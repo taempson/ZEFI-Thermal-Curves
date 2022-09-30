@@ -1,39 +1,40 @@
-#Read in ZEFI Data sets
-repeatability <- read.csv(file.path("..", "data", "raw_data", "HSPi-Repeatability-Song-Count.csv"))
-heat_round1 <- read.csv(file.path("..", "data", "raw_data", "HSPi-Round-1-Heat-Trials.csv"))
-heat_round2 <-read.csv(file.path("..", "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv"))
+## install packages user might not have by replacing FALSE with TRUE
+if(FALSE) {
+    install.packages("RSQLite", "nls.multstart")
+    ##  Install the thermal curve package from git_hub, not cran
+    remotes::install_github("padpadpadpad/rTPC")
+}
 
-#install RSQLite package if needed by replacing FALSE with TRUE
-if(FALSE) install.packages("RSQLite")
-
-#call forward RSQLite package
+## Install libraries
 library(RSQLite)
-
-#Create a database
-ZEFI_DB<-"portalR.db"
-myConn<-dbConnect(drv = SQLite(), dbname=ZEFI_DB)
-dbListTables(myConn)
-
-#add datframes into the database
-dbWriteTable(myConn, "repeatability", repeatability)
-dbWriteTable(myConn, "heat_round1", heat_round1)
-dbWriteTable(myConn, "heat_round2", heat_round2)
-dbListTables(myConn)
-
-# Instal the thermal curve package
-remotes::install_github("padpadpadpad/rTPC")
-
-#load packages
 library(rTPC)
 library(nls.multstart)
 library(broom)
 library(tidyverse)
 
-##PRACTICE##
-#keep a single curve
-d<-filter(heat_round2, Male == "T247")
+## Read in ZEFI Data sets
+repeatability <- read.csv(file.path("..", "data", "raw_data", "HSPi-Repeatability-Song-Count.csv"))
+heat_round1 <- read.csv(file.path("..", "data", "raw_data", "HSPi-Round-1-Heat-Trials.csv"))
+heat_round2 <-read.csv(file.path("..", "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv"))
 
-#show the data
+
+## Create a database
+ZEFI_DB <-"portalR.db"
+myConn <-dbConnect(drv = SQLite(), dbname=ZEFI_DB)
+dbListTables(myConn)
+
+## add datframes into the database
+dbWriteTable(myConn, "repeatability", repeatability)
+dbWriteTable(myConn, "heat_round1", heat_round1)
+dbWriteTable(myConn, "heat_round2", heat_round2)
+dbListTables(myConn)
+
+
+## #PRACTICE##
+## keep a single curve
+d <-filter(heat_round2, Male == "T247")
+
+## show the data
 windows()
 ggplot(d, aes(Desired.Temp,song_count)) + 
   geom_point()+ 
@@ -42,22 +43,22 @@ ggplot(d, aes(Desired.Temp,song_count)) +
        y='Song Count', 
        title = 'Song Count Across Temperature')
 
-#choose the model
+## choose the model
 mod = 'lactin2_1995'
 
-#get starting values
+## get starting values
 start_vals <- get_start_vals(d$Desired.Temp, d$song_count, model_name = 'lactin2_1995')
   
-#Get limits
-low_lims<- get_lower_lims(d$Desired.Temp,d$song_count,model_name = 'lactin2_1995')
-upper_lims<- get_upper_lims(d$Desired.Temp, d$song_count, model_name = 'lactin2_1995')
+## Get limits
+low_lims <- get_lower_lims(d$Desired.Temp,d$song_count,model_name = 'lactin2_1995')
+upper_lims <- get_upper_lims(d$Desired.Temp, d$song_count, model_name = 'lactin2_1995')
 
 start_vals
 low_lims
 upper_lims
   
-#fit model
-fit<-nls.multstart::nls_multstart(song_count~lactin2_1995(temp = Desired.Temp, a,b,tmax,delta_t),
+## fit model
+fit <- nls_multstart(song_count~lactin2_1995(temp = Desired.Temp, a,b,tmax,delta_t),
                                   data = d,
                                   iter = 600,
                                   start_lower = start_vals-10,
@@ -67,14 +68,14 @@ fit<-nls.multstart::nls_multstart(song_count~lactin2_1995(temp = Desired.Temp, a
                                   supp_errors = 'Y',
                                   convergence_count = FALSE)
   
-#look at model fit
+## look at model fit
 summary(fit)
 
-#Predict new data 
+## Predict new data 
 preds <- data.frame(temp = seq(min(d$Desired.Temp), max(d$Desired.Temp), length.out = 6))
 preds <- broom::augment(fit, newdata = preds)
 
-#plot data and model fit
+## plot data and model fit
 windows()
 ggplot(preds)+
   geom_point(aes(Desired.Temp,song_count),d)+
@@ -90,8 +91,8 @@ ggplot(preds)+
 #####07/19/22##########
 ###Unweighted model###
 
-#Fit 4 Chosen model formulations in rTPC
-d<-filter(heat_round2, Male =="T236")
+## Fit 4 Chosen model formulations in rTPC
+d <-filter(heat_round2, Male =="T236")
 d_fits <- nest(d, data = c(Desired.Temp,song_count)) %>%
   mutate(lactin = map(data,~nls_multstart(song_count~lactin2_1995(temp = Desired.Temp, a, b, tmax, delta_t),
                       data = .x,
