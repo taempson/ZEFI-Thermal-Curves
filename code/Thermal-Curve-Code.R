@@ -1,10 +1,10 @@
 #Read in ZEFI Data sets
-repeatability<- read.csv("HSPi Repeatability Song Count.csv")
-heat_round1<- read.csv("HSPi Round 1 Heat Trials.csv")
-heat_round2<-read.csv("HSPi Round 2 Heat Trials.csv")
+repeatability <- read.csv(file.path("..", "data", "raw_data", "HSPi-Repeatability-Song-Count.csv"))
+heat_round1 <- read.csv(file.path("..", "data", "raw_data", "HSPi-Round-1-Heat-Trials.csv"))
+heat_round2 <-read.csv(file.path("..", "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv"))
 
-#install RSQLite package
-install.packages("RSQLite")
+#install RSQLite package if needed by replacing FALSE with TRUE
+if(FALSE) install.packages("RSQLite")
 
 #call forward RSQLite package
 library(RSQLite)
