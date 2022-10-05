@@ -29,6 +29,7 @@ if(FALSE) {
 }
 
 ## load libraries
+library(stats)
 library(RSQLite)  #not sure why we need this
 library(rTPC)
 library(nls.multstart)
@@ -67,7 +68,11 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     mutate(song_count = song_count*1.0) %>% ## convert to a double so it's not treated as an integer
     rename(trial_order = test_order) %>%
     mutate(chamber = as.factor(chamber), male = as.factor(male)) %>%
-    mutate(trial_order = ordered(trial_order)) %>%
+    ## Using ordered = TRUE only changes the format of the output.
+    ## The contrasts change and it's confusing, so don't use it.
+    mutate(trial_order = as.factor(trial_order)) %>%
+    mutate(song_count_plus_1 = (song_count + 1)) %>%
+    mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
     mutate() ## Dummy function so we can comment out lines above it w/o any issues
 
 
@@ -105,13 +110,107 @@ data %>% group_by(temp_target) %>%
     filter(song_count < 400) %>%
     summarize(ave = mean(song_count), sd = sd(song_count), n = length(song_count), n_completed = sum(trial_completed))
 
-data %>% 
+```
+
+## Analyze `round = 3` only
+
+- In `round = 3`, the only `trial_completed = FALSE` is in highest temp.
+- Only one of 6 champters was used for a given male, thus chamber and male are conflated.
+  - Actually makes life easier!
+
+```{r}
+
+data_r3 <- data_full %>% filter(round ==3)
+
+```
+## LM Fits on `log(song_counts_plus_one)`
+
+- None of these models fit very well
+- Learning how to use `lmList()` function
+
+
+### Fit Models
+
+```{r}
+
+
+lm = list()
+
+
+
+formula <- as.formula("log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2)")
+## Note syntax below model `formula` doesn't appear in the model summary().
+## lm$basic <- lm(formula = formula , data = data_r3)
+
+## Here string of formula is shown in summary()
+## The .() forces the evaluation in bquote()
+## See: https://win-vector.com/2018/09/01/r-tip-how-to-pass-a-formula-to-lm/
+## for detailed explanation of how this works
+lm$basic <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
+summary(tmp)
+
+## Individual fits to each male
+## This isn't that useful, but is my first use of lmList()
+formula <- as.formula("log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2)| male")
+lm$male_separate <- tmp <- eval(bquote(lmList(formula = .(formula) , data = data_r3)))
+summary(tmp)
+
+## Add trial_order effect
+formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_order+ temp_target + I(temp_target^2)")
+lm$trial_order <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
+summary(tmp)
+
+## Add male effect 
+formula <- as.formula("log_song_count_plus_1 ~ 1 + male + temp_target + I(temp_target^2)")
+lm$male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
+summary(tmp) 
+
+## Add chamber effect (fewer chambers than males)
+formula <- as.formula("log_song_count_plus_1 ~ 1+ chamber + temp_target + I(temp_target^2)")
+lm$chamber <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
+summary(tmp)
+
+## Add trial_order effect
+formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_order + male + temp_target + I(temp_target^2)")
+lm$trial_order_and_male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
+summary(tmp)
+
+
+## Add male x trial order
+## This doesn't work since we have as many coefficients as data points.
+## Oops
+formula <- as.formula("log_song_count_plus_1 ~ 1 + male*trial_order + temp_target + I(temp_target^2)")
+lm$trial_order_by_male <- tmp <- lm(formula = eval(formula) , data = data_r3)
+summary(tmp)
 
 ```
 
-## Poisson on `trial_completed`
+### Compare Models
 
-- Only NA's are in highest temp.
+```{r}
+
+
+## Results: Male is much better predictor than trial_order
+anova(lm$male, lm$trial_order)
+
+## Results: Male is better predictor than chamber.
+## This indicates males vary more than chambers
+anova(lm$male, lm$chamber)
+
+## Results: Adding trial_order to male provides no real gain in fit
+anova(lm$male, lm$trial_order_and_male)
+```
+
+### Notes
+
+- We do see evidence of male effects.
+  The important males have lower intercepts than the rest
+- There is little evidence of consistent trial_order effects (an ordered factor).
+
+
+## GLM and GLMM Poisson, Quasipoisson and Negative-Binomial Fits
+
+
 
 ## GLM on Song Rate
 
@@ -120,25 +219,29 @@ data %>%
   
 ```{r}
 
-data <- data_full %>% filter(round ==3)
+glm <- list()
 
-model <- list()
-
-## chamber seems unimportant, while trial_order and male are very important
+## chamber and male are conflated
 ## Data is very overdispersed given poisson assumptions
-model$glm_poisson <- glm(song_count ~ 1+ male + trial_order + temp_target + I(temp_target^2), data = data, family = poisson(link = "log"))
+glm$poisson <- glm(song_count ~ 1 + male + trial_order + temp_target + I(temp_target^2), data = data_r3, family = poisson(link = "log"))
 
 ## This allows for over dispersion which greatly elevates the SE
-model$glm_qpoisson <- glm(model$glm_poisson, family = quasipoisson(link = "log"))
+glm$qpoisson <- glm(model$glm_poisson, family = quasipoisson(link = "log"))
 
 ## Gives similar results as with the quasipoisson
-model$glm_nb <- glm.nb(model$glm_poisson)
+glm$nb <- glm.nb(model$glm_poisson)
 
+anova.list(glm)
+```
+
+## GLMM (glmer) Model fits
+
+```{r}
 
 model$glmer_poisson <- glmer(
 ## song_count ~ 1 + chamber + (1|male) + (temp_target|male) + (I(temp_target^2)|male),
     song_count ~ 1 + trial_order + ((1 + temp_target + I(temp_target^2))|male),
-    data = data,
+    data = data_r3,
     family = poisson(link = "log"),
     control = glmerControl(optCtrl = list(maxiter = 300)),
     verbose = TRUE)
@@ -149,7 +252,7 @@ model$glmer_od <- overdisp.glmer(model$glmer_poisson)
 ## I think this is a correct fit.  If I don't include the 1 + temp... w/o the |male, I don't get any effects.
 model$glmer_nb_1 <- glmer.nb(
     song_count ~ 1 + temp_target + I(temp_target^2) + trial_order + ((1 + temp_target + I(temp_target^2))|male),
-    data = data,
+    data = data_r3,
     family = poisson(link = "log"),
     control = glmerControl(optCtrl = list(maxiter = 300)),
     verbose = TRUE)
@@ -165,8 +268,6 @@ mode
 
 
 ## For Later: Lactin2 
-
-
 
 ```{r}
 
