@@ -22,10 +22,12 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 ## install packages user might not have by replacing FALSE with TRUE
-if(FALSE) {
-    install.packages(c("RSQLite", "nls.multstart"))
+if(TRUE) {
+    BiocManager::install("mixOmics") ## needed by RVAideMemoire
+    install.packages(c("RSQLite", "nls.multstart", "lme4", "RVAideMemoire"))
     ##  Install the thermal curve package from git_hub, not cran
     remotes::install_github("padpadpadpad/rTPC")
+
 }
 
 ## load libraries
