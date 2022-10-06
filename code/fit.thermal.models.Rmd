@@ -22,7 +22,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 ## install packages user might not have by replacing FALSE with TRUE
-if(TRUE) {
+if(FALSE) {
     BiocManager::install("mixOmics") ## needed by RVAideMemoire
     install.packages(c("RSQLite", "nls.multstart", "lme4", "RVAideMemoire"))
     ##  Install the thermal curve package from git_hub, not cran
@@ -33,10 +33,11 @@ if(TRUE) {
 ## load libraries
 library(stats)
 library(RSQLite)  #not sure why we need this
-library(rTPC)
+library(rTPC)  ## 
 library(nls.multstart)
 library(broom)
 library(tidyverse)
+
 require(ggplot2)
 require(GGally)
 require(reshape2)
@@ -172,7 +173,7 @@ formula <- as.formula("log_song_count_plus_1 ~ 1+ chamber + temp_target + I(temp
 lm$chamber <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
 summary(tmp)
 
-## Add trial_order effect
+## Add trial_order and male effects
 formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_order + male + temp_target + I(temp_target^2)")
 lm$trial_order_and_male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
 summary(tmp)
@@ -207,7 +208,7 @@ anova(lm$male, lm$trial_order_and_male)
 
 - We do see evidence of male effects.
   The important males have lower intercepts than the rest
-- There is little evidence of consistent trial_order effects (an ordered factor).
+- There is little evidence of consistent trial_order effects.
 
 
 ## GLM and GLMM Poisson, Quasipoisson and Negative-Binomial Fits
