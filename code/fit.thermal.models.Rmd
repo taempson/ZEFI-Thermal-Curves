@@ -32,12 +32,11 @@ if(FALSE) {
 
 ## load libraries
 library(stats)
-library(RSQLite)  #not sure why we need this
+library(RSQLite)  # Don't think we need this.
 library(rTPC)  ## 
 library(nls.multstart)
 library(broom)
 library(tidyverse)
-
 require(ggplot2)
 require(GGally)
 require(reshape2)
@@ -58,8 +57,17 @@ require(MASS) # provides negative binomial fitting:  glm.nb
 
 data_raw = list()
 
-data_raw[[1]] <- read.csv(file.path("..", "data", "raw_data", "HSPi-Repeatability-Song-Count.csv")) %>% mutate(round = 2)
-data_raw[[2]] <- read.csv(file.path("..", "data", "raw_data", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) ## Note T237 and T230 are missing numbers in the song_count column
+data_raw[[1]] <- read.csv(file.path("..", "data", "raw_data", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
+    ## Note T237 and T230 are missing numbers in the song_count column
+    ## so we are filtering these observations out until they are found
+    filter(!is.na(song_count))
+
+data_raw[[2]] <- read.csv(file.path("..", "data", "raw_data", "HSPi-Repeatability-Song-Count.csv")) %>%
+    mutate(round = 2) %>%
+    group_by(male) %>%
+    mutate(test_order = rank(date)) %>%
+    ungroup()
+
 data_raw[[3]] <-read.csv(file.path("..", "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv")) %>% mutate(round = 3)
 
 ## Join data and discard empty columns
@@ -69,13 +77,12 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     mutate(trial_completed = !(is.na(song_count)) ) %>%
     mutate(song_count = ifelse(is.na(song_count), 0, song_count)) %>%
     mutate(song_count = song_count*1.0) %>% ## convert to a double so it's not treated as an integer
-    rename(trial_order = test_order) %>%
     mutate(chamber = as.factor(chamber), male = as.factor(male)) %>%
-    ## Using ordered = TRUE only changes the format of the output.
-    ## The contrasts change and it's confusing, so don't use it.
-    mutate(trial_order = as.factor(trial_order)) %>%
+    ## create a global variable trial_order based on individual rounds
+    mutate(trial_index = as.integer(round*10+test_order)) %>%
     mutate(song_count_plus_1 = (song_count + 1)) %>%
     mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
+    mutate(temp_target = as.numeric(temp_target)) %>%
     mutate() ## Dummy function so we can comment out lines above it w/o any issues
 
 
@@ -113,12 +120,175 @@ data %>% group_by(temp_target) %>%
     filter(song_count < 400) %>%
     summarize(ave = mean(song_count), sd = sd(song_count), n = length(song_count), n_completed = sum(trial_completed))
 
+## Look at occurrance of males across rounds
+tmp1 <- data_full %>%
+    filter(round==1) %>%
+    pull(male) %>%
+    unique(); tmp1
+
+tmp2 <- data_full %>%
+    filter(round %in% c(2,3)) %>%
+    pull(male) %>%
+    unique() ; tmp2
+
+lapply(list(tmp1, tmp2, intersect(tmp1, tmp2)), dim)
+
 ```
 
-## Analyze `round = 3` only
+## Plot Data
 
-- In `round = 3`, the only `trial_completed = FALSE` is in highest temp.
-- Only one of 6 champters was used for a given male, thus chamber and male are conflated.
+
+### `log(song_count_plus_1)`
+```{r}
+
+
+## Plotting based on: https://www.tjmahr.com/plotting-partial-pooling-in-mixed-effects-models/
+
+xlab <- "Temperature"
+ylab <- "log(song_count + 1)"
+
+pdf(file = "log-plus-1_vs_temp_all.pdf")
+
+ggplot(data_full  ) + 
+    aes(x = temp_target,
+        y = log_song_count_plus_1,
+        color = (round == 1)) +
+    stat_smooth(method = "lm",
+                se = TRUE,
+                formula = y ~ x + I(x^2), size = 1,
+                ) +
+  # Put the points on top of lines
+  #  geom_point() +
+    geom_jitter() +
+  facet_wrap("male", scales = "free_y") +
+    labs(x = xlab, y = ylab,
+         subtitle = "lm:y ~ 1 + x + x^2",
+         title = "log(count + 1) vs Temp") 
+
+dev.off()
+
+
+
+```
+
+```{r}
+
+
+
+## Choose some males to use for starting values based on log fit
+reasonable.males = c("T229", "T237", "T258")
+
+glm_combined <- glm(song_count ~ 1 + temp_target + I(temp_target^2),
+                    family = quasipoisson(),
+    data = data_full %>% filter(male %in% reasonable.males))
+
+xlab <- "Temperature"
+ylab <- "song_count"
+
+pdf(file = "song_count_vs_temp_all.pdf")
+
+ggplot(data_full) + 
+    aes(x = temp_target,
+        y = song_count,
+        color = (round == 1)) +
+    stat_smooth(method = "glm",
+                method.args = list(
+                    family = quasipoisson(link = "log"),
+                    start = coefficients(glm_combined),
+                    maxit = 100),
+                se = FALSE,
+                formula = y ~ 1 + x + I(x^2), size = 1,
+                ) +
+    geom_jitter() +
+    facet_wrap("male", scales = "free_y") +
+    labs(x = xlab, y = ylab,
+         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])",
+         title = "Song Count vs Temp: Quasi-Poisson Regression") 
+
+dev.off()
+
+
+pdf(file = "song_count_vs_temp_all-2.pdf")
+
+ggplot(data_full) + 
+    aes(x = temp_target,
+        y = song_count,
+        color = (round == 1)) +
+    stat_smooth(method = "glm",
+                method.args = list(
+                    family = quasipoisson(link = 'sqrt'),
+                    start = 
+                ),
+                se = FALSE,
+                formula = y ~ 1 + x + I(x^2), size = 1
+                ) +
+    geom_jitter() +
+    facet_wrap("male", scales = "free_y") +
+    scale_y_continuous(limits = c(0, NA) ) +
+    labs(x = xlab, y = ylab,
+         subtitle = "glm:y ~poisson(1 + x + x^2)",
+         title = "Song Count vs Temp: Poisson Regression") 
+
+dev.off()
+
+```
+
+
+## Make a model fit tibble
+
+- 
+```{r}
+round_tbl <- tibble(round_1 = FALSE, round_2 = c(TRUE, FALSE),
+       round_3 = TRUE
+       ) %>% rep(2)
+
+
+
+model_cat <- c("lm", "glm", "glmer")
+round_1 <- FALSE
+round_2 <- c(FALSE, TRUE)
+round_3 <- TRUE
+male <- c(FALSE, TRUE)
+chamber <- c(FALSE, TRUE)
+trial_index <- c(FALSE, TRUE)
+
+fit_tbl_names <- c("model_cat",
+      "round_1",
+      "round_2",
+      "round_3",
+      "male",
+      "chamber",
+      "trial_index",
+      "temp_slope",
+      "temp_curve",
+      "male_x_temp_slope",
+      "male_x_temp_curve",
+      "residual_df".
+      "residual_ss"
+      "R2",
+      "AIC",
+      "fit_obj"
+      )
+
+fit_tbl <- data.frame("a" = 1, "b"= 1:2, "c" = 1:3)
+
+                 ,
+                  names = 
+      )
+)
+comment(fit_tbl) <- "temp_slope = temp_target, temp_curve = I(temp_target^2)"
+
+filter_data_lm() <- list(
+formulas_lm() <-
+    
+
+
+```
+## Analyze `round 2 & 3`
+
+- In `round = 3`, 
+  - The only `trial_completed = FALSE` is in highest temp.
+  - Only one of 6 chambers was used for a given male, thus chamber and male are conflated.
   - Actually makes life easier!
 
 ```{r}
@@ -129,17 +299,38 @@ data_r3 <- data_full %>% filter(round ==3)
 ## LM Fits on `log(song_counts_plus_one)`
 
 - None of these models fit very well
+
+
+
+### Fit each individual separately
+
 - Learning how to use `lmList()` function
 
+```{r}
 
+## Individual fits to each male
+## This isn't that useful, but is my firstuse of lmList()
+
+lmList <- list()
+
+lmList$by_male <- tmp <-
+    lme4::lmList(log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2) | male,
+           data = data %>% filter(round %in% c(2,3)),
+           na.action = na.omit)
+           
+
+summary(tmp)
+
+plot.lmList4(tmp, log_song_count_plus1 ~ fitted(.)| male)
+
+
+```
 ### Fit Models
 
 ```{r}
 
 
 lm = list()
-
-
 
 formula <- as.formula("log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2)")
 ## Note syntax below model `formula` doesn't appear in the model summary().
@@ -152,15 +343,9 @@ formula <- as.formula("log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2
 lm$basic <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
 summary(tmp)
 
-## Individual fits to each male
-## This isn't that useful, but is my first use of lmList()
-formula <- as.formula("log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2)| male")
-lm$male_separate <- tmp <- eval(bquote(lmList(formula = .(formula) , data = data_r3)))
-summary(tmp)
-
-## Add trial_order effect
-formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_order+ temp_target + I(temp_target^2)")
-lm$trial_order <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
+## Add trial_index effect
+formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_index+ temp_target + I(temp_target^2)")
+lm$trial_index <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
 summary(tmp)
 
 ## Add male effect 
@@ -173,18 +358,36 @@ formula <- as.formula("log_song_count_plus_1 ~ 1+ chamber + temp_target + I(temp
 lm$chamber <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
 summary(tmp)
 
-## Add trial_order and male effects
-formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_order + male + temp_target + I(temp_target^2)")
-lm$trial_order_and_male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
+## Add trial_index and male effects
+formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_index + male + temp_target + I(temp_target^2)")
+lm$trial_index_and_male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
 summary(tmp)
 
 
 ## Add male x trial order
 ## This doesn't work since we have as many coefficients as data points.
 ## Oops
-formula <- as.formula("log_song_count_plus_1 ~ 1 + male*trial_order + temp_target + I(temp_target^2)")
-lm$trial_order_by_male <- tmp <- lm(formula = eval(formula) , data = data_r3)
+formula <- as.formula("log_song_count_plus_1 ~ 1 + male*trial_index + temp_target + I(temp_target^2)")
+lm$trial_index_by_male <- tmp <- lm(formula = eval(formula) , data = data_r3)
 summary(tmp)
+
+
+## add slope x male interaction term
+
+lm$male_by_temp <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target*male + I(temp_target^2), data = data_r3)
+summary(tmp)
+
+
+## slope x male - male intercept
+## This suggests that the slopes are similar between males (though the SE are large)
+lm$male_by_temp <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target:male + I(temp_target^2), data = data_r3)
+summary(tmp)
+
+## curvature x male - male intercept
+## This suggests that the slopes are similar between males (though the SE are large)
+lm$male_by_temp_sq <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2):male, data = data_r3)
+summary(tmp)
+
 
 ```
 
@@ -193,22 +396,23 @@ summary(tmp)
 ```{r}
 
 
-## Results: Male is much better predictor than trial_order
-anova(lm$male, lm$trial_order)
+## Results: Male is much better predictor than trial_index
+anova(lm$male, lm$trial_index)
 
 ## Results: Male is better predictor than chamber.
 ## This indicates males vary more than chambers
 anova(lm$male, lm$chamber)
 
-## Results: Adding trial_order to male provides no real gain in fit
-anova(lm$male, lm$trial_order_and_male)
+## Results: Adding trial_index to male provides no real gain in fit
+anova(lm$male, lm$trial_index_and_male)
 ```
 
 ### Notes
 
 - We do see evidence of male effects.
   The important males have lower intercepts than the rest
-- There is little evidence of consistent trial_order effects.
+- There is little evidence of consistent trial_index effects.
+- Adjusted $R^2$ don't seem to vary much.
 
 
 ## GLM and GLMM Poisson, Quasipoisson and Negative-Binomial Fits
@@ -226,7 +430,7 @@ glm <- list()
 
 ## chamber and male are conflated
 ## Data is very overdispersed given poisson assumptions
-glm$poisson <- glm(song_count ~ 1 + male + trial_order + temp_target + I(temp_target^2), data = data_r3, family = poisson(link = "log"))
+glm$poisson <- glm(song_count ~ 1 + male + trial_index + temp_target + I(temp_target^2), data = data_r3, family = poisson(link = "log"))
 
 ## This allows for over dispersion which greatly elevates the SE
 glm$qpoisson <- glm(model$glm_poisson, family = quasipoisson(link = "log"))
@@ -241,27 +445,30 @@ anova.list(glm)
 
 ```{r}
 
-model$glmer_poisson <- glmer(
-## song_count ~ 1 + chamber + (1|male) + (temp_target|male) + (I(temp_target^2)|male),
-    song_count ~ 1 + trial_order + ((1 + temp_target + I(temp_target^2))|male),
-    data = data_r3,
-    family = poisson(link = "log"),
-    control = glmerControl(optCtrl = list(maxiter = 300)),
-    verbose = TRUE)
+glmer = list()
+
+glmer$poisson <- tmp <-
+    glmer(
+        song_count ~
+            1+ 1|male + temp_target + I(temp_target^2),
+        data = data_r3,
+        family = poisson(link = "log"),
+        control = glmerControl(optCtrl = list(maxiter = 300)),
+        verbose = TRUE)
 
 ## Still a lot of overdispersion
-model$glmer_od <- overdisp.glmer(model$glmer_poisson)
+glmer$od <- overdisp.glmer(glmer$poisson)
 
 ## I think this is a correct fit.  If I don't include the 1 + temp... w/o the |male, I don't get any effects.
-model$glmer_nb_1 <- glmer.nb(
-    song_count ~ 1 + temp_target + I(temp_target^2) + trial_order + ((1 + temp_target + I(temp_target^2))|male),
+glmer$nb_1 <- glmer.nb(
+    song_count ~ 1 + temp_target + I(temp_target^2) + trial_index + ((1 + temp_target + I(temp_target^2))|male),
     data = data_r3,
     family = poisson(link = "log"),
     control = glmerControl(optCtrl = list(maxiter = 300)),
     verbose = TRUE)
 
 
-model$glmer_nb_2 <- update(model$glmer_nb_1, formula =  song_count ~ 1 + temp_target + I(temp_target^2) + ((1 + temp_target + I(temp_target^2))|male) )
+glmer$nb_2 <- update(glmer$nb_1, formula =  song_count ~ 1 + temp_target + I(temp_target^2) + ((1 + temp_target + I(temp_target^2))|male) )
 
 mode
 ```
