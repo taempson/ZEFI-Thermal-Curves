@@ -32,6 +32,7 @@ if(FALSE) {
 
 ## load libraries
 library(stats)
+require(MASS) # provides negative binomial fitting:  glm.nb
 library(RSQLite)  # Don't think we need this.
 library(rTPC)  ## 
 library(nls.multstart)
@@ -42,7 +43,7 @@ require(GGally)
 require(reshape2)
 require(lme4)
 require(RVAideMemoire) # provides overdisp.glmer()
-require(MASS) # provides negative binomial fitting:  glm.nb
+
 ```
 
 ## Load Data
@@ -131,14 +132,40 @@ tmp2 <- data_full %>%
     pull(male) %>%
     unique() ; tmp2
 
-lapply(list(tmp1, tmp2, intersect(tmp1, tmp2)), dim)
+lapply(list(tmp1, tmp2, intersect(tmp1, tmp2)), length)
 
 ```
 
 ## Plot Data
 
 
+### Raw Plot
+
+```{r}
+
+
+xlab <- "Temperature"
+ylab <- "song_count"
+
+plot_data_only <-
+    ggplot(data_full) + 
+    aes(x = temp_target,
+        y = song_count,
+        color = as.factor(round)) +
+    facet_wrap("male", scales = "free_y") +
+    geom_jitter() +
+    labs(x = xlab, y = ylab,
+         title = "Song Count vs Temp: Data Only") 
+
+pdf(file = "song_count_vs_temp_data_only.pdf")
+
+plot_data_only
+
+dev.off()
+```
+
 ### `log(song_count_plus_1)`
+
 ```{r}
 
 
@@ -149,10 +176,10 @@ ylab <- "log(song_count + 1)"
 
 pdf(file = "log-plus-1_vs_temp_all.pdf")
 
-ggplot(data_full  ) + 
+plot_log_plus_1 <- ggplot(data_full  ) + 
     aes(x = temp_target,
         y = log_song_count_plus_1,
-        color = (round == 1)) +
+        color = (round) +
     stat_smooth(method = "lm",
                 se = TRUE,
                 formula = y ~ x + I(x^2), size = 1,
@@ -171,9 +198,12 @@ dev.off()
 
 ```
 
+### Song Count 
 ```{r}
 
 
+## Code below used for posting to stackexchange
+data_full %>% filter(male %in% c("T258", "T259"))%>% dplyr::select(male, temp_target, song_count) %>% rename(ID = male, x = temp_target, y = song_count)  %>% dput()
 
 ## Choose some males to use for starting values based on log fit
 reasonable.males = c("T229", "T237", "T258")
@@ -185,12 +215,12 @@ glm_combined <- glm(song_count ~ 1 + temp_target + I(temp_target^2),
 xlab <- "Temperature"
 ylab <- "song_count"
 
-pdf(file = "song_count_vs_temp_all.pdf")
 
-ggplot(data_full) + 
+
+plot_glm <- plot_data_only +
     aes(x = temp_target,
         y = song_count,
-        color = (round == 1)) +
+        color = (round == 1)) + ## Combine round 2 and 3
     stat_smooth(method = "glm",
                 method.args = list(
                     family = quasipoisson(link = "log"),
@@ -199,17 +229,23 @@ ggplot(data_full) +
                 se = FALSE,
                 formula = y ~ 1 + x + I(x^2), size = 1,
                 ) +
-    geom_jitter() +
-    facet_wrap("male", scales = "free_y") +
     labs(x = xlab, y = ylab,
          subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])",
          title = "Song Count vs Temp: Quasi-Poisson Regression") 
 
+
+pdf(file = "song_count_vs_temp_multiple.pdf")
+
+plot_data_only
+plot_log_plus_1
+plot_glm
+
 dev.off()
 
 
-pdf(file = "song_count_vs_temp_all-2.pdf")
+## What the heck, try sqrt...
 
+pdf(file = "song_count_vs_temp_all-2.pdf")
 ggplot(data_full) + 
     aes(x = temp_target,
         y = song_count,
