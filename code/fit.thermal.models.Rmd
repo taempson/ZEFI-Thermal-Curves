@@ -86,26 +86,6 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     mutate(temp_target = as.numeric(temp_target)) %>%
     mutate() ## Dummy function so we can comment out lines above it w/o any issues
 
-
-## Create a database
-## Don't see where myConn this is used anywhere else
-
-if(FALSE){
-    db_data <- c(data_raw[[1]], data_raw[[2]], data_raw[[3]])
-    ZEFI_DB <-"portalR.db"
-    myConn <-dbConnect(drv = SQLite(), dbname=ZEFI_DB)
-
-    dbListTables(myConn)
-
-    if(!file.exists(ZEFI_DB))
-    {
-    dbWriteTable(myConn, "repeatability", data_raw[0])
-    dbWriteTable(myConn, "data_raw1", data_raw1)
-    dbWriteTable(myConn, "data_raw2", data_raw2)
-    dbListTables(myConn)
-    }
-}
-
 ```
 
 # Analysis
@@ -136,10 +116,7 @@ lapply(list(tmp1, tmp2, intersect(tmp1, tmp2)), length)
 
 ```
 
-## Plot Data
-
-
-### Raw Plot
+## Plot Raw Data
 
 ```{r}
 
@@ -154,8 +131,7 @@ plot_data_only <-
         color = as.factor(round)) +
     facet_wrap("male", scales = "free_y") +
     geom_jitter() +
-    labs(x = xlab, y = ylab,
-         title = "Song Count vs Temp: Data Only") 
+    labs( title = paste( substitute(x), " vs ", substitute(y)))
 
 pdf(file = "song_count_vs_temp_data_only.pdf")
 
@@ -163,164 +139,8 @@ plot_data_only
 
 dev.off()
 ```
-
-### `log(song_count_plus_1)`
-
-```{r}
-
-
-## Plotting based on: https://www.tjmahr.com/plotting-partial-pooling-in-mixed-effects-models/
-
-xlab <- "Temperature"
-ylab <- "log(song_count + 1)"
-
-pdf(file = "log-plus-1_vs_temp_all.pdf")
-
-plot_log_plus_1 <- ggplot(data_full  ) + 
-    aes(x = temp_target,
-        y = log_song_count_plus_1,
-        color = (round) +
-    stat_smooth(method = "lm",
-                se = TRUE,
-                formula = y ~ x + I(x^2), size = 1,
-                ) +
-  # Put the points on top of lines
-  #  geom_point() +
-    geom_jitter() +
-  facet_wrap("male", scales = "free_y") +
-    labs(x = xlab, y = ylab,
-         subtitle = "lm:y ~ 1 + x + x^2",
-         title = "log(count + 1) vs Temp") 
-
-dev.off()
-
-
-
-```
-
-### Song Count 
-```{r}
-
-
-## Code below used for posting to stackexchange
-data_full %>% filter(male %in% c("T258", "T259"))%>% dplyr::select(male, temp_target, song_count) %>% rename(ID = male, x = temp_target, y = song_count)  %>% dput()
-
-## Choose some males to use for starting values based on log fit
-reasonable.males = c("T229", "T237", "T258")
-
-glm_combined <- glm(song_count ~ 1 + temp_target + I(temp_target^2),
-                    family = quasipoisson(),
-    data = data_full %>% filter(male %in% reasonable.males))
-
-xlab <- "Temperature"
-ylab <- "song_count"
-
-
-
-plot_glm <- plot_data_only +
-    aes(x = temp_target,
-        y = song_count,
-        color = (round == 1)) + ## Combine round 2 and 3
-    stat_smooth(method = "glm",
-                method.args = list(
-                    family = quasipoisson(link = "log"),
-                    start = coefficients(glm_combined),
-                    maxit = 100),
-                se = FALSE,
-                formula = y ~ 1 + x + I(x^2), size = 1,
-                ) +
-    labs(x = xlab, y = ylab,
-         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])",
-         title = "Song Count vs Temp: Quasi-Poisson Regression") 
-
-
-pdf(file = "song_count_vs_temp_multiple.pdf")
-
-plot_data_only
-plot_log_plus_1
-plot_glm
-
-dev.off()
-
-
-## What the heck, try sqrt...
-
-pdf(file = "song_count_vs_temp_all-2.pdf")
-ggplot(data_full) + 
-    aes(x = temp_target,
-        y = song_count,
-        color = (round == 1)) +
-    stat_smooth(method = "glm",
-                method.args = list(
-                    family = quasipoisson(link = 'sqrt'),
-                    start = 
-                ),
-                se = FALSE,
-                formula = y ~ 1 + x + I(x^2), size = 1
-                ) +
-    geom_jitter() +
-    facet_wrap("male", scales = "free_y") +
-    scale_y_continuous(limits = c(0, NA) ) +
-    labs(x = xlab, y = ylab,
-         subtitle = "glm:y ~poisson(1 + x + x^2)",
-         title = "Song Count vs Temp: Poisson Regression") 
-
-dev.off()
-
-```
-
-
-## Make a model fit tibble
-
-- 
-```{r}
-round_tbl <- tibble(round_1 = FALSE, round_2 = c(TRUE, FALSE),
-       round_3 = TRUE
-       ) %>% rep(2)
-
-
-
-model_cat <- c("lm", "glm", "glmer")
-round_1 <- FALSE
-round_2 <- c(FALSE, TRUE)
-round_3 <- TRUE
-male <- c(FALSE, TRUE)
-chamber <- c(FALSE, TRUE)
-trial_index <- c(FALSE, TRUE)
-
-fit_tbl_names <- c("model_cat",
-      "round_1",
-      "round_2",
-      "round_3",
-      "male",
-      "chamber",
-      "trial_index",
-      "temp_slope",
-      "temp_curve",
-      "male_x_temp_slope",
-      "male_x_temp_curve",
-      "residual_df".
-      "residual_ss"
-      "R2",
-      "AIC",
-      "fit_obj"
-      )
-
-fit_tbl <- data.frame("a" = 1, "b"= 1:2, "c" = 1:3)
-
-                 ,
-                  names = 
-      )
-)
-comment(fit_tbl) <- "temp_slope = temp_target, temp_curve = I(temp_target^2)"
-
-filter_data_lm() <- list(
-formulas_lm() <-
-    
-
-
-```
-## Analyze `round 2 & 3`
+## Earliest Analysis
+### Analyze `round 2 & 3`
 
 - In `round = 3`, 
   - The only `trial_completed = FALSE` is in highest temp.
@@ -332,13 +152,13 @@ formulas_lm() <-
 data_r3 <- data_full %>% filter(round ==3)
 
 ```
-## LM Fits on `log(song_counts_plus_one)`
+### LM Fits on `log(song_counts_plus_one)`
 
 - None of these models fit very well
 
 
 
-### Fit each individual separately
+#### Fit each individual separately
 
 - Learning how to use `lmList()` function
 
@@ -361,7 +181,7 @@ plot.lmList4(tmp, log_song_count_plus1 ~ fitted(.)| male)
 
 
 ```
-### Fit Models
+#### Fit multiple variations of grouping
 
 ```{r}
 
@@ -423,58 +243,6 @@ summary(tmp)
 ## This suggests that the slopes are similar between males (though the SE are large)
 lm$male_by_temp_sq <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2):male, data = data_r3)
 summary(tmp)
-
-
-```
-
-### Compare Models
-
-```{r}
-
-
-## Results: Male is much better predictor than trial_index
-anova(lm$male, lm$trial_index)
-
-## Results: Male is better predictor than chamber.
-## This indicates males vary more than chambers
-anova(lm$male, lm$chamber)
-
-## Results: Adding trial_index to male provides no real gain in fit
-anova(lm$male, lm$trial_index_and_male)
-```
-
-### Notes
-
-- We do see evidence of male effects.
-  The important males have lower intercepts than the rest
-- There is little evidence of consistent trial_index effects.
-- Adjusted $R^2$ don't seem to vary much.
-
-
-## GLM and GLMM Poisson, Quasipoisson and Negative-Binomial Fits
-
-
-
-## GLM on Song Rate
-
-- See [webpage](https://stats.oarc.ucla.edu/r/faq/random-coefficient-poisson-models/)
-  for mixed-effects poisson models
-  
-```{r}
-
-glm <- list()
-
-## chamber and male are conflated
-## Data is very overdispersed given poisson assumptions
-glm$poisson <- glm(song_count ~ 1 + male + trial_index + temp_target + I(temp_target^2), data = data_r3, family = poisson(link = "log"))
-
-## This allows for over dispersion which greatly elevates the SE
-glm$qpoisson <- glm(model$glm_poisson, family = quasipoisson(link = "log"))
-
-## Gives similar results as with the quasipoisson
-glm$nb <- glm.nb(model$glm_poisson)
-
-anova.list(glm)
 ```
 
 ## GLMM (glmer) Model fits
@@ -510,8 +278,283 @@ mode
 ```
 
 
+### Compare Models
+
+```{r}
 
 
+## Results: Male is much better predictor than trial_index
+anova(lm$male, lm$trial_index)
+
+## Results: Male is better predictor than chamber.
+## This indicates males vary more than chambers
+anova(lm$male, lm$chamber)
+
+## Results: Adding trial_index to male provides no real gain in fit
+anova(lm$male, lm$trial_index_and_male)
+```
+
+### Notes
+
+- We do see evidence of male effects.
+  The important males have lower intercepts than the rest
+- There is little evidence of consistent trial_index effects.
+- Adjusted $R^2$ don't seem to vary much.
+
+
+
+## First Analysis Shared with Liz
+
+- Slightly more organized than previous
+
+### lm analysis of `log(song_count_plus_1)`
+
+```{r}
+
+
+## Plotting based on: https://www.tjmahr.com/plotting-partial-pooling-in-mixed-effects-models/
+
+xlab <- "Temperature"
+ylab <- "log(song_count + 1)"
+
+pdf(file = "log-plus-1_vs_temp_all.pdf")
+
+plot_log_plus_1 <- ggplot(data_full  ) + 
+    aes(x = temp_target,
+        y = log_song_count_plus_1,
+        color = (round) +
+    stat_smooth(method = "lm",
+                se = TRUE,
+                formula = y ~ x + I(x^2), size = 1,
+                ) +
+  # Put the points on top of lines
+  #  geom_point() +
+    geom_jitter() +
+  facet_wrap("male", scales = "free_y") +
+    labs( title = paste( substitute(x), " vs ", substitute(y), ": Data Only"), 
+         subtitle = "lm:y ~ 1 + x + x^2")
+
+dev.off()
+
+
+
+```
+
+### GLM analysis of `song_count` and `temp_target` 
+
+```{r}
+
+## Code below used for posting to stackexchange
+data_full %>% filter(male %in% c("T258", "T259"))%>% dplyr::select(male, temp_target, song_count) %>% rename(ID = male, x = temp_target, y = song_count)  %>% dput()
+
+## Choose some males to use for starting values based on log fit
+reasonable.males = c("T229", "T237", "T258")
+
+glm_result <- glm_qpoisson_target <- glm(song_count ~ 1 + temp_target + I(temp_target^2),
+                    family = quasipoisson(),
+    data = data_full %>% filter(male %in% reasonable.males))
+
+xlab <- "Temperature"
+ylab <- "song_count"
+
+
+
+plot_glm <- plot_data_only +
+    aes(x = temp_target,
+        y = song_count,
+        color = (round == 1)) + ## Combine round 2 and 3
+    stat_smooth(method = "glm",
+                method.args = list(
+                    family = quasipoisson(link = "log"),
+                    start = coefficients(glm_result),
+                    maxit = 100),
+                se = FALSE,
+                formula = y ~ 1 + x + I(x^2), size = 1,
+                ) +
+    labs( title = paste( substitute(x), " vs ", substitute(y), ": Data Only"), 
+         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])")
+
+pdf(file = "song_count_vs_temp_multiple.pdf")
+
+plot_data_only
+plot_log_plus_1
+plot_glm
+
+dev.off()
+
+
+```
+
+
+    
+
+
+
+
+
+## Second Analysis for Liz
+
+### GLM analysis of `song_count` and `temp_mean` 
+
+```{r}
+
+data_tmp <- data_full %>% filter(round == 2) %>% dplyr::select(male, song_count) %>% group_by(male)
+
+tmp_summarized <- summarize(data_tmp, var(song_count), mean(song_count))
+
+## Methods of Moments: if x ~ NB(p, p/(p + r)), var(x) = p + p^2/r, mean(x) = p
+## Alternative parameterization
+## p = 1 - \mu/\sigma^2;
+## r = \mu^2/(\sigma^2 - \mu)
+## Where,
+##   \mu = mean(x) = p r/(1-p)
+##   \sigma^2 = var(x) = (1-p)/(1+p)^2
+
+
+var_tmp = var(data_tmp)
+
+
+tmp <- glm(song_count ~ male,
+           data = data_tmp,
+    family = quasipoisson()
+    )
+
+
+data <- data_full %>% filter(round == 3)
+
+xlab <- "Temperature"
+ylab <- "song_count"
+
+plot_data_temp <-
+    ggplot(data = data) + 
+    aes(x = temp_target,
+        y = song_count,
+        color = as.factor(round)) +
+    facet_wrap("male", scales = "free_y") +
+    geom_jitter() +
+    labs( title = paste( substitute(x), " vs ", substitute(y), ": Data Only") )
+plot_data_temp
+
+xlab= "Humidity"
+
+plot_data_humidity <-
+    ggplot(data = data) + 
+    aes(x = humidity_mean,
+        y = song_count,
+        color = as.factor(round)) +
+    facet_wrap("male", scales = "free_y") +
+    geom_jitter() +
+    labs( title = paste( substitute(x), " vs ", substitute(y), ": Data Only") ) 
+plot_data_humidity
+
+
+## As one might expect, Humidity is negatively correlated with temperature
+ylab = "temp_mean"
+plot_data_humidity_vs_temp <-
+    ggplot(data = data) + 
+    aes(x = temp_mean,
+        y = humidity_mean,
+        color = as.factor(round)) +
+    facet_wrap("male", scales = "free_y") +
+    geom_jitter() +
+    labs( title = paste( substitute(x), " vs ", substitute(y), ": Data Only") )
+plot_data_humidity_vs_temp
+
+
+## Choose some males to use for starting values based on log fit
+reasonable.males = c("T229", "T237", "T258")
+
+glm_result <- glm_qpoisson_mean <- glm(song_count ~ 1 + temp_mean + I(temp_mean^2),
+                    family = quasipoisson(),
+    data = data_full %>% filter(male %in% reasonable.males))
+
+xlab <- "Temperature"
+ylab <- "song_count"
+
+
+
+plot_glm <- plot_data_only +
+    aes(x = temp_mean,
+        y = song_count,
+        color = (round == 1)) + ## Combine round 2 and 3
+    stat_smooth(method = "glm",
+                method.args = list(
+                    family = quasipoisson(link = "log"),
+                    start = coefficients(glm_result),
+                    maxit = 100),
+                se = FALSE,
+                formula = y ~ 1 + x + I(x^2), size = 1,
+                ) +
+    labs(x = xlab, y = ylab,
+         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])",
+         title = "Song Count vs Temp: Quasi-Poisson Regression") 
+
+
+pdf(file = "song_count_vs_temp_mean_glm.pdf")
+
+plot_data_only
+plot_log_plus_1
+plot_glm
+
+dev.off()
+
+
+```
+
+
+    
+
+
+
+## Make a model fit tibble - Not complete
+
+```{r}
+round_tbl <- tibble(round_1 = FALSE, round_2 = c(TRUE, FALSE),
+       round_3 = TRUE
+       ) %>% rep(2)
+
+
+
+model_cat <- c("lm", "glm", "glmer")
+round_1 <- FALSE
+round_2 <- c(FALSE, TRUE)
+round_3 <- TRUE
+male <- c(FALSE, TRUE)
+chamber <- c(FALSE, TRUE)
+trial_index <- c(FALSE, TRUE)
+
+fit_tbl_names <- c("model_cat",
+      "round_1",
+      "round_2",
+      "round_3",
+      "male",
+      "chamber",
+      "trial_index",
+      "temp_slope",
+      "temp_curve",
+      "male_x_temp_slope",
+      "male_x_temp_curve",
+      "residual_df".
+      "residual_ss"
+      "R2",
+      "AIC",
+      "fit_obj"
+      )
+
+fit_tbl <- data.frame("a" = 1, "b"= 1:2, "c" = 1:3)
+
+                 ,
+                  names = 
+      )
+)
+comment(fit_tbl) <- "temp_slope = temp_mean, temp_curve = I(temp_mean^2)"
+
+filter_data_lm() <- list(
+formulas_lm() <-
+    
+
+
+```
 
 ## For Later: Lactin2 
 
@@ -542,7 +585,7 @@ start_vals <- get_start_vals(data$temp_target, data$song_count, model_name = 'la
   
 ## Get limits
 low_lims <- get_lower_lims(data$temp_target,data$song_count,model_name = 'lactin2_1995')
-upper_lims <- get_upper_lims(data$temp_target, data$song_count, model_name = 'lactin2_1995')
+upper_lims <- get_upper_lims(data$temp_target, data$song_count, model_name = l'actin2_1995')
 
 start_vals
 low_lims
