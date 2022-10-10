@@ -21,6 +21,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Install libraries
 
 ```{r}
+
 ## install packages user might not have by replacing FALSE with TRUE
 if(FALSE) {
     BiocManager::install("mixOmics") ## needed by RVAideMemoire
@@ -140,6 +141,7 @@ plot_data_only
 dev.off()
 ```
 ## Earliest Analysis
+
 ### Analyze `round 2 & 3`
 
 - In `round = 3`, 
@@ -189,6 +191,7 @@ plot.lmList4(tmp, log_song_count_plus1 ~ fitted(.)| male)
 lm = list()
 
 formula <- as.formula("log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2)")
+
 ## Note syntax below model `formula` doesn't appear in the model summary().
 ## lm$basic <- lm(formula = formula , data = data_r3)
 
@@ -394,7 +397,7 @@ dev.off()
 
 ## Second Analysis for Liz
 
-### GLM analysis of `song_count` and `temp_mean` 
+### Consider estimating overdispersion parameter
 
 ```{r}
 
@@ -419,11 +422,13 @@ tmp <- glm(song_count ~ male,
     family = quasipoisson()
     )
 
+```
+
+### GLM analysis of `song_count` and `temp_mean` 
+
+```{r}
 
 data <- data_full %>% filter(round == 3)
-
-xlab <- "Temperature"
-ylab <- "song_count"
 
 plot_data_temp <-
     ggplot(data = data) + 
@@ -462,15 +467,12 @@ plot_data_humidity_vs_temp
 
 
 ## Choose some males to use for starting values based on log fit
+
 reasonable.males = c("T229", "T237", "T258")
 
-glm_result <- glm_qpoisson_mean <- glm(song_count ~ 1 + temp_mean + I(temp_mean^2),
+glm_temp_mean <- glm_qpoisson_mean <- glm(song_count ~ 1 + temp_mean + I(temp_mean^2),
                     family = quasipoisson(),
     data = data_full %>% filter(male %in% reasonable.males))
-
-xlab <- "Temperature"
-ylab <- "song_count"
-
 
 
 plot_glm <- plot_data_only +
@@ -485,10 +487,9 @@ plot_glm <- plot_data_only +
                 se = FALSE,
                 formula = y ~ 1 + x + I(x^2), size = 1,
                 ) +
-    labs(x = xlab, y = ylab,
-         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])",
-         title = "Song Count vs Temp: Quasi-Poisson Regression") 
-
+    labs(title = paste(substitute(x), " vs ", substitute(y)),         
+         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])"
+         )
 
 pdf(file = "song_count_vs_temp_mean_glm.pdf")
 
@@ -506,6 +507,9 @@ dev.off()
 
 
 
+
+
+# Other Stuff
 ## Make a model fit tibble - Not complete
 
 ```{r}
@@ -585,7 +589,7 @@ start_vals <- get_start_vals(data$temp_target, data$song_count, model_name = 'la
   
 ## Get limits
 low_lims <- get_lower_lims(data$temp_target,data$song_count,model_name = 'lactin2_1995')
-upper_lims <- get_upper_lims(data$temp_target, data$song_count, model_name = l'actin2_1995')
+upper_lims <- get_upper_lims(data$temp_target, data$song_count, model_name = 'lactin2_1995')
 
 start_vals
 low_lims
