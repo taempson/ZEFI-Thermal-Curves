@@ -73,7 +73,7 @@ data_raw[[2]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Repeatab
 
 data_raw[[3]] <-read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv")) %>%
     mutate(round = 3) %>%
-    group_by(male) %>% mutate(total_count_round_3 = sum(song_count) ) 
+    group_by(male) %>% mutate(total_count_round_3 = sum(song_count) )
 
 ## Join data and discard empty columns
 data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
@@ -102,7 +102,6 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
 data <- data_full #%>% filter(round ==3)
 
 data %>% group_by(temp_target) %>%
-    filter(song_count < 400) %>%
     summarize(ave = mean(song_count), sd = sd(song_count), n = length(song_count), n_completed = sum(trial_completed))
 
 ## Look at occurrance of males across rounds
@@ -120,11 +119,13 @@ lapply(list(tmp1, tmp2, intersect(tmp1, tmp2)), length)
 
 ```
 
-## Plot Raw Data
+## Plot Filtered Data
 
 ```{r}
 
-data <- data_full %>% filter(round==3)
+data <- data_full %>%
+    filter(round==3) %>%
+    filter(total_count_round_3 >=100)
 
 xlab <- "Temperature"
 ylab <- "song_count"
@@ -138,16 +139,30 @@ plot_data_only <-
     labs( title = paste( substitute(x), " vs ", substitute(y)))
 plot_data_only
 
-total_count <- data 
-
-
-data %>% group_by(temp_target) %>%
+data_summarize <-
+    data %>% group_by(temp_target) %>%
     summarize(song_mean = mean(song_count),
               song_sd = sd(song_count),
-              song_nz_mean = na_if(,
-              song_nz_sd = sd(song_count > 0))
+              song_n= dplyr::n(),
+              song_se = song_sd/sqrt(song_n),
+              song_ci = song_se*1.96
+              )
+
+plot_combine <- ggplot(data) +
+                  aes(x = temp_target, y = song_count, color = male) +
+                  geom_point()
+plot_combine
+
+
+plot_summarize <- ggplot(data_summarize) +
+    aes(x = temp_target, y = song_mean) +
+    geom_point()+
+    geom_errorbar(aes(ymin=song_mean - song_ci, ymax=song_mean+song_ci), width=.2) #+
+#    labs(title = "Mean(song_count) vs. Target Temp",
+#         subtitle = "with SE bars")
+plot_summarize
               
-              
+plot_combine + plot_summarize
 
 ```
 
