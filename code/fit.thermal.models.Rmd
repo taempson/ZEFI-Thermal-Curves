@@ -57,20 +57,22 @@ require(RVAideMemoire) # provides overdisp.glmer()
 
 ## Repeatability was done between round 1 and 2, female was present, but only one temp. so treating as `round = 2` and redefining `round = 2` as `round = 3`
 
+git_root <- system("git rev-parse --show-toplevel", intern = TRUE)
+
 data_raw = list()
 
-data_raw[[1]] <- read.csv(file.path("..", "data", "raw_data", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
+data_raw[[1]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
     ## Note T237 and T230 are missing numbers in the song_count column
     ## so we are filtering these observations out until they are found
     filter(!is.na(song_count))
 
-data_raw[[2]] <- read.csv(file.path("..", "data", "raw_data", "HSPi-Repeatability-Song-Count.csv")) %>%
+data_raw[[2]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Repeatability-Song-Count.csv")) %>%
     mutate(round = 2) %>%
     group_by(male) %>%
     mutate(test_order = rank(date)) %>%
     ungroup()
 
-data_raw[[3]] <-read.csv(file.path("..", "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv")) %>% mutate(round = 3)
+data_raw[[3]] <-read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv")) %>% mutate(round = 3)
 
 ## Join data and discard empty columns
 data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
