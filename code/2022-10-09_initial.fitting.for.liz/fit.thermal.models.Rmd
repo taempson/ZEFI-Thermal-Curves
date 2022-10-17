@@ -202,8 +202,6 @@ glm_combined <- glm(song_count ~ 1 + temp_target + I(temp_target^2),
 xlab <- "Temperature"
 ylab <- "song_count"
 
-
-
 plot_glm <- plot_data_only +
     aes(x = temp_target,
         y = song_count,
@@ -220,12 +218,25 @@ plot_glm <- plot_data_only +
          subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])",
          title = "Song Count vs Temp: Quasi-Poisson Regression") 
 
+## Rescale axes to deal with poor GLM fit that messes up plotting of T259
+p1 <- ggplot_build(plot_data_only)
+p2 <- ggplot_build(plot_glm)
+
+
+## original post suggested using
+## p2$layout$panel_scales_y <- p1$layout$panel_scales_y
+
+## Only replace problematic scale
+p2$layout$panel_params[[14]] <- p1$layout$panel_params[[14]]
 
 pdf(file = "song_count_vs_temp_multiple.pdf")
 
 plot_data_only
+
 plot_log_plus_1
-plot_glm
+
+grid::grid.newpage()
+grid::grid.draw(ggplot_gtable(p2))
 
 dev.off()
 
