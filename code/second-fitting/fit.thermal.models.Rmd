@@ -71,7 +71,9 @@ data_raw[[2]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Repeatab
     mutate(test_order = rank(date)) %>%
     ungroup()
 
-data_raw[[3]] <-read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv")) %>% mutate(round = 3)
+data_raw[[3]] <-read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv")) %>%
+    mutate(round = 3) %>%
+    group_by(male) %>% mutate(total_count_round_3 = sum(song_count) ) 
 
 ## Join data and discard empty columns
 data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
@@ -136,7 +138,9 @@ plot_data_only <-
     labs( title = paste( substitute(x), " vs ", substitute(y)))
 plot_data_only
 
- na_if
+total_count <- data 
+
+
 data %>% group_by(temp_target) %>%
     summarize(song_mean = mean(song_count),
               song_sd = sd(song_count),
