@@ -39,6 +39,14 @@ library(nls.multstart)
 library(broom)
 library(tidyverse)
 require(ggplot2)
+require(ggpubr)
+require(viridisLite)
+
+#options(ggplot2.continuous.colour="viridis",
+#        ggplot2.discrete.colour="viridis",
+#        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
+#        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
+
 require(GGally)
 require(reshape2)
 require(lme4)
@@ -72,8 +80,8 @@ data_raw[[2]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Repeatab
     ungroup()
 
 data_raw[[3]] <-read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv")) %>%
-    mutate(round = 3) %>%
-    group_by(male) %>% mutate(total_count_round_3 = sum(song_count) )
+    mutate(round = 3) #%>%
+#    group_by(male) %>% mutate(total_count_round_3 = sum(song_count) )
 
 ## Join data and discard empty columns
 data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
@@ -88,6 +96,9 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     mutate(song_count_plus_1 = (song_count + 1)) %>%
     mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
     mutate(temp_target = as.numeric(temp_target)) %>%
+    ## Add column with total song_count for a given round
+    group_by(male, round ) %>% mutate(count_total_round = sum(song_count) ) %>%
+    ungroup() %>%
     mutate() ## Dummy function so we can comment out lines above it w/o any issues
 
 ```
@@ -98,6 +109,26 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
 ## Examine Data
 
 ```{r}
+
+data_count_total <- data_full %>% group_by(round) %>%
+    select(male, round, count_total_round)  %>%
+    distinct() %>% mutate(filtered = FALSE)
+
+data_count_total_filter <- data_count_total %>%
+    filter(count_total_round > 150) %>%
+    mutate(filtered = TRUE)
+    
+
+data_tmp <- full_join(data_count_total, data_count_total_filter)
+
+
+t <- ggplot(data_tmp, aes(count_total_round, fill = male)) +
+    geom_histogram(bins = 10) #+
+#    scale_x_log10()
+hist_count_total <- t +
+    facet_grid(cols =vars(round), rows = vars(filtered), scales = "free_x")
+hist_count_total
+
 
 data <- data_full #%>% filter(round ==3)
 
@@ -117,7 +148,28 @@ tmp2 <- data_full %>%
 
 lapply(list(tmp1, tmp2, intersect(tmp1, tmp2)), length)
 
+
 ```
+## Compare `count_total_round` between round 1 and 3
+
+```{r}
+
+x <- data_count_total %>% filter(round ==1) %>% select(male, count_total_round, round)
+y <- data_count_total %>% filter(round ==3) %>% select(male, count_total_round, round)
+
+data_xy <- full_join(x = x, y = y, by = "male") %>% na.omit()
+
+ggplot(data_xy) +
+    aes(x = count_total_round.x, y = count_total_round.y) +
+    geom_point()
+
+```
+
+### Result
+
+- We see consistancy between `count_total_round` which is good
+
+
 
 ## Plot Filtered Data
 
@@ -125,7 +177,7 @@ lapply(list(tmp1, tmp2, intersect(tmp1, tmp2)), length)
 
 data <- data_full %>%
     filter(round==3) %>%
-    filter(total_count_round_3 >=100)
+    filter(count_total_round >=100)
 
 xlab <- "Temperature"
 ylab <- "song_count"
@@ -138,6 +190,20 @@ plot_data_only <-
     geom_point() +
     labs( title = paste( substitute(x), " vs ", substitute(y)))
 plot_data_only
+
+## Create again for humidity
+
+hist(data$count_total_round, breaks = 20)
+```
+
+
+## Work with mean
+
+- This approach won't work because `temp_target` varies greatly from `temp_mean`.
+
+
+
+```{r}
 
 data_summarize <-
     data %>% group_by(temp_target) %>%
@@ -184,12 +250,50 @@ plot_data_humidity_vs_temp <-
         color = as.factor(round)) +
     facet_wrap("male", scales = "free_y") +
     geom_jitter() +
-    labs( title = "Humidity vs Temperature: Data Only") )
+    labs( title = "Humidity vs Temperature: Data Only")
+plot_data_humidity_vs_temp
+
+plot_data_humidity_vs_temp_combined <-
+    ggplot(data = data) + 
+    aes(x = temp_mean,
+        y = humidity_mean) + 
+    geom_point() +
+    labs( title = "Humidity vs Temperature: Data Only")
 
 pdf("temp_mean-vs-humidity_mean.pdf")
 plot_data_humidity_vs_temp
 dev.off()
+```
 
+## Compare `temp_target` and `temp_mean`
+
+```{r}
+
+p <- ggplot(data, aes(x = temp_target, y = temp_mean)) +
+    geom_point()
+p
+
+```
+
+### Result
+
+Clearly we want to work with `temp_mean`, rather than `temp_target` and, as a result, only round = 3 since we don't have this data for the other rounds.
+
+## Compare song_count to `temp_mean` and `temp_humidity`
+```{r}
+
+
+p <- ggplot(data, aes(x = temp_mean, y = song_count), color = male) +
+    geom_point() +
+    stat_cor()
+last_plot()
+
+p <- ggplot(data, aes(x = humidity_mean, y = song_count), color = male) +
+    geom_point() +
+    stat_cor()
+last_plot()
+
+```
 ### Consider estimating overdispersion parameter
 
 ```{r}
@@ -225,12 +329,6 @@ tmp <- glm(song_count ~ male,
 
 ## Choose some males to use for starting values based on log fit
 
-reasonable.males = c("T229", "T237", "T258")
-
-glm_temp_mean <- glm_qpoisson_mean <- glm(song_count ~ 1 + temp_mean + I(temp_mean^2),
-                    family = quasipoisson(),
-    data = data_full %>% filter(male %in% reasonable.males))
-
 
 plot_glm <- plot_data_only +
     aes(x = temp_mean,
@@ -238,7 +336,7 @@ plot_glm <- plot_data_only +
     stat_smooth(method = "glm",
                 method.args = list(
                     family = quasipoisson(link = "log"),
-                    start = coefficients(glm_temp_mean),
+#                    start = coefficients(glm_temp_mean),
                     maxit = 100),
                 se = FALSE,
                 formula = y ~ 1 + x + I(x^2), size = 1,
@@ -246,7 +344,8 @@ plot_glm <- plot_data_only +
     labs(title = paste(substitute(x), " vs ", substitute(y)),         
          subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])"
          )
-plot_glm
+last_plot()
+
 
 
 
