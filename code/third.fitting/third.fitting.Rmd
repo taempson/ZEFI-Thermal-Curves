@@ -1,0 +1,747 @@
+---
+title: "Third Fitting of Thermal Models"
+author: "Michael Gilchrist"
+date: "date: 2022-10-XX"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Goal
+
+- Fit series of thermal models, including, ultimately, those found in `rTPC` to data collected in the Derryberry lab.
+
+## Recap
+
+Previous work suggests that
+
+- Temp is hard to control in chambers, so we should work with `temp_mean` (mean value during trial), not `temp_target`.
+- `humidity_mean` and `temp_mean` strongly co-vary so consider using aggregate index as explanatory variable
+  - Vapor Pressure Deficit (provided by `humidity` package)
+  - Heat Index (formulated for humans, and provided by `weathermetrics`)
+- Round 3 data only for curve fitting
+  - Only round where `temp_mean` and `humidity_mean` exist.
+- `count_total_round` are consistent between Rounds 1 and 3, so could use that info to classify birds, estimate variance function in response, etc.
+- One bird in `round = 3` collapsed during the trial so it was terminated.
+  We've set the `song_count` from NA to 0 and should consider making at `temp_working` column using `temp_target` in this instance and `temp_mean` in all other instances.
+  Would need to do something similar for relative humidity, i.e. use `mean(humidity_mean)` for the `temp_target` value.
+  
+## Current Work
+
+- Created `temp` and `humidity` variables from `temp_mean` and `humidity_mean` for males who didn't collapse, used `mean(temp_mean)` and `mean(humidity_mean)` values for one male that did.
+
+
+
+
+# Set up
+
+## Install libraries
+
+```{r}
+
+## install packages user might not have by replacing FALSE with TRUE
+if(FALSE) {
+    BiocManager::install("mixOmics") ## needed by RVAideMemoire
+    install.packages(c("RSQLite", "nls.multstart", "lme4", "RVAideMemoire"))
+    ##  Install the thermal curve package from git_hub, not cran
+    remotes::install_github("padpadpadpad/rTPC")
+
+}
+
+## load libraries
+library(stats)
+require(MASS) # provides negative binomial fitting:  glm.nb
+library(RSQLite)  # Don't think we need this.
+library(rTPC)  ## 
+library(nls.multstart)
+library(broom)
+library(tidyverse)
+require(ggplot2)
+require(ggpubr)
+require(viridisLite)
+
+#options(ggplot2.continuous.colour="viridis",
+#        ggplot2.discrete.colour="viridis",
+#        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
+#        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
+
+require(GGally)
+require(reshape2)
+require(lme4)
+require(RVAideMemoire) # provides overdisp.glmer()
+require(humidity) ## provides VPD
+require(weathermetrics)
+
+```
+
+## Load Data
+
+```{r}
+
+## Read in ZEFI Data sets
+## Treat 'repeatability' as round = 0
+## Add round info
+
+## Repeatability was done between round 1 and 2, female was present, but only one temp. so treating as `round = 2` and redefining `round = 2` as `round = 3`
+
+git_root <- system("git rev-parse --show-toplevel", intern = TRUE)
+
+data_raw = list()
+
+data_raw[[1]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
+    ## Note T237 and T230 are missing numbers in the song_count column
+    ## so we are filtering these observations out until they are found
+    filter(!is.na(song_count))
+
+data_raw[[2]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Repeatability-Song-Count.csv")) %>%
+    mutate(round = 2) %>%
+    group_by(male) %>%
+    mutate(test_order = rank(date)) %>%
+    ungroup()
+
+data_raw[[3]] <-read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv")) %>%
+    mutate(round = 3) %>%
+    group_by(temp_target) %>% 
+    mutate(temp = if_else((round == 3 & is.na(temp_mean)),
+                          mean(temp_mean, na.rm = TRUE),
+                          temp_mean)) %>%
+    mutate(humidity = if_else((round == 3 & is.na(humidity_mean)),
+                              mean(humidity_mean, na.rm = TRUE),
+                              humidity_mean)) %>%
+    ungroup() 
+
+
+## Join data and discard empty columns
+data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
+    full_join(data_raw[[3]]) %>%
+    discard(~all(is.na(.) | . =="")) %>% ## get rid of columns of only NA
+    mutate(trial_completed = !(is.na(song_count)) ) %>%
+    mutate(song_count = ifelse(is.na(song_count), 0, song_count)) %>%
+    mutate(song_count = song_count*1.0) %>% ## convert to a double so it's not treated as an integer
+    ## assuming poisson error
+    ## add +1 to deal with single 0
+    mutate(song_wt = sqrt(song_count + 1)) %>%
+    mutate(chamber = as.factor(chamber), male = as.factor(male)) %>%
+    ## create a global variable trial_order based on individual rounds
+    mutate(trial_index = as.integer(round*10+test_order)) %>%
+    mutate(song_count_plus_1 = (song_count + 1)) %>%
+    mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
+    mutate(temp_target = as.numeric(temp_target)) %>%
+    ## Deal with missing temp_mean and humidity_mean values
+    ## in round == 3
+    ## Add column with total song_count for a given round
+    group_by(male, round ) %>%
+    mutate(count_total_round = sum(song_count) ) %>%
+    ungroup() %>%
+    mutate(song_prop = song_count/count_total_round) %>%
+    ## Add vpd 
+    mutate(svp = SVP(t = temp + 273.15, isK = TRUE), vpd = svp*(1-humidity/100) ) %>%
+    relocate(song_count, song_prop, vpd, temp, humidity, .after = male) %>% 
+    mutate() ## Dummy function so we can comment out lines above it w/o any issues
+
+```
+
+# Third Analysis for Liz
+
+
+## Examine Data
+
+```{r}
+
+data_count_total <- data_full %>% group_by(round) %>%
+    select(male, round, count_total_round)  %>%
+    distinct()
+
+t <- ggplot(data_count_total, aes(count_total_round, fill = male)) +
+    geom_histogram(bins = 10) +
+    scale_x_log10()
+
+hist_count_total <- t +
+    facet_grid(cols =vars(round), scales = "free_x")
+hist_count_total
+
+
+
+```
+## Compare `count_total_round` between round 1 and 3
+
+```{r}
+
+count_total_by_round <- data_full %>%
+      select(male, round, count_total_round) %>%
+      unique() %>%
+      pivot_wider(names_from = round, values_from = count_total_round)
+
+
+## Modified from https://stackoverflow.com/a/68553749/5322644
+diag_plots <- function(data, mapping, ...) {
+    ggplot(data = data, mapping = mapping) +
+        # choose color by counter and send bin width argument in
+        geom_histogram(...)
+}
+
+# pairs plot
+ggpairs(count_total_by_round %>% select(-male),
+        diag = list(continuous = wrap(diag_plots, bins = 8))
+        )
+
+
+```
+
+### Result
+
+- As before, we see strong consistancy between `round` 1 and 3.
+- Consistency with round 2 is weaker, but sample sizes are smaller: 3 trials/male in round 2 vs 6 trials/male in round 3.
+
+  
+
+## Plot Filtered Data
+
+```{r}
+
+data <- data_full %>%
+    filter(round==3) %>%
+    filter(count_total_round >=150)
+
+xlab <- "Temperature"
+ylab <- "song_count"
+
+plot_temp_data <-
+    ggplot(data) + 
+    aes(x = temp,
+        y = song_count) +
+    facet_wrap("male", scales = "free_y") +
+    geom_point() +
+    labs( title = paste( substitute(x), " vs ", substitute(y)))
+last_plot()
+
+
+## Create again for humidity
+
+xlab <- "humidity"
+ylab <- "song_count"
+
+plot_humidity_data <-
+    ggplot(data) + 
+    aes(x = humidity,
+        y = song_count) +
+    facet_wrap("male", scales = "free_y") +
+    geom_point() +
+    labs( title = paste( substitute(x), " vs ", substitute(y)))
+last_plot()
+
+## Create for vpd
+
+xlab <- "vpd"
+ylab <- "song_count"
+
+plot_vpd_data <-
+    ggplot(data) + 
+    aes(x = vpd,
+        y = song_count) +
+    facet_wrap("male", scales = "free_y") +
+    geom_point() +
+    labs( title = paste( substitute(x), " vs ", substitute(y)))
+last_plot()
+
+```
+
+
+## Work with mean and song_prop 
+
+- This approach won't work because `temp_target` varies greatly from `temp_mean`.
+
+
+
+```{r}
+
+plot_combine <- ggplot(data) +
+                  aes(x = temp_target, y = song_prop, color = male) +
+                  geom_point()
+# last_plot()
+
+data_summarize <-
+    data %>% group_by(temp_target) %>%
+    summarize(song_mean = mean(song_prop),
+              song_sd = sd(song_prop),
+              song_n= dplyr::n(),
+              song_se = song_sd/sqrt(song_n),
+              song_ci = song_se*1.96
+              )
+
+
+plot_summarize <- ggplot(data_summarize) +
+    aes(x = temp_target, y = song_mean) +
+    geom_point()+
+    geom_errorbar(aes(ymin=song_mean - song_ci, ymax=song_mean+song_ci), width=.2)
+# last_plot()
+              
+plot_combine +
+    geom_point(data = data_summarize, aes(x = temp_target+0.125, y = song_mean, colour = "Mean & CI"))+
+    geom_errorbar(data = data_summarize, aes(x = temp_target+0.125,
+                                             y = song_mean,
+                                             ymin=song_mean - song_ci,
+                                             ymax=song_mean+song_ci,
+                                             colour= "Mean & CI"), width=.2) + 
+    labs(title = "Raw and Mean(song_prop) vs. Target Temp",
+         subtitle = "with 95% CI for mean")
+
+```
+
+### Result
+
+- Data is noisy.
+- Using `song_prop` reduces impact of male `T225` on lower temps.
+- Note `temp_target` is not necessarily accurate.
+
+
+
+## Humidity, Temp, and VPD
+
+
+### Previous Results from `second.fitting.pdf`
+
+- Values clearly co-vary.
+- Should consider using
+  - Vapor Pressure Deficit
+    - Uses temp to calculate max humidity and then looks at difference with relative humidity.
+  - Heat Index
+    - Adjusted for birds if available
+    - Use just first terms (`c_1 + c_2 T + c_3 R + c_4 T R + ...`) 
+
+### Using VPD as Predictor
+
+- VPD = vapor pressure deficit = actual vapor pressure - saturated vapor pressure
+  - VPD = $VPD=vp_{\text{sat}} \times (1-{\text{relative humidity}}/100)}$
+- `humidity` package provide saturated vapor pressure `SVP()`
+  - Note doesn't work with temps in C despite `isK` argument.
+
+
+### Compare predictors
+
+```{r}
+
+thv <- data %>% 
+      select(male, temp, humidity, vpd) %>%
+      unique() 
+
+
+# pairs plot
+ggpairs(thv %>% select(-male),
+        diag = list(continuous = wrap(diag_plots, bins = 8))
+        )
+
+```
+
+### Result
+
+- VPD and temp are *highly* correlated
+
+## Model Fitting
+
+```{r}
+
+knitr::knit_exit()
+
+```
+
+
+### Stats
+    
+```{r}
+
+
+plot_glm <- plot_temp_data +
+    aes(x = temp,
+        y = song_count) +
+    stat_smooth(method = "glm",
+                method.args = list(
+                    family = quasipoisson(link = "log"),
+#                    start = coefficients(glm_temp),
+                    maxit = 100),
+                se = FALSE,
+                formula = y ~ 1 + x + I(x^2), size = 1,
+                ) +
+    labs(title = paste(substitute(x), " vs ", substitute(y)),         
+         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])"
+         )
+last_plot()
+
+
+
+
+pdf(file = "song_count_vs_temp_glm.pdf")
+plot_glm
+dev.off()
+```
+
+## GLM Mixed Effects (glmer) Model fits
+
+```{r}
+
+glmer = list()
+
+glmer$poisson <- tmp <-
+    glmer(
+        song_count ~
+            (1 + temp + (temp||male) + I(temp^2)),
+        data = data,
+        family = poisson(link = "log"),
+        control = glmerControl(optCtrl = list(maxiter = 300)),
+        verbose = TRUE)
+
+## Still a lot of overdispersion
+glmer$od <- overdisp.glmer(glmer$poisson)
+
+```
+
+
+
+
+
+
+# Other Stuff
+
+### Consider estimating overdispersion parameter
+
+```{r}
+
+data_tmp <- data_full %>% filter(round == 2) %>% dplyr::select(male, song_count) %>% group_by(male)
+
+tmp_summarized <- summarize(data_tmp, var(song_count), mean(song_count))
+
+## Methods of Moments: if x ~ NB(p, p/(p + r)), var(x) = p + p^2/r, mean(x) = p
+## Alternative parameterization
+## p = 1 - \mu/\sigma^2;
+## r = \mu^2/(\sigma^2 - \mu)
+## Where,
+##   \mu = mean(x) = p r/(1-p)
+##   \sigma^2 = var(x) = (1-p)/(1+p)^2
+
+
+var_tmp = var(data_tmp)
+
+
+tmp <- glm(song_count ~ male,
+           data = data_tmp,
+    family = quasipoisson()
+    )
+
+```
+
+## Make a model fit tibble - Not complete
+
+```{r}
+round_tbl <- tibble(round_1 = FALSE, round_2 = c(TRUE, FALSE),
+       round_3 = TRUE
+       ) %>% rep(2)
+
+
+
+model_cat <- c("lm", "glm", "glmer")
+round_1 <- FALSE
+round_2 <- c(FALSE, TRUE)
+round_3 <- TRUE
+male <- c(FALSE, TRUE)
+chamber <- c(FALSE, TRUE)
+trial_index <- c(FALSE, TRUE)
+
+fit_tbl_names <- c("model_cat",
+      "round_1",
+      "round_2",
+      "round_3",
+      "male",
+      "chamber",
+      "trial_index",
+      "temp_slope",
+      "temp_curve",
+      "male_x_temp_slope",
+      "male_x_temp_curve",
+      "residual_df".
+      "residual_ss"
+      "R2",
+      "AIC",
+      "fit_obj"
+      )
+
+fit_tbl <- data.frame("a" = 1, "b"= 1:2, "c" = 1:3)
+
+                 ,
+                  names = 
+      )
+)
+comment(fit_tbl) <- "temp_slope = temp, temp_curve = I(temp^2)"
+
+filter_data_lm() <- list(
+formulas_lm() <-
+    
+
+
+```
+
+## Earliest Analysis
+
+### Analyze `round 2 & 3`
+
+- In `round = 3`, 
+  - The only `trial_completed = FALSE` is in highest temp.
+  - Only one of 6 chambers was used for a given male, thus chamber and male are conflated.
+  - Actually makes life easier!
+
+```{r}
+
+data_r3 <- data_full %>% filter(round ==3)
+
+```
+### LM Fits on `log(song_counts_plus_one)`
+
+- None of these models fit very well
+
+
+
+#### Fit each individual separately
+
+- Learning how to use `lmList()` function
+
+```{r}
+
+## Individual fits to each male
+## This isn't that useful, but is my firstuse of lmList()
+
+lmList <- list()
+
+lmList$by_male <- tmp <-
+    lme4::lmList(log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2) | male,
+           data = data %>% filter(round %in% c(2,3)),
+           na.action = na.omit)
+           
+
+summary(tmp)
+
+plot.lmList4(tmp, log_song_count_plus1 ~ fitted(.)| male)
+
+
+```
+#### Fit multiple variations of grouping
+
+```{r}
+
+
+lm = list()
+
+formula <- as.formula("log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2)")
+
+## Note syntax below model `formula` doesn't appear in the model summary().
+## lm$basic <- lm(formula = formula , data = data_r3)
+
+## Here string of formula is shown in summary()
+## The .() forces the evaluation in bquote()
+## See: https://win-vector.com/2018/09/01/r-tip-how-to-pass-a-formula-to-lm/
+## for detailed explanation of how this works
+lm$basic <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
+summary(tmp)
+
+## Add trial_index effect
+formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_index+ temp_target + I(temp_target^2)")
+lm$trial_index <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
+summary(tmp)
+
+## Add male effect 
+formula <- as.formula("log_song_count_plus_1 ~ 1 + male + temp_target + I(temp_target^2)")
+lm$male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
+summary(tmp) 
+
+## Add chamber effect (fewer chambers than males)
+formula <- as.formula("log_song_count_plus_1 ~ 1+ chamber + temp_target + I(temp_target^2)")
+lm$chamber <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
+summary(tmp)
+
+## Add trial_index and male effects
+formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_index + male + temp_target + I(temp_target^2)")
+lm$trial_index_and_male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
+summary(tmp)
+
+
+## Add male x trial order
+## This doesn't work since we have as many coefficients as data points.
+## Oops
+formula <- as.formula("log_song_count_plus_1 ~ 1 + male*trial_index + temp_target + I(temp_target^2)")
+lm$trial_index_by_male <- tmp <- lm(formula = eval(formula) , data = data_r3)
+summary(tmp)
+
+
+## add slope x male interaction term
+
+lm$male_by_temp <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target*male + I(temp_target^2), data = data_r3)
+summary(tmp)
+
+
+## slope x male - male intercept
+## This suggests that the slopes are similar between males (though the SE are large)
+lm$male_by_temp <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target:male + I(temp_target^2), data = data_r3)
+summary(tmp)
+
+## curvature x male - male intercept
+## This suggests that the slopes are similar between males (though the SE are large)
+lm$male_by_temp_sq <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2):male, data = data_r3)
+summary(tmp)
+```
+
+## GLMM (glmer) Model fits
+
+```{r}
+
+glmer = list()
+
+## I think this is a correct fit.  If I don't include the 1 + temp... w/o the |male, I don't get any effects.
+glmer$nb_1 <- glmer.nb(
+    song_count ~ 1 + temp_target + I(temp_target^2) + trial_index + ((1 + temp_target + I(temp_target^2))|male),
+    data = data_r3,
+    family = poisson(link = "log"),
+    control = glmerControl(optCtrl = list(maxiter = 300)),
+    verbose = TRUE)
+
+
+glmer$nb_2 <- update(glmer$nb_1, formula =  song_count ~ 1 + temp_target + I(temp_target^2) + ((1 + temp_target + I(temp_target^2))|male) )
+
+mode
+```
+
+
+### Compare Models
+
+```{r}
+
+
+## Results: Male is much better predictor than trial_index
+anova(lm$male, lm$trial_index)
+
+## Results: Male is better predictor than chamber.
+## This indicates males vary more than chambers
+anova(lm$male, lm$chamber)
+
+## Results: Adding trial_index to male provides no real gain in fit
+anova(lm$male, lm$trial_index_and_male)
+```
+
+### Notes
+
+- We do see evidence of male effects.
+  The important males have lower intercepts than the rest
+- There is little evidence of consistent trial_index effects.
+- Adjusted $R^2$ don't seem to vary much.
+
+
+## For Later: Lactin2 
+
+```{r}
+
+data <- data_full %>% filter(round ==3)
+
+data %>% group_by(temp_target) %>%
+    filter(song_count < 400) %>%
+    summarize(ave = mean(song_count, na.rm = TRUE), sd = sd(song_count, na.rm = TRUE)) 
+
+
+## show the data
+## windows()
+ggplot(data, aes(temp_target, song_count)) + 
+    geom_point() +
+    geom_jitter() +
+  theme_bw(base_size = 12) +
+  labs(x='Temperature (C)', 
+       y='Song Count', 
+       title = 'Song Count Across Temperature')
+
+## choose the model
+mod = 'lactin2_1995'
+
+## get starting values
+start_vals <- get_start_vals(data$temp_target, data$song_count, model_name = 'lactin2_1995')
+  
+## Get limits
+low_lims <- get_lower_lims(data$temp_target,data$song_count,model_name = 'lactin2_1995')
+upper_lims <- get_upper_lims(data$temp_target, data$song_count, model_name = 'lactin2_1995')
+
+start_vals
+low_lims
+upper_lims
+  
+## fit model
+fit <- nls_multstart(song_count~lactin2_1995(temp = temp_target, a,b,tmax,delta_t),
+                                  data = data,
+                                  iter = 600,
+                                  start_lower = start_vals-10,
+                                  start_upper = start_vals+10,
+                                  lower = low_lims,
+                                  upper = upper_lims,
+                                  supp_errors = 'Y',
+                                  convergence_count = FALSE)
+  
+## look at model fit
+summary(fit)
+
+## Predict new data 
+preds <- data.frame(temp = seq(min(data$temp_target), max(data$temp_target), length.out = 6))
+preds <- broom::augment(fit, newdata = preds)
+
+## plot data and model fit
+## windows()
+ggplot(preds)+
+  geom_point(aes(temp_target,song_count), data)+
+  geom_line(aes(temp, .fitted), preds, col = 'blue')+
+  theme_bw()+
+  labs(x='Temperature (C)',
+       y='Song Count',
+       title = 'Song Count Across Temperatures')
+
+
+```
+
+
+## Unweighted model
+
+- Fit 4 Chosen model formulations in rTPC
+
+
+```{r}
+
+d <-filter(heat_roundt2, Male =="T236")
+d_fits <- nest(d, data = c(temp_target,song_count)) %>%
+  mutate(lactin = map(data,~nls_multstart(song_count~lactin2_1995(temp = temp_target, a, b, tmax, delta_t),
+                      data = .x,
+                      iter = c(3,3,3,3),
+                      start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'lactin2_1995')-10,
+                      start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'lactin2_1995')+10,
+                      lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'lactin2_1995'),
+                      upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'lactin2_1995'),
+                      supp_errors = 'Y',
+                      convergence_count = FALSE)),
+weibull = map(data,~nls_multstart(song_count~weibull_1995(temp = temp_target, a, topt, b,c),
+                                  data = .x,
+                                  iter = c(4,4,4,4),
+                                  start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'weibull_1995')-10,
+                                  start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'weibull_1995')+10,
+                                  lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'weibull_1995'),
+                                  upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'weibull_1995'),
+                                  supp_errors = 'Y',
+                                  convergence_count = FALSE)),
+modifiedgaussian = map(data, ~nls_multstart(song_count~modifiedgaussian_2006(temp = temp_target, rmax,topt, a, b),
+                                            data = .x,
+                                            iter = c(3,3,3,3),
+                                            start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006')-10,
+                                            start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006')+10,
+                                            lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006'),
+                                            upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006'),
+                                            supp_errors = 'Y',
+                                            convergence_count = FALSE)),
+briere = map(data,nls_multstart(song_count~briere2_1999(temp = temp_target, tmin, tmax, a,b),
+                                data = .x,
+                                iter = c(4,4,4,4),
+                                start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'briere2_1999')-10,
+                                start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'briere2_1999')+10,
+                                lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'briere2_1999'),
+                                upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'briere2_1999'),
+                                supp_errors = 'Y',
+                                convergence_count = FALSE)))
