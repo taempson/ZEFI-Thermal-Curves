@@ -1,12 +1,17 @@
 ---
 title: "Third Fitting of Thermal Models"
 author: "Michael Gilchrist"
-date: "date: 2022-10-XX"
+date: "date: 2022-10-20"
 output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  warning = TRUE, # show warnings
+  message = TRUE, # show messages
+  error = TRUE, # do not interrupt generation in case of errors,
+  echo = TRUE  # show R code
+)
 ```
 # Goal
 
@@ -30,8 +35,58 @@ Previous work suggests that
 ## Current Work
 
 - Created `temp` and `humidity` variables from `temp_mean` and `humidity_mean` for males who didn't collapse, used `mean(temp_mean)` and `mean(humidity_mean)` values for one male that did.
+- Copied `data_full` and set  `male = "combined"` so we could look at all of the data at once.
+- Learned about using `model` argument for glm models
+- Can't fit ME models
+  - I don't understand why the ME model with `song_count` where we use a RE for the intercept doesn't have a similar effect as using song_prop.
+    This intercept value is essentially multiplying by a constant, so we could try and specify this value using `offset(log(count_total_round))`.
+    So why doesn't this work?
+
+## Next Steps
+
+### Which Explanatory Variable: temp, humidity, vpd?
+
+- Liz will look into operative temp
+- Use of `vpd_mean` is somewhat arbitrary since it depends on the experimental design.
+  - Use of 0 reference in vpd seems less arbitrary than using 0 C.
+- Note that we could scale temp_mean relative to C = 45, which is the understood thermal maximum.
+  - This is what Liz wants to do since it's easier to interpret
+
+### Including beak and mass data
+
+- Include beak size (surface area) as additional explanatory variable.
+  We do have bird mass as well
+- Notes from Liz
+  - Do birds with larger beaks maintain singing at higher rates at higher temps? 
+  - We calculated bill surface area approximately as the surface area of a cone: length * pi * (width + depth) / 4.
+  - Because larger animals produce more heat (Kleiber 1932), we scaled bill size relative to heat production by dividing bill surface area by expected daily energy consumption (mass0.658; Speakman and Kr´ol 2010, Hudson et al. 2013).
+  - So, looks like we need to calculate bill surface area and then scale relative to heat production (bill surface area/mass0.658)
+
+### Type of Model Fitted
+
+- Don't worry about random effects for now
+- Try the quadratic fit with just temperature and the 0 set at 45C. 
+  - Quadratic function – pull out the peak, the curvature at the peak, calculate the intercept at some temp – what is the intercept
+- Begin fitting rTPC models to combined dataset.
 
 
+### Using Data from Rounds 1 and 2
+
+- Liz: Ask Kayci about `temp_mean` and `humidity_mean` data for rounds 1 and 2.
+- Look for order effects in round 1 and 2? 
+  Can we use any of this data? 
+  Seems like there will be an issue if we throw out, say, first two trials, when using `song_prop`.
+  Note that since total_count is consistent for a bird between rounds, this may not be an issue.
+- Begin fitting rTPC models to combined dataset.
+- We could include round = 2
+  - Would need to down weight song_count values when combining across  `count_total_round` values.
+
+
+#### Additional Liz
+
+- Follow up with Ray/Juan about ground versus surface temp for operative temperature.
+- What is the 0 for operative temperature?
+- Ponder utility of other ZF data on panting.
 
 
 # Set up
@@ -72,6 +127,7 @@ require(lme4)
 require(RVAideMemoire) # provides overdisp.glmer()
 require(humidity) ## provides VPD
 require(weathermetrics)
+require(latex2exp)
 
 ```
 
@@ -102,13 +158,16 @@ data_raw[[2]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Repeatab
 
 data_raw[[3]] <-read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv")) %>%
     mutate(round = 3) %>%
-    group_by(temp_target) %>% 
-    mutate(temp = if_else((round == 3 & is.na(temp_mean)),
-                          mean(temp_mean, na.rm = TRUE),
-                          temp_mean)) %>%
-    mutate(humidity = if_else((round == 3 & is.na(humidity_mean)),
-                              mean(humidity_mean, na.rm = TRUE),
-                              humidity_mean)) %>%
+    ## Deal with missing temp_mean and humidity_mean values
+    ## in round == 3
+    ## 2022/10/19 - code no longer needed
+    ## group_by(temp_target) %>% 
+    ##mutate(temp = if_else((round == 3 & is.na(temp_mean)),
+    ##                      mean(temp_mean, na.rm = TRUE),
+    ##                      temp_mean)) %>%
+    ##mutate(humidity = if_else((round == 3 & is.na(humidity_mean)),
+    ##                          mean(humidity_mean, na.rm = TRUE),
+    ##                          humidity_mean)) %>%
     ungroup() 
 
 
@@ -119,26 +178,34 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     mutate(trial_completed = !(is.na(song_count)) ) %>%
     mutate(song_count = ifelse(is.na(song_count), 0, song_count)) %>%
     mutate(song_count = song_count*1.0) %>% ## convert to a double so it's not treated as an integer
-    ## assuming poisson error
-    ## add +1 to deal with single 0
-    mutate(song_wt = sqrt(song_count + 1)) %>%
     mutate(chamber = as.factor(chamber), male = as.factor(male)) %>%
     ## create a global variable trial_order based on individual rounds
     mutate(trial_index = as.integer(round*10+test_order)) %>%
     mutate(song_count_plus_1 = (song_count + 1)) %>%
     mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
     mutate(temp_target = as.numeric(temp_target)) %>%
-    ## Deal with missing temp_mean and humidity_mean values
-    ## in round == 3
     ## Add column with total song_count for a given round
     group_by(male, round ) %>%
     mutate(count_total_round = sum(song_count) ) %>%
     ungroup() %>%
     mutate(song_prop = song_count/count_total_round) %>%
+    ## assuming poisson error
+    ## From glm man page
+    ## > Non-‘NULL’ ‘weights’ can be used to indicate that different
+    ## >  observations have different dispersions (with the values in
+    ## >  ‘weights’ being inversely proportional to the dispersions);
+    ## add +1 to deal with single 0
+    mutate(count_wt = 1/(song_count + 1)) %>%
+    ## need to rescale wts for song_prop data
+    mutate(prop_wt = count_wt * count_total_round^2) %>% 
     ## Add vpd 
-    mutate(svp = SVP(t = temp + 273.15, isK = TRUE), vpd = svp*(1-humidity/100) ) %>%
-    relocate(song_count, song_prop, vpd, temp, humidity, .after = male) %>% 
+    mutate(svp = SVP(t = temp_mean + 273.15, isK = TRUE), vpd = svp*(1-humidity_mean/100) ) %>%
+    group_by(round) %>%
+    mutate(vpd_offset = vpd - mean(vpd)) %>%
+    ungroup() %>%
+    relocate(song_count, song_prop, vpd, temp_mean, humidity_mean, .after = male) %>% 
     mutate() ## Dummy function so we can comment out lines above it w/o any issues
+
 
 ```
 
@@ -196,45 +263,47 @@ ggpairs(count_total_by_round %>% select(-male),
 
   
 
-## Plot Filtered Data
+## Create & Plot Filtered Data
 
 ```{r}
 
-data <- data_full %>%
+data_ind <- data_full %>%
     filter(round==3) %>%
     filter(count_total_round >=150)
+## copy data frame and assign `male =  "combined")
+data_comb <- data_ind %>% mutate(male = "combined")
+
+data <- bind_rows(data_ind, data_comb)
 
 xlab <- "Temperature"
 ylab <- "song_count"
 
 plot_temp_data <-
     ggplot(data) + 
-    aes(x = temp,
+    aes(x = temp_mean,
         y = song_count) +
     facet_wrap("male", scales = "free_y") +
     geom_point() +
-    labs( title = paste( substitute(x), " vs ", substitute(y)))
+labs( title = paste( ylab, " vs ", xlab))
 last_plot()
 
 
 ## Create again for humidity
 
 xlab <- "humidity"
-ylab <- "song_count"
 
 plot_humidity_data <-
     ggplot(data) + 
-    aes(x = humidity,
+    aes(x = humidity_mean,
         y = song_count) +
     facet_wrap("male", scales = "free_y") +
     geom_point() +
-    labs( title = paste( substitute(x), " vs ", substitute(y)))
+labs( title = paste( ylab, " vs ", xlab))
 last_plot()
 
 ## Create for vpd
 
 xlab <- "vpd"
-ylab <- "song_count"
 
 plot_vpd_data <-
     ggplot(data) + 
@@ -242,8 +311,9 @@ plot_vpd_data <-
         y = song_count) +
     facet_wrap("male", scales = "free_y") +
     geom_point() +
-    labs( title = paste( substitute(x), " vs ", substitute(y)))
+    labs( title = paste( ylab, " vs ", xlab))
 last_plot()
+
 
 ```
 
@@ -256,13 +326,13 @@ last_plot()
 
 ```{r}
 
-plot_combine <- ggplot(data) +
-                  aes(x = temp_target, y = song_prop, color = male) +
+plot_combine <- ggplot(data_ind) +
+                  aes(x = temp_mean, y = song_prop, color = male) +
                   geom_point()
 # last_plot()
 
 data_summarize <-
-    data %>% group_by(temp_target) %>%
+    data_ind %>% group_by(temp_target) %>%
     summarize(song_mean = mean(song_prop),
               song_sd = sd(song_prop),
               song_n= dplyr::n(),
@@ -278,14 +348,15 @@ plot_summarize <- ggplot(data_summarize) +
 # last_plot()
               
 plot_combine +
-    geom_point(data = data_summarize, aes(x = temp_target+0.125, y = song_mean, colour = "Mean & CI"))+
-    geom_errorbar(data = data_summarize, aes(x = temp_target+0.125,
+    geom_point(data = data_summarize, aes(x = temp_target, y = song_mean, colour = "Mean & CI"))+
+    geom_errorbar(data = data_summarize, aes(x = temp_target,
                                              y = song_mean,
                                              ymin=song_mean - song_ci,
                                              ymax=song_mean+song_ci,
                                              colour= "Mean & CI"), width=.2) + 
-    labs(title = "Raw and Mean(song_prop) vs. Target Temp",
-         subtitle = "with 95% CI for mean")
+    labs(title = "Mean(song_prop) vs. temp_target with 95% CI for mean",
+         subtitle = "Individual song_prop vs. temp_mean also plotted")
+
 
 ```
 
@@ -313,17 +384,17 @@ plot_combine +
 ### Using VPD as Predictor
 
 - VPD = vapor pressure deficit = actual vapor pressure - saturated vapor pressure
-  - VPD = $VPD=vp_{\text{sat}} \times (1-{\text{relative humidity}}/100)}$
+  - VPD = $VPD=vp_{\text{sat}} \times (1-{\text{relative humidity}}/100)$
 - `humidity` package provide saturated vapor pressure `SVP()`
   - Note doesn't work with temps in C despite `isK` argument.
 
 
-### Compare predictors
+### Compare Temp, Humidity, and VPD as predictors
 
 ```{r}
 
-thv <- data %>% 
-      select(male, temp, humidity, vpd) %>%
+thv <- data_ind %>% 
+      select(male, temp_mean, humidity_mean, vpd) %>%
       unique() 
 
 
@@ -340,41 +411,276 @@ ggpairs(thv %>% select(-male),
 
 ## Model Fitting
 
+
+### Plots
+    
+```{r}
+
+xlab = "vpd"
+
+
+plot_tmp <- ggplot(data) + 
+    aes(x = vpd,
+        y = song_prop) +
+#    ylim(0, 0.6) + 
+    facet_wrap("male", scales = "free_y") +
+    geom_point()
+
+plot_glm_vpd <- plot_tmp +
+    stat_smooth(method = "glm",
+                method.args = list(
+                    family = quasipoisson(link = "log"),
+                    maxit = 100),
+                se = TRUE,
+                formula = y ~ 1 + x + I(x^2),
+                size = 1
+                ) +
+    labs( title = paste( ylab, " vs ", xlab, ": unweighted"), 
+         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])"
+         )
+last_plot()
+
+plot_glm_vpd_weighted <- plot_tmp + 
+    stat_smooth(method = "glm",
+                method.args = list(
+                    family = quasipoisson(link = "log"),
+                    maxit = 100),
+                    aes(weight = prop_wt),
+                se = TRUE,
+                formula = y ~ 1 + x + I(x^2), size = 1,
+                ) +
+    labs( title = TeX(paste( ylab, " vs ", xlab, ": weight ~ (count_total_round)$^2$)/(song_count + 1)") ), 
+         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])"
+         )
+last_plot()
+
+
+xlab <- "vpd-$\\bar{vpd}$"
+
+plot_glm_vpd_weighted_centered <- ggplot(data) + 
+    aes(x = vpd_offset,
+        y = song_prop) +
+    facet_wrap("male", scales = "free_y") +
+    geom_point() + 
+    stat_smooth(method = "glm",
+                method.args = list(
+                    family = quasipoisson(link = "log"),
+                    maxit = 100),
+                    aes(weight = prop_wt),
+                se = TRUE,
+                formula = y ~ 1 + x + I(x^2), size = 1,
+                ) +
+    labs( title = TeX(paste( ylab, " vs ", xlab, ": weight ~ (count_total_round)$^2$/(song_count + 1)")),
+         xlab = TeX(xlab), 
+         subtitle = TeX("glm:y ~ quasipoisson($\\exp[1 + x + x^2]$)")
+         )
+last_plot()
+```
+
+#### Result
+
+- We do see a concave down curve if we naively fit a quadratic function to the log transformed data.
+- Adding `weight = (count_total_round^2)/(song_count + 1)` greatly improves fit
+
+
+### Formal Model Fits to `song_count`
+
+
+- Using midpoint of vpd
+  
+
+```{r}
+
+## Try filtering the data a bit more
+## Goal is to get good starting values
+count_glm_poisson <- glm(song_count ~
+            1 + vpd_offset + I(vpd_offset^2), 
+            data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
+        family = poisson(link = "log")
+       )
+summary(count_glm_poisson)
+plot(count_glm_poisson)
+
+count_glm_qpoisson <- glm(song_count ~
+            1 + vpd_offset + I(vpd_offset^2), 
+            data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
+        family = quasipoisson(link = "log")
+)
+summary(count_glm_qpoisson)
+plot(count_glm_qpoisson)
+
+## Clearly the data is over dispersed
+## quasipoisson() doesn't seem to exist for glmer (but likely exists in nlme)
+
+## Try using negative binomial
+
+count_glmer_nb <-
+    glmer.nb(song_count ~ vpd_offset + I(vpd_offset^2) + (vpd_offset|male),
+             data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
+             ## control values are used by the initial optimization
+             ## using a poisson glmer model, which doesn't converge
+             control = glmerControl( 
+                 optCtrl = list(maxiter = 1E5,
+                                maxfun = 2E6,
+                                verbose = TRUE,
+                                trace = TRUE),
+                 optimizer="bobyqa"),
+             ## nb.control values are used by the second optimizer
+             nb.control = list(
+#                 trace = TRUE,
+                 maxit = 100,
+                 verbose = TRUE)
+             )
+
+## Try and fail to use `start` rgument
+tmp <- glmer(song_count ~
+            vpd_offset + I(vpd_offset^2) + (vpd_offset + I(vpd_offset^2)||male),
+        data = data_ind,
+        family = poisson(link = "log"),
+        start = list(theta = 4.8, fixef = -0.3515557), #coef,
+control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
+    verbose = TRUE)
+
+```
+
+### Result
+
+- Model doesn't converge.
+- Output includes 
+  > Model is nearly unidentifiable: very large eigenvalue
+  > - Rescale variables?;Model is nearly unidentifiable: large eigenvalue ratio
+  > - Rescale variables?
+  To me this suggests we should use `song_prop` and the glmer weights function.
+  
+  
+
+### Formal Model Fits to `song_prop`
+
+
+#### Using GLM
+
+- Set `family` to "Gamma" or "Gaussian" and link = 'log'
+
+```{r}
+
+
+## Gamma has issue with 0 value, so add equivalent of 1 count to every observation (~ like a prior)
+glm_gamma <- glm((song_prop + 1/count_total_round) ~
+            1 + vpd_offset + I(vpd_offset^2), 
+            data = data_ind %>% filter( !(male %in% c("T231", "T260"))),,
+        family = "Gamma"(link = 'log')
+       )
+
+summary(glm_gamma)
+plot(glm_gamma)
+
+glm_gamma_weighted <- update(glm_gamma,  weights = 1/prop_wt)
+summary(glm_gamma_weighted)
+plot(glm_gamma_weighted)
+
+anova(glm_gamma, glm_gamma_weighted)
+
+
+## Even filtered data doesn't behave well
+glmer_gamma_filtered <- glmer(
+    (song_prop + 1/count_total_round) ~
+            vpd_offset + I(vpd_offset^2) + (vpd_offset||male),
+        data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
+        family = Gamma(link = "log"),
+        control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
+        )
+
+
+tmp <- glmer(song_prop ~
+            vpd_offset + I(vpd_offset^2) + (vpd_offset + I(vpd_offset^2)||male),
+        data = data_ind,
+        family = poisson(link = "log"),
+        weights = prop_wt,
+        control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
+        verbose = TRUE)
+
+summary(tmp)
+
+```
+
+### Result
+
+
+## Analyze with rTPC
+
+# Analyze with other packages
+
+
+According to Padfield et al. (2021)
+
+> However, [the rTPC] pipeline does not accommodate non-independent (related) replicates, and clustered or stratified sampling (possibly with missing values). In such situations, nonlinear mixed effects model fitting (e.g. using the nlme r package; Oddi et al., 2019) or Bayesian approaches (e.g. using the brms r package; Bürkner, 2017) would be more appropriate. Nevertheless, for fitting massive TPC datasets to multiple mathematical models, rTPC offers a simple, reliable and reproducible computational pipeline with robust methods for calculation of model uncertainty, requiring minimal statistical and computational expertise, and suitable for a wide range of applications.
+
+Thus, we can't incorporate random effects.
+
+
+## `stan`
+
+This is a good excuse to learn how to use `stan`
+
+## 
+
+# End
+
 ```{r}
 
 knitr::knit_exit()
 
 ```
 
+#### Using LME -- Uses `nlme` package
 
-### Stats
-    
 ```{r}
 
+fm1<-lme(song_prop ~ exp( 1 + vpd_offset + I(vpd_offset^2)),
+         data = data_ind,
+         random = ~ 1|male,
+         weights = varFixed( ~ 1/prop_wt))  ## this should specify weights = var(song_prop) 
 
-plot_glm <- plot_temp_data +
-    aes(x = temp,
-        y = song_count) +
-    stat_smooth(method = "glm",
-                method.args = list(
-                    family = quasipoisson(link = "log"),
-#                    start = coefficients(glm_temp),
-                    maxit = 100),
-                se = FALSE,
-                formula = y ~ 1 + x + I(x^2), size = 1,
-                ) +
-    labs(title = paste(substitute(x), " vs ", substitute(y)),         
-         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])"
-         )
-last_plot()
+initialize( varFixed( ~ 1/prop_wt), data_ind)
 
 
+           
+## Try filtering the data a bit more
+## Goal is to get good starting values
 
 
-pdf(file = "song_count_vs_temp_glm.pdf")
-plot_glm
-dev.off()
+glm_gaussian <- glm(song_prop ~
+            1 + vpd_offset + I(vpd_offset^2), 
+            data = data_ind,
+            weights = prop_wt,
+        family = "gaussian"(link = 'log')
+       )
+summary(glm_gaussian)
+
+## Even filtered data doesn't behave well
+fit_glmer_initial <- glmer(song_prop ~
+            vpd_offset + I(vpd_offset^2) + (vpd_offset||male),
+        data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
+        family = gaussian(link = "log"),
+        control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
+        )
+
+fit_glmer_qpoisson <- update(fig_glmer_initial, family = quasipoisson())
+
+
+tmp <- glmer(song_prop ~
+            vpd_offset + I(vpd_offset^2) + (vpd_offset + I(vpd_offset^2)||male),
+        data = data_ind,
+        family = poisson(link = "log"),
+        weights = prop_wt,
+        control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
+        verbose = TRUE)
+
+summary(tmp)
+
 ```
+
+
 
 ## GLM Mixed Effects (glmer) Model fits
 
@@ -385,8 +691,8 @@ glmer = list()
 glmer$poisson <- tmp <-
     glmer(
         song_count ~
-            (1 + temp + (temp||male) + I(temp^2)),
-        data = data,
+            (1 + temp_mean + (temp_mean||male) + I(temp_mean^2)),
+        data = data_ind,
         family = poisson(link = "log"),
         control = glmerControl(optCtrl = list(maxiter = 300)),
         verbose = TRUE)
