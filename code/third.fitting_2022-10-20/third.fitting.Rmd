@@ -591,15 +591,16 @@ glmer_gamma_filtered <- glmer(
         )
 
 
-tmp <- glmer(song_prop ~
-            vpd_offset + I(vpd_offset^2) + (vpd_offset + I(vpd_offset^2)||male),
-        data = data_ind,
-        family = poisson(link = "log"),
-        weights = prop_wt,
-        control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
-        verbose = TRUE)
-
-summary(tmp)
+## Wrong model since data is not discrete, gives 400+ pages of warnings
+#tmp <- glmer(song_prop ~
+#            vpd_offset + I(vpd_offset^2) + (vpd_offset + I(vpd_offset^2)||male),
+#        data = data_ind,
+#        family = poisson(link = "log"),
+#        weights = prop_wt,
+#        control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
+#        verbose = TRUE)
+#
+#summary(tmp)
 
 ```
 
@@ -626,7 +627,7 @@ This is a good excuse to learn how to use `stan`
 
 # End
 
-```{r}
+```{r, error = FALSE}
 
 knitr::knit_exit()
 
