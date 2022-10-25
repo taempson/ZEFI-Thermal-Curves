@@ -11,7 +11,11 @@ knitr::opts_chunk$set(
   message = TRUE, # show messages
   error = TRUE, # do not interrupt generation in case of errors,
   echo = TRUE  # show R code
-)
+  )
+
+
+if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E5, output = TRUE)
+
 ```
 # Goal
 
@@ -42,8 +46,10 @@ knitr::opts_chunk$set(
     This intercept value is essentially multiplying by a constant, so we could try and specify this value using `offset(log(count_total_round))`.
     So why doesn't this work?
 
-### Next Steps
 
+## Fourth Fitting
+
+### Preliminary Notes
 #### Which Explanatory Variable: temp, humidity, vpd?
 
 - Liz will look into operative temp
@@ -51,8 +57,53 @@ knitr::opts_chunk$set(
   - Use of 0 reference in vpd seems less arbitrary than using 0 C.
 - Note that we could scale temp_mean relative to C = 45, which is the understood thermal maximum.
   - This is what Liz wants to do since it's easier to interpret
+  
+#### Type of Model Fitted
 
-#### Including beak and mass data
+- Use `temp_mean - temp_ref` where Don't worry about random effects for now
+- Try the quadratic fit with just temperature and the 0 set at 45C. 
+  - Quadratic function – pull out the peak, the curvature at the peak, calculate the intercept at some temp – what is the intercept
+- Begin fitting rTPC models to combined dataset.
+
+### Summary of Results
+
+- Tried fitting lots of variations of `glm` and `glmer`
+- Optimizer matters in terms of convergence.
+- Adding fixed `male` term rather than treating it as RE via `(1|male)` was very important since the variation in overall male singing varies so greatly.
+- poisson fits indicate data is greatly overdispersed.
+- Got one particular form of GLMM (`glmer`) working well (i.e. when there's no covariance matrix).
+  I think this is a valid approach, but am unsure and a bit concerned since the `|` fitting shows the RE for $x1$ and $x1^2$ being close to perfectly correlated.
+- Overall results indicate taht this approach is problematic
+  - Data is extremely overdispersed in these fits.
+  - As a result, no signal beyond a `male` effect on overall activity is reliably detected.
+  
+## Future Steps
+
+### Revisit `lmList`
+
+- are the estiamtes from individual models consistent with the paramters estimated with the `|` and /or `||` models?
+  This is really only worth doing if
+  - We think we want to ultimately use the quadratic `link = "log"`  models
+  - We want to make sure we correctly understand GLMM
+
+### Analyze with rTPC
+
+
+According to Padfield et al. (2021)
+
+> However, [the rTPC] pipeline does not accommodate non-independent (related) replicates, and clustered or stratified sampling (possibly with missing values). In such situations, nonlinear mixed effects model fitting (e.g. using the nlme r package; Oddi et al., 2019) or Bayesian approaches (e.g. using the brms r package; Bürkner, 2017) would be more appropriate. Nevertheless, for fitting massive TPC datasets to multiple mathematical models, rTPC offers a simple, reliable and reproducible computational pipeline with robust methods for calculation of model uncertainty, requiring minimal statistical and computational expertise, and suitable for a wide range of applications.
+
+Thus, we can't incorporate individual or random effects.
+We could try and use all of the observations in `song_prop` to deal with the `male` term.
+
+
+
+
+### Analyze with other packages
+    
+- i.e. use `stan` and/or `brms` which uses `stan`.
+    
+### Including beak and mass data
 
 - Include beak size (surface area) as additional explanatory variable.
   We do have bird mass as well
@@ -62,15 +113,8 @@ knitr::opts_chunk$set(
   - Because larger animals produce more heat (Kleiber 1932), we scaled bill size relative to heat production by dividing bill surface area by expected daily energy consumption (mass0.658; Speakman and Kr´ol 2010, Hudson et al. 2013).
   - So, looks like we need to calculate bill surface area and then scale relative to heat production (bill surface area/mass0.658)
 
-#### Type of Model Fitted
 
-- Don't worry about random effects for now
-- Try the quadratic fit with just temperature and the 0 set at 45C. 
-  - Quadratic function – pull out the peak, the curvature at the peak, calculate the intercept at some temp – what is the intercept
-- Begin fitting rTPC models to combined dataset.
-
-
-#### Using Data from Rounds 1 and 2
+### Using Data from Rounds 1 and 2
 
 - Liz: Ask Kayci about `temp_mean` and `humidity_mean` data for rounds 1 and 2.
 - Look for order effects in round 1 and 2? 
@@ -87,12 +131,6 @@ knitr::opts_chunk$set(
 - Follow up with Ray/Juan about ground versus surface temp for operative temperature.
 - What is the 0 for operative temperature?
 - Ponder utility of other ZF data on panting.
-
-## Current Work
-
-- Add male intercept
-
-
 
 # Set up
 
@@ -384,80 +422,7 @@ plot_combine +
 
 ### Plots
     
-```{r}
-
-temp_ref = 45 ## define a reference point for quadratic fits
-
-xlab = "temp_mean - 45C"
-
-
-plot_tmp <- ggplot(data) + 
-    aes(x = (temp_mean), ## offset
-        y = song_prop) +
-#    ylim(0, 0.6) + 
-    facet_wrap("male", scales = "free_y") +
-    geom_point()
-
-plot_glm_temp <- plot_tmp +
-    stat_smooth(method = "glm",
-                method.args = list(
-                    family = quasipoisson(link = "log"),
-                    maxit = 100),
-                se = TRUE,
-                formula = y ~ 1 + x + I(x^2),
-                size = 1
-                ) +
-    labs( title = paste( ylab, " vs ", xlab, ": unweighted"), 
-         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])"
-         )
-last_plot()
-
-plot_glm_vpd_weighted <- plot_tmp + 
-    stat_smooth(method = "glm",
-                method.args = list(
-                    family = quasipoisson(link = "log"),
-                    maxit = 100),
-                    aes(weight = prop_wt),
-                se = TRUE,
-                formula = y ~ 1 + x + I(x^2), size = 1,
-                ) +
-    labs( title = TeX(paste( ylab, " vs ", xlab, ": weight ~ (count_total_round)$^2$)/(song_count + 1)") ), 
-         subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])"
-         )
-last_plot()
-
-
-xlab <- "temp_mean-45C"
-
-plot_glm_vpd_weighted_temp_max <- ggplot(data) + 
-    aes(x = (temp_mean - 45),
-        y = song_prop) +
-    facet_wrap("male", scales = "free_y") +
-    geom_point() + 
-    stat_smooth(method = "glm",
-                method.args = list(
-                    family = quasipoisson(link = "log"),
-                    maxit = 100),
-                    aes(weight = prop_wt),
-                se = TRUE,
-                formula = y ~ 1 + x + I(x^2), size = 1,
-                ) +
-    labs( title = TeX(paste( ylab, " vs ", xlab, ": weight ~ (count_total_round)$^2$/(song_count + 1)")),
-         xlab = TeX(xlab), 
-         subtitle = TeX("glm:y ~ quasipoisson($\\exp[1 + x + x^2]$)")
-         )
-last_plot()
-```
-
-#### Result
-
-- We do see a concave down curve if we naively fit a quadratic function to the log transformed data.
-- Adding `weight = (count_total_round^2)/(song_count + 1)` greatly improves fit.
-- Offsetting seems to have a minimal impact.
-
-
-    
-### Formal Model Fits to `song_count`
+## Formal Model Fits to `song_count`
 
 
 ### Initial
@@ -471,12 +436,18 @@ Using
 ```{r}
 
 
+tem_ref <- 45
+verbose <- 0
+trace <- FALSE
+
 ## Try filtering the data a bit more
 ## Goal is to get good starting values
 
 data <- data_ind %>%
     mutate(x1 = (temp_mean - temp_ref)) %>%
     filter( !(male %in% c("T231", "T260")))
+
+make_plot = FALSE;
 
 glm_poisson <- glm(song_count ~
                        1 + male + (x1) + I(x1^2), # + offset(log(count_total_round)), 
@@ -485,14 +456,17 @@ glm_poisson <- glm(song_count ~
                    )
 
 summary(glm_poisson)
-plot(glm_poisson)
+
+if(make_plot) plot(glm_poisson, ask = FALSE)
 
 glm_qpoisson <- update(glm_poisson,
                        family = quasipoisson(link = "log")
                        )
 summary(glm_qpoisson)
 
-plot(glm_qpoisson)
+if(make_plot) {
+    plot(glm_qpoisson, ask = FALSE)
+    }
 
 ## Clearly the data is over dispersed
 ## quasipoisson() doesn't seem to exist for glmer (but likely exists in nlme)
@@ -513,13 +487,14 @@ glmer_poisson <- glmer(formula_quad_RE,
                        control = glmerControl(
                            optCtrl = list(maxiter = 1E5,
                                           maxfun = 2E6,
-                                          trace = TRUE),
+                                          trace = trace),
                            optimizer="nloptwrap"),
                        family = poisson(link = "log"),
-                       verbose = 1
+                       verbose = verbose
                        )
 summary(glmer_poisson)
-plot(glmer_poisson)
+if(make_plot) plot(glmer_poisson, ask = FALSE)
+
 ## Results indicate that var in x1^2 term is very small (1E-4)
 ## So we should drop that.
 ## Except the model complains about convergence
@@ -539,12 +514,40 @@ plot(glmer_poisson)
                                         #tmp <- update(glmer_poisson, formula = formula_quad_RE <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2)||male)
 
 
+glmer_nb <- 
+    glmer.nb(formula_quad_RE,
+             data = data,
+             ## control values are used by the initial optimization
+             ## using a poisson glmer model, which doesn't converge
+             control = glmerControl(
+                 boundary.tol = 0,
+                 tolPwrss=1e-1,                 
+                 optCtrl = list(maxiter = 1E5,
+                                maxfun = 2E6,
+                                trace = trace),
+                 optimizer="nloptwrap"),
+             ## nb.control values are used by the second optimizer
+             ## Note need to set own optCtrl values
+             nb.control = list(
+                 optCtrl = list(maxit = 1000,
+                                maxfun = 2E5)),
+             verbose = verbose
+             )
+
+
 ## Try dropping the quadratic RE
 formula_linear_RE <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1| male)
-glmer_poisson_linear <- update(glmer_poisson, formula = formula_linear_RE,
-                               verbose = 1)
+rm(glmer_poisson_linear)
 
-summary(glmer_poisson_linear)
+try(glmer_poisson_linear <- update(glmer_poisson, formula = formula_linear_RE,
+                                   verbose = verbose)
+    );
+
+if(exists("glmer_poisson_linear")){
+    summary(glmer_poisson_linear);
+    if(make_plot) plot(glmer_poisson_linear, ask = FALSE)
+}
+
 ## This model fails to converge, strangely.
 
 
@@ -553,7 +556,7 @@ summary(glmer_poisson_linear)
 ## This appears to be because the variances of the RE become very small (on the order of E-11!)
 ## See B. Bolker's notes on GLMM fitting and comparisons
 ## https://bbolker.github.io/mixedmodels-misc/ecostats_chap.html#diagnostics-and-model-summaries
-glmer_nb <- 
+glmer_nb_linear <- 
     glmer.nb(formula_linear_RE,
              data = data,
              ## control values are used by the initial optimization
@@ -563,15 +566,17 @@ glmer_nb <-
                  tolPwrss=1e-1,                 
                  optCtrl = list(maxiter = 1E5,
                                 maxfun = 2E6,
-                                trace = TRUE),
+                                trace = trace),
                  optimizer="nloptwrap"),
              ## nb.control values are used by the second optimizer
              ## Note need to set own optCtrl values
              nb.control = list(
                  optCtrl = list(maxit = 1000,
                                 maxfun = 2E5)),
-             verbose = 2
+             verbose = verbose
              )
+
+rm(make_plot, formula_quad_RE, formula_linear_RE)
 
 ```
 
@@ -582,186 +587,415 @@ glmer_nb <-
   > Model is nearly unidentifiable: very large eigenvalue
   > - Rescale variables?;Model is nearly unidentifiable: large eigenvalue ratio
   > - Rescale variables?
-  To me this suggests we should use `song_prop` and the glmer weights function.
+  To me this initially suggested we should use `song_prop` and the glmer weights function.
+  However, I've made some progress in my understanding of ME models.
   
+  
+###
   
 
-#### Focus on promising models from above and don't filter data
+## Use All Round 2 Data
+
+
+
+### Create fit_db
 
 ```{r}
-
-vec_temp_ref <- c(35, 44, 45)
+vec_temp_ref <- c(27, 35, 44, 45)
 
 ## Create a tibble for holding model result
 ## filter out rows that won't get defined.
-
-
-
-       
-fit_db <- expand_grid(temp_ref = vec_temp_ref, model = c("glm", "glmer"), dist = c("poisson", "qpoisson", "nb")) %>% 
-    filter( !(model == "glm" & dist =="nb")) %>%
+      
+fit_db <- expand_grid(temp_ref = vec_temp_ref, model = c("glm", "glmer"), re = c("none", "linear", "quad", "both"), est_cov = c(TRUE, FALSE), dist = c("poisson", "qpoisson", "nb")) %>% 
+    filter( !(model == "glm" & est_cov ==TRUE)) %>%
     filter( !(model == "glmer" & dist =="qpoisson")) %>%
-    add_column(fit = list(list()) )
+    add_column(fit = list(list(NA)) )
+
+## Try to understand how to work with fit_db
+
+## Filter fit's that are NA, but doesn't work if I assign glm objects to fit[[i]]
+subset(fit_db, is.na(fit[[1]]))
+
+## Doesn't know what fit is
+select(fit_db, is.na(fit[[1]]))
+
+```
+
+### GLM Fits
+
+- Just FE
+
+### Fit Fixed Effects models
 
 
+```{r}
+
+
+### Fit Fixed Effects models
+
+est_cov <- FALSE
+verbose <- 0
+trace <- FALSE
 
 for(temp_ref in vec_temp_ref ){
+
     data <- data_ind %>%
         mutate(x1 = (temp_mean - temp_ref))
-
     print(paste("temp_ref:", temp_ref))
 
+    re <- "none"
+    
     glm_poisson <-
         glm(song_count ~ 1 + male + (x1) + I(x1^2), 
-                       data = data,
-                       family = poisson(link = "log")
-                       )
+            data = data,
+            family = poisson(link = "log")
+            )
 
     summary(glm_poisson)
-    plot(glm_poisson)
+    plot(glm_poisson, ask = FALSE)
 
-    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glm" &  fit_db$dist == "poisson", ]$fit  #<- glm_poisson
+    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glm" &  fit_db$dist == "poisson" & fit_db$re == re & est_cov == est_cov, ]$fit  <- list(glm_poisson)
     
     glm_qpoisson <- update(glm_poisson,
                            family = quasipoisson(link = "log")
                            )
     summary(glm_qpoisson)
 
-    plot(glm_qpoisson)
+    plot(glm_qpoisson, ask = FALSE)
 
-    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glm" &  fit_db$dist == "qpoisson", fit] <- glm_qpoisson
+    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glm" &  fit_db$dist == "qpoisson" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glm_qpoisson)
     
+
+    glm_qpoisson <- update(glm_poisson,
+                           family = quasipoisson(link = "log")
+                           )
+    summary(glm_qpoisson)
+    ## Note the dispersion parameter is 29.7 rather than 1!!
     ## Clearly the data is over dispersed
     ## quasipoisson() doesn't seem to exist for glmer (but likely exists in nlme)
+    plot(glm_qpoisson, ask = FALSE)
 
-    ## Try using negative binomial
+    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glm" &  fit_db$dist == "qpoisson" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glm_qpoisson)
 
-
-    ## This model formulation seems to be correct and converges!!
-    ## HOwever, it ignores the correlation between x1 and I(x1^2)
-    formula_quad_RE <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2)||male)
-
-    ## This model doesn't converge due to high correlation mentioned above.
-    formula_quad_RE <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2)|male)
-    ## Remove previous results to avoid confusion if model fails to fit
-    rm(glmer_poisson) 
-    glmer_poisson <- glmer(formula_quad_RE,
-                           data = data,
-                           control = glmerControl(
-                               optCtrl = list(maxiter = 1E5,
-                                              maxfun = 2E6,
-                                              trace = TRUE),
-                               optimizer="nloptwrap"),
-                           family = poisson(link = "log"),
-                           verbose = 1
-                           )
-    summary(glmer_poisson)
-    plot(glmer_poisson)
-
-    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glmer" &  fit_db$dist == "poisson", "fit"] <- glmer_poisson
-
-    glmer_nb <- 
-    glmer.nb(formula_linear_RE,
-             data = data,
-             ## control values are used by the initial optimization
-             ## using a poisson glmer model, which doesn't converge
-             control = glmerControl(
-                 boundary.tol = 0,
-                 tolPwrss=1e-1,                 
-                 optCtrl = list(maxiter = 1E5,
-                                maxfun = 2E6,
-                                trace = TRUE),
-                 optimizer="nloptwrap"),
-             ## nb.control values are used by the second optimizer
-             ## Note need to set own optCtrl values
-             nb.control = list(
-                 optCtrl = list(maxit = 1000,
-                                maxfun = 2E5)),
-             verbose = 2
-             )
-    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glmer" &  fit_db$dist == "nb", "fit"] <- glmer_nb
     
+    glm_nb <- glm.nb <-
+        glm(song_count ~ 1 + male + (x1) + I(x1^2), 
+            data = data
+            )
+    summary(glm_nb)
+    plot(glm_nb, ask = FALSE)
+
+    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glm" &  fit_db$dist == "nb" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glm_nb)
+    ## Dispersion parameter is 4547!
 }
 
 
-        
 ```
-### Formal Model Fits to `song_prop`
 
 
-#### Using GLM
+### Results
 
-- Set `family` to "Gamma" or "Gaussian" and link = 'log'
+- glm of `poisson` gives significant `x1` and `x1^2` terms, **but** if I adjust for overdispersion using `qpoisson` they become insignicant.
+- I see the same result, enormous CI for `x1` and `x1^2` terms, with `glm_nb`.
+- These results are the motivation for using RE.
+  That is, to deal with the heterogeneity in a more controlled manner.
+  However,  none of the `glmer_nb` model fittings work well
+  - There appears to be a negative correlation between the RE for `x1` and `x1^2`.
+  - The variance in the RE are pretty small which makes me wonder why don't the fixed effect models work well enough.
+
+## GLMM Fits 
+
+### No RE co-var:  `||` Formulation
+
+- On reflection the "both" is the only RE setting where `||` should differ from `|`
 
 ```{r}
 
+est_cov <- FALSE
+verbose <- 0
+trace <- FALSE
+optimizer <- "bobyqa" #"nloptwrap" # "bobyqa"
 
-## Gamma has issue with 0 value, so add equivalent of 1 count to every observation (~ like a prior)
-glm_gamma <- glm((song_prop + 1/count_total_round) ~
-            1 + vpd_offset + I(vpd_offset^2), 
-            data = data_ind %>% filter( !(male %in% c("T231", "T260"))),,
-        family = "Gamma"(link = 'log')
-       )
+## Fit random effects models
+for(dist in c("poisson", "nb")) {
+    for(temp_ref in c(35)) { # vec_temp_ref ){
+        for(re in c("linear", "quad", "both")) {
+            
+            switch(re,
+                   both = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2) || male)),
+                   linear = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 || male)),
+                   quad = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 + I(x1^2) ||  male))
+                   )
+            ## This model formulation seems to be correct and converges with optimizer = "bobyqa"!!
+            ## HOwever, it ignores the correlation between x1 and I(x1^2)
+            ## formula_quad_RE <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2)||male)
+            ## I'm not sure what that means 
+            if(dist == "poisson"){
+                print(paste("temp_ref =", temp_ref,"glmer_poisson", "re = ", re))
+                glmer_poisson <- glmer(formula = formula_re,
+                                       data = data,
+                                       control = glmerControl(
+                                           optCtrl = list(maxiter = 1E5,
+                                                          maxfun = 2E6,
+                                                          trace = trace),
+                                           optimizer=optimizer),
+                                       family = poisson(link = "log"),
+                                       verbose = verbose
+                                       )
 
-summary(glm_gamma)
-plot(glm_gamma)
-
-glm_gamma_weighted <- update(glm_gamma,  weights = 1/prop_wt)
-summary(glm_gamma_weighted)
-plot(glm_gamma_weighted)
-
-anova(glm_gamma, glm_gamma_weighted)
+                print(summary(glmer_poisson))
+                plot(glmer_poisson, ask=FALSE)
+                
+                fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glmer" &  fit_db$dist == "poisson" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glmer_poisson)
 
 
-## Even filtered data doesn't behave well
-glmer_gamma_filtered <- glmer(
-    (song_prop + 1/count_total_round) ~
-            vpd_offset + I(vpd_offset^2) + (vpd_offset||male),
-        data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
-        family = Gamma(link = "log"),
-        control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
-        )
+                print("evaluate overdispersion")
+                
+                glmer_qpoisson <- overdisp.glmer(glmer_poisson)
+
+            }
+
+            if(dist == "nb"){
+                print(paste("temp_ref =", temp_ref,"glmer_nb", "re = ", re))
+                try(glmer_nb <- 
+                        glmer.nb(formula = formula_re,
+                                 data = data,
+                                 ## control values are used by the initial optimization
+                                 ## using a poisson glmer model, which doesn't converge
+                                 control = glmerControl(
+                                     boundary.tol = 0,
+                                     tolPwrss=1e-1,                 
+                                     optCtrl = list(maxiter = 1E5,
+                                                    maxfun = 2E6,
+                                                    trace = trace),
+                                     optimizer = optimizer),
+                                 ## nb.control values are used by the second optimizer
+                                 ## Note need to set own optCtrl values
+                                 nb.control = list(
+                                     optCtrl = list(maxit = 1000,
+                                                    maxfun = 2E5)),
+                                 verbose = verbose
+                                 )
+                    )
+
+                plot(glmer_nb, ask = FALSE)
+                print(summary(glmer_nb))
+
+                fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glmer" &  fit_db$dist == "nb" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glmer_nb)
+            }
+        }
+    }
+}
 
 
-## Wrong model since data is not discrete, gives 400+ pages of warnings
-#tmp <- glmer(song_prop ~
-#            vpd_offset + I(vpd_offset^2) + (vpd_offset + I(vpd_offset^2)||male),
-#        data = data_ind,
-#        family = poisson(link = "log"),
-#        weights = prop_wt,
-#        control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
-#        verbose = TRUE)
-#
-#summary(tmp)
 
 ```
 
-### Result
+
+#### Results
+    
+- `glmer_poisson` and `glmer_nb` only converge under certain `re` and only when  when `optimizer = "bobyqa"`.
+- `glmer_poisson` summary
+  - `re = "linear"`: Singular/boundary fit
+  - `re = "quad"`: Fails to converge
+  - `re = "both"`: Converges, `overdisp.glmer` indicates data is greatly overdispersed.
+- `glmer_nb` summary
+  - `re = "linear"`: Singular/boundary fit
+  - `re = "quad"`: Singular/boundary fit
+  - `re = "both"`: Singular/boundary fit
+- It's note worthy that `glmer_nb` gives a singular value for the variance (i.e. effectively 0) for `x1` using `optimizer = "bobyqa"`, but gives the variance (i.e. effectively 0) for `x1^2` using `optimizer = "nloptwrap"`.
+  This seems consistent with them being highly correlated as suggested in the `||` fittings.
+- The `x1^2` term is often (always?) non-significant in the `nb` models
 
 
-## Analyze with rTPC
+### `|` Formulation
 
-# Analyze with other packages
+```{r}
 
-
-According to Padfield et al. (2021)
-
-> However, [the rTPC] pipeline does not accommodate non-independent (related) replicates, and clustered or stratified sampling (possibly with missing values). In such situations, nonlinear mixed effects model fitting (e.g. using the nlme r package; Oddi et al., 2019) or Bayesian approaches (e.g. using the brms r package; Bürkner, 2017) would be more appropriate. Nevertheless, for fitting massive TPC datasets to multiple mathematical models, rTPC offers a simple, reliable and reproducible computational pipeline with robust methods for calculation of model uncertainty, requiring minimal statistical and computational expertise, and suitable for a wide range of applications.
-
-Thus, we can't incorporate random effects.
+est_cov <- TRUE
+verbose <- 0
+trace <- FALSE
+optimizer <- "bobyqa" #"nloptwrap" # "bobyqa"
 
 
-## `stan`
+## Fit random effects models
+for(dist in c("poisson", "nb")) {
+    for(temp_ref in c(35)) { # vec_temp_ref ){
+        for(re in c("linear", "quad", "both")) {
+            
+            switch(re,
+                   both = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2) | male)),
+                   linear = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 | male)),
+                   quad = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 + I(x1^2) |  male))
+                   )
 
-This is a good excuse to learn how to use `stan`
+            if(dist == "poisson"){
+                print(paste("temp_ref =", temp_ref,"glmer_poisson", "re = ", re))
+                glmer_poisson <- glmer(formula = formula_re,
+                                       data = data,
+                                       control = glmerControl(
+                                           optCtrl = list(maxiter = 1E5,
+                                                          maxfun = 2E6,
+                                                          trace = trace),
+                                           optimizer=optimizer),
+                                       family = poisson(link = "log"),
+                                       verbose = verbose
+                                       )
 
-## 
+                print(summary(glmer_poisson))
+                plot(glmer_poisson, ask=FALSE)
+                
+                fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glmer" &  fit_db$dist == "poisson" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glmer_poisson)
 
+
+                print("evaluate overdispersion")
+                
+                glmer_qpoisson <- overdisp.glmer(glmer_poisson)
+
+            }
+
+            if(dist == "nb"){
+                print(paste("temp_ref =", temp_ref,"glmer_nb", "re = ", re))
+                try(glmer_nb <- 
+                        glmer.nb(formula = formula_re,
+                                 data = data,
+                                 ## control values are used by the initial optimization
+                                 ## using a poisson glmer model, which doesn't converge
+                                 control = glmerControl(
+                                     boundary.tol = 0,
+                                     tolPwrss=1e-1,                 
+                                     optCtrl = list(maxiter = 1E5,
+                                                    maxfun = 2E6,
+                                                    trace = trace),
+                                     optimizer = optimizer),
+                                 ## nb.control values are used by the second optimizer
+                                 ## Note need to set own optCtrl values
+                                 nb.control = list(
+                                     optCtrl = list(maxit = 1000,
+                                                    maxfun = 2E5)),
+                                 verbose = verbose
+                                 )
+                    )
+
+                plot(glmer_nb, ask = FALSE)
+                print(summary(glmer_nb))
+
+                fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glmer" &  fit_db$dist == "nb" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glmer_nb)
+            }
+        }
+    }
+}
+
+```
+
+#### Results 
+
+- Changing `temp_ref` alters the linear term, as expected, but has little impact on the overall model fit.
+- fixed effects qpoisson and nb indicates data is highly over dispersed
+- poisson and nb RE models do not converge
+  - With RE for both `x1` and `x1^2` we get failure to converge and the correlation between these two RE is 1 (this means there's really, at best, one RE|male rather than two).
+  - With single RE we get return `boundary(singular)` error because the var of teh RE is essentially zero.
+  This indicates the model is too complex given the data
+
+Basically, I don't think this avenue is fruitful, but I do need to understand how the covariance matrix is used in these models
+    - What is the difference between the `|` and `||` models?
+    - I believe the `|` is a correlated random effects approach
+    - Houseman test is used for comparing FE and RE
+    - Does one of these assume the random effects themselves vary between trials for the same male as some refernces suggest, i.e. the RE for `x1` for male `z` varies between replicates? Trials?
+    - Seems like we could compare a `lmList` result with the `glmer`
+    
+## Additional Fixed Effects fits
+
+### Fit Fixed Effects models
+
+```{r}
+
+est_cov <- FALSE
+verbose <- 0
+trace <- FALSE
+
+#for(temp_ref in vec_temp_ref ){
+temp_ref <- 35
+
+    data <- data_ind %>%
+        mutate(x1 = (temp_mean - temp_ref))
+    print(paste("temp_ref:", temp_ref))
+
+    re <- "none"
+    
+    glm_poisson <-
+        glm(song_count ~ 1 + male + x1/male + I(x1^2)/male, 
+            data = data,
+            family = poisson(link = "log")
+            )
+
+    summary(glm_poisson)
+    plot(glm_poisson, ask = FALSE)
+
+    glm_qpoisson <- update(glm_poisson,
+                           family = quasipoisson(link = "log")
+                           )
+    summary(glm_qpoisson)
+
+    ## Note the dispersion parameter is 29.7 rather than 1!!
+    ## Clearly the data is over dispersed
+    ## quasipoisson() doesn't seem to exist for glmer (but likely exists in nlme)
+    plot(glm_qpoisson, ask = FALSE)
+
+    
+    glm_nb <- glm.nb <-
+        glm(song_count ~ 1 + male + (x1/male) + I(x1^2)/male, 
+            data = data
+            )
+    summary(glm_nb)
+    plot(glm_nb, ask = FALSE)
+
+    ## Dispersion parameter is 4547!
+}
+
+
+```
+
+### Results
+
+- `poisson` model does give significant effects, but `qpoisson` indicates data is overdispersed.
+  When overdisperion is taken into account, significance disappears.
+  - This occurs even if you're only using `/male` on one of the `x1` terms.
+  
 # End
 
 ```{r, error = FALSE}
 
 knitr::knit_exit()
+
+```
+
+```{r}
+
+temp_ref = 35
+
+
+data <- data_ind %>%
+    mutate(x1 = (temp_mean - temp_ref))
+
+glm_poisson <-
+    glm(song_count ~ x1*male + I(x1^2),
+        data = data,
+        family = poisson(link = "log")
+        )
+
+
+## This results seems to suggest there are a few 'outliers' that likely cause problesm when fitting the model (i.e. birds with very high linear terms
+summary(glm_poisson)
+plot(glm_poisson, ask = FALSE)
+
+
+glm_qpoisson <- update(glm_poisson,
+                           family = quasipoisson(link = "log")
+                       )
+
+summary(glm_qpoisson)
+plot(glm_qpoisson, ask = FALSE)
 
 ```
 
@@ -807,7 +1041,7 @@ tmp <- glmer(song_prop ~
         family = poisson(link = "log"),
         weights = prop_wt,
         control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
-        verbose = TRUE)
+        verbose = verbose)
 
 summary(tmp)
 
@@ -828,7 +1062,7 @@ glmer$poisson <- tmp <-
         data = data_ind,
         family = poisson(link = "log"),
         control = glmerControl(optCtrl = list(maxiter = 300)),
-        verbose = TRUE)
+        verbose = verbose)
 
 ## Still a lot of overdispersion
 glmer$od <- overdisp.glmer(glmer$poisson)
@@ -1039,7 +1273,7 @@ glmer$nb_1 <- glmer.nb(
     data = data_r3,
     family = poisson(link = "log"),
     control = glmerControl(optCtrl = list(maxiter = 300)),
-    verbose = TRUE)
+    verbose = verbose)
 
 
 glmer$nb_2 <- update(glmer$nb_1, formula =  song_count ~ 1 + temp_target + I(temp_target^2) + ((1 + temp_target + I(temp_target^2))|male) )
