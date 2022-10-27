@@ -48,6 +48,9 @@ We could try and use all of the observations in `song_prop` to deal with the `ma
 
 Yes.
     
+- Can't use `rTPC` functions directly (e.g. `lactin2_1995`) in `brm()` calls since that uses `stan` rather than `R` functions.
+- Having issues fitting models, should consider using ouptut from glm fits.
+
 
 ## Data and Explanatory Variables
 
@@ -309,17 +312,38 @@ nlform <- bf(song_count ~ rmax*exp(-0.5*(fabs(temp_mean - topt)/a)^b), #modified
              b ~1,
              nl = TRUE)
 
-#nlprior <- c(prior(Gamma(shape = 10, scale = 10 ), nlpar = "rmax"),
-#          prior(normal(35, 100), nlpar = "topt"),
-#          prior(Gamma(shape = 1, scale = 100), nlpar = "a"),
-#          prior(normal(0, 5), nlpar = "b"))
-        
-nlprior <- c(prior(normal(200, 100 ), nlpar = "rmax"),
-          prior(normal(35, 100), nlpar = "topt"),
-          prior(normal( 1, 100), nlpar = "a"),
-          prior(normal(0, 5), nlpar = "b"))          
+switch(1,
+{
+    ## gamma(alpha, beta) 
+    nlprior <- c(prior(gamma(1., 0.005), nlpar = "rmax", lb = 0),
+                 prior(normal(35, 10.), nlpar = "topt", lb = 0),
+                 prior(gamma(1., 0.01), nlpar = "a", lb = 0),
+                 prior(normal(0, 5), nlpar = "b", lb = 0))},
+{
+    nlprior <- c(prior(uniform(10, 1000 ), nlpar = "rmax"),
+                 prior(uniform(30, 45), nlpar = "topt"),
+                 prior(uniform(0, 100), nlpar = "a"),
+                 prior(uniform(0, 5), nlpar = "b"))}
+)
 
-fit_mgauss1 <- brm(formula = nlform,
+
+fit_mgauss_poisson1 <- brm(formula = nlform,
+                   data = data,
+                   family = poisson(link = "identity"),
+                   prior = nlprior,
+                   cores = 1,
+                   iter = 10000,
+                   verbose = TRUE)
+
+
+model_mgauss_nb1 <- make_stancode(formula = nlform,
+                   data = data,
+                   family = negbinomial(link = "identity", link_shape = "identity"),
+                   prior = nlprior,
+                   save = "mgauss.stan")
+
+
+fit_mgauss_nb1 <- brm(formula = nlform,
                    data = data,
                    family = negbinomial(link = "identity", link_shape = "identity"),
                    prior = nlprior,
