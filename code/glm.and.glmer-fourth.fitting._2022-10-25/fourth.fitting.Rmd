@@ -436,7 +436,7 @@ Using
 ```{r}
 
 
-tem_ref <- 45
+temp_ref <- 45
 verbose <- 0
 trace <- FALSE
 
