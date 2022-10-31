@@ -1,5 +1,5 @@
 ---
-title: "Third Fitting of Thermal Models"
+title: "Fifth Fitting of Thermal Models"
 author: "Michael Gilchrist"
 date: "date: 2022-10-20"
 output: pdf_document
@@ -40,8 +40,22 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E5, ou
        - not using `male` with `song_prop` is a less precise accommodation with no cost in terms of df.
          It also allows us to use rTPC models (we think)
          
+## Resources
+
+### Poisson Regression and its extensions
+
+- Provides some clear examples of R code
+  - https://stats.oarc.ucla.edu/r/dae/negative-binomial-regression/
+  
+- Gives important details on variance terms
+  - file://Rodriguez_2022_models.for.count.data.with.over.dispersion_Lecture.Notes.pdf
+  
+
+
 ## Recap
 
+- Using a Gamma model for the error converges, but I don't think it's the appropriate model, it assumes var ~ x^2
+  See: 
 ## First and Second Fitting
 
 - Temp is hard to control in chambers, so we should work with `temp_mean` (mean value during trial), not `temp_target`.
@@ -106,6 +120,7 @@ library(broom)
 library(tidyverse)
 require(ggplot2)
 require(ggpubr)
+library(gridExtra)
 require(viridisLite)
 
 #options(ggplot2.continuous.colour="viridis",
@@ -176,9 +191,14 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     mutate(song_count_plus_1 = (song_count + 1)) %>%
     mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
     mutate(temp_target = as.numeric(temp_target)) %>%
+    ## Create generic 'temp' column which is either
+    ## temp_mean, if it exists, or temp_target, if it doesn't
+    mutate(temp = if_else(is.na(temp_mean),
+                          temp_target,
+                          temp_mean)) %>%
     ## Add column with total song_count for a given round
     group_by(male, round ) %>%
-    mutate(count_total_round = sum(song_count) ) %>%
+    mutate(count_total_round = sum(song_count)) %>%
     ungroup() %>%
     mutate(song_prop = song_count/count_total_round) %>%
     ## assuming poisson error
@@ -210,12 +230,51 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
 ```{r}
 
 data_ind <- data_full %>%
-    filter(round==3) %>%
-    filter(count_total_round >=150)
+    filter(round %in% c(2,3)) %>%
+    filter(count_total_round >= 1) %>%
+    mutate()
+
 ## copy data frame and assign `male =  "combined")
 data_comb <- data_ind %>% mutate(male = "combined")
 
 data <- bind_rows(data_ind, data_comb)
+
+
+count_total_round_2_and_3  <- data_ind %>%
+    select(c(male, count_total_round, round)) %>%
+    unique() %>%
+    pivot_wider(names_from = "round", values_from = "count_total_round")%>%
+    select(male, `2`, `3`) %>%
+    print(n=100)
+
+
+song_count_round_2  <- data_ind %>%
+    filter(round == 2) %>%
+    select(c(male, song_count)) %>%
+    group_by(male) %>% 
+    mutate(mean = mean(song_count), sd = sd(song_count), var = var(song_count)) %>%
+    unique()
+
+dev.new()
+## par() doesn't work for grobs
+par(mfrow = c(2, 2))
+
+g1 <- ggplot(song_count_round_2) +
+    aes(x=song_count,
+        color = male,
+        fill = male) + 
+    geom_histogram() +
+    labs(title = "")
+
+g2 <- ggplot(song_count_round_2 %>% select(-song_count)) +
+    aes(x=mean, y = sd,
+        color = male) +
+    geom_point() +
+    geom_smooth(method='lm', formula= y~x) +
+    labs(title = "Mean vs. sd for Round 2: temp_target = 40")
+
+grid.arrange(g1, g2, ncol=2)
+
 
 xlab <- "Temperature"
 ylab <- "song_count"
@@ -229,6 +288,8 @@ plot_temp_data <-
 labs( title = paste( ylab, " vs ", xlab))
 last_plot()
 
+
+pivot_wider(data_ind, names_from = "round", values_from = "count_total_round") %>% select(male, `2`, `3`) %>% filter(!is.na(`3`)) %>% unique()
 
 ```
 
@@ -252,33 +313,56 @@ trace <- FALSE
 
 data <- data_ind %>%
     mutate(x1 = (temp_mean - temp_ref)) %>%
+    filter(count_total_round >= 1) %>%
+    mutate()
 #    filter( !(male %in% c("T231", "T260"))) %>% 
     mutate()
 
-make_plot = FALSE;
+make_plot = TRUE;
 
 glm_poisson <- glm(song_count ~
-                       1 + (x1) + I(x1^2) + offset(-log(count_total_round)), 
+                       (1 + male + (x1) + I(x1^2)), # + offset(-log(count_total_round)), 
                    data = data,
                    family = poisson(link = "log")
                    )
 
 summary(glm_poisson)
 
-if(make_plot) plot(glm_poisson, ask = FALSE)
+## Note that using qpoisson doesn't affect MLE
+male_coef <-  coef(glm_poisson) %>% keep(str_detect(names(.), 'male'))
+
+hist(male_coef, breaks = 30)
+
+
+if(make_plot){
+    ifelse(length(dev.list()) < 3, dev.new(), dev.next())
+    par(mfrow = c(2, 2))
+    plot(glm_poisson, ask = FALSE)
+    page_label <- "glm with poisson error"
+    mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
+}
 
 glm_qpoisson <- update(glm_poisson,
                        family = quasipoisson(link = "log")
                        )
 summary(glm_qpoisson)
 
-ggplot(data, aes(temp_mean, song_count ))
+if(make_plot){
+    ifelse(length(dev.list()) < 3, dev.new(), dev.next())
+    par(mfrow = c(2, 2))
+    plot(glm_poisson, ask = FALSE)
+    page_label <- "glm with poisson error"
+    mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
+
+    dev.new()
+    ggplot(data, aes(temp_mean, song_count))
+    }
 ```
 
 ### Result
 
 - Overdispersion of data makes parameters non-significant
-- Not sure how a `song_prop` approach will solve this issue.
+- Don't how a `song_prop` approach will solve this issue.
   
 
 ## Formal Model Fits to `song_prop`
@@ -303,7 +387,7 @@ data <- data_ind %>%
 #    filter( !(male %in% c("T231", "T260"))) %>% 
     mutate()
 
-make_plot = FALSE;
+make_plot = TRUE;
 
 ## Gamma has issue with 0 value, so add equivalent of 1 count to every observation (~ like a prior)
 glm_gamma <- glm((song_prop + 1/count_total_round) ~
