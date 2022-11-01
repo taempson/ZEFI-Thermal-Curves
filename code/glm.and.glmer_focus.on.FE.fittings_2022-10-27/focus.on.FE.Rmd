@@ -225,7 +225,7 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
 
 # Examine Data  
 
-## Create & Plot Filtered Data
+## Create Working Dataset
 
 ```{r}
 
@@ -239,25 +239,19 @@ data_comb <- data_ind %>% mutate(male = "combined")
 
 data <- bind_rows(data_ind, data_comb)
 
+```
 
-count_total_round_2_and_3  <- data_ind %>%
-    select(c(male, count_total_round, round)) %>%
-    unique() %>%
-    pivot_wider(names_from = "round", values_from = "count_total_round")%>%
-    select(male, `2`, `3`) %>%
-    print(n=100)
+## Examine How Var(Mean)
 
+```{r}
 
 song_count_round_2  <- data_ind %>%
     filter(round == 2) %>%
     select(c(male, song_count)) %>%
     group_by(male) %>% 
     mutate(mean = mean(song_count), sd = sd(song_count), var = var(song_count)) %>%
+    ungroup() %>%
     unique()
-
-dev.new()
-## par() doesn't work for grobs
-par(mfrow = c(2, 2))
 
 g1 <- ggplot(song_count_round_2) +
     aes(x=song_count,
@@ -267,13 +261,52 @@ g1 <- ggplot(song_count_round_2) +
     labs(title = "")
 
 g2 <- ggplot(song_count_round_2 %>% select(-song_count)) +
-    aes(x=mean, y = sd,
-        color = male) +
-    geom_point() +
+    aes(x=mean, y = sd) + 
+    geom_point(aes(color = male)) +
     geom_smooth(method='lm', formula= y~x) +
     labs(title = "Mean vs. sd for Round 2: temp_target = 40")
 
-grid.arrange(g1, g2, ncol=2)
+g3 <- ggplot(song_count_round_2 %>% select(-song_count)) +
+    aes(x=mean, y = var) +
+    geom_point(aes(color = male)) +
+    geom_smooth(method='lm', formula= y~x) +
+    labs(title = "Mean vs. Var for Round 2: temp_target = 40",
+         subtitle = "log(var) ~ log(mean)") + 
+    scale_x_log10() +
+    scale_y_log10()
+    
+ggcoefstats(
+    
+g4 <- ggplot(song_count_round_2 %>% select(-song_count)) +
+    aes(x=mean, y = var) +
+    geom_point(aes(color = male)) +
+    geom_smooth(method='glm', formula= y~-1 + x+I(x^2)) +
+    labs(title = "Mean vs. Var for Round 2: temp_target = 40",
+subtitle = "var ~ mean + mean^2")
+#    scale_x_log10() +
+#    scale_y_log10()
+
+grid.arrange(g1, g2, g3, g4, ncol=2)
+
+
+```
+
+## Compare Rounds 2 and 3
+
+```{r}
+
+count_total_round_2_and_3  <- data_ind %>%
+    select(c(male, count_total_round, round)) %>%
+    unique() %>%
+    pivot_wider(names_from = "round", values_from = "count_total_round")%>%
+    select(male, `2`, `3`) %>%
+    print(n=100)
+
+```
+
+## Rounds 2 and 3 vs Temp
+
+```{r}
 
 
 xlab <- "Temperature"
