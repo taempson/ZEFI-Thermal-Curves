@@ -118,23 +118,25 @@ library(rTPC)  ##
 library(nls.multstart)
 library(broom)
 library(tidyverse)
-require(ggplot2)
-require(ggpubr)
+library(ggplot2)
+library(ggpubr)
 library(gridExtra)
-require(viridisLite)
+library(viridisLite)
 
 #options(ggplot2.continuous.colour="viridis",
 #        ggplot2.discrete.colour="viridis",
 #        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
 #        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
 
-require(GGally)
-require(reshape2)
-require(lme4)
-require(RVAideMemoire) # provides overdisp.glmer()
-require(humidity) ## provides VPD
-require(weathermetrics)
-require(latex2exp)
+library(GGally)
+library(reshape2)
+library(lme4)
+library(rsample) ## provides bootstraps()
+
+library(RVAideMemoire) # provides overdisp.glmer()
+library(humidity) ## provides VPD
+library(weathermetrics)
+library(latex2exp)
 
 ```
 
@@ -197,7 +199,7 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
                           temp_target,
                           temp_mean)) %>%
     ## Add column with total song_count for a given round
-    group_by(male, round ) %>%
+    group_by(male, round) %>%
     mutate(count_total_round = sum(song_count)) %>%
     ungroup() %>%
     mutate(song_prop = song_count/count_total_round) %>%
@@ -241,7 +243,7 @@ data <- bind_rows(data_ind, data_comb)
 
 ```
 
-## Examine How Var(Mean)
+## Examine How Var(Mean) using `round = 2`
 
 ```{r}
 
@@ -253,6 +255,33 @@ song_count_round_2  <- data_ind %>%
     ungroup() %>%
     unique()
 
+## Bootstrap data to get SE of var and mean
+bs_data <- song_count_round_2 %>%
+select(male, song_count) %>%
+    bootstraps(times=100, strata = male)
+
+bs_moments <- map_dfr(
+  bs_data$splits,
+  function(x) {
+    dat <- as.data.frame(x) %>% group_by(male) %>%
+    summarize(mean = mean(song_count), var = var(song_count), sd = sd(song_count))
+  }, .id = "sample")
+
+bs_ci <- bs_moments %>%
+    group_by(male) %>%
+    summarize(mean_low = quantile(mean, 0.025),
+              mean_high = quantile(mean, 0.975),
+              sd_low = quantile(sd, 0.025),
+              sd_high = quantile(sd, 0.975),
+              var_low = quantile(var, 0.025),
+              var_high = quantile(var, 0.975)
+              )
+
+##Clearly we have very little confidence in our moment estimators
+
+song_count_stats <- full_join(song_count_round_2 %>% select(-song_count) %>% unique(), bs_ci, by = "male")
+
+
 g1 <- ggplot(song_count_round_2) +
     aes(x=song_count,
         color = male,
@@ -260,29 +289,35 @@ g1 <- ggplot(song_count_round_2) +
     geom_histogram() +
     labs(title = "")
 
-g2 <- ggplot(song_count_round_2 %>% select(-song_count)) +
+g2 <- ggplot(song_count_stats) +
     aes(x=mean, y = sd) + 
     geom_point(aes(color = male)) +
     geom_smooth(method='lm', formula= y~x) +
+    geom_errorbar(aes(ymin = sd_low, ymax = sd_high)) +
+    geom_errorbarh(aes(xmin = mean_low, xmax = mean_high)) +
     labs(title = "Mean vs. sd for Round 2: temp_target = 40")
 
-g3 <- ggplot(song_count_round_2 %>% select(-song_count)) +
+g3 <- ggplot(song_count_stats) +
     aes(x=mean, y = var) +
     geom_point(aes(color = male)) +
     geom_smooth(method='lm', formula= y~x) +
+##    geom_errorbar(aes(ymin = var_low, ymax = var_high)) +
+##    geom_errorbarh(aes(xmin = mean_low, xmax = mean_high)) +
     labs(title = "Mean vs. Var for Round 2: temp_target = 40",
          subtitle = "log(var) ~ log(mean)") + 
     scale_x_log10() +
     scale_y_log10()
     
-ggcoefstats(
+#ggcoefstats(
     
-g4 <- ggplot(song_count_round_2 %>% select(-song_count)) +
+g4 <- ggplot(song_count_stats) +
     aes(x=mean, y = var) +
     geom_point(aes(color = male)) +
     geom_smooth(method='glm', formula= y~-1 + x+I(x^2)) +
+    geom_errorbar(aes(ymin = var_low, ymax = var_high)) +
+    geom_errorbarh(aes(xmin = mean_low, xmax = mean_high)) +
     labs(title = "Mean vs. Var for Round 2: temp_target = 40",
-subtitle = "var ~ mean + mean^2")
+         subtitle = "var ~ mean + mean^2")
 #    scale_x_log10() +
 #    scale_y_log10()
 
