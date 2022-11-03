@@ -349,7 +349,7 @@ ylab <- "song_count"
 
 plot_temp_data <-
     ggplot(data) + 
-    aes(x = temp_mean,
+    aes(x = temp,
         y = song_count) +
     facet_wrap("male", scales = "free_y") +
     geom_point() +
@@ -367,7 +367,7 @@ pivot_wider(data_ind, names_from = "round", values_from = "count_total_round") %
 
 Using
 
-- `x = temp_mean -45C`
+- `x = temp -45C`
 - use `offset(log(count_total_round))` instead of `male` as a factor
 
 ```{r}
@@ -380,51 +380,102 @@ trace <- FALSE
 ## Goal is to get good starting values
 
 data <- data_ind %>%
-    mutate(x1 = (temp_mean - temp_ref)) %>%
-    filter(count_total_round >= 1) %>%
-    mutate()
+    mutate(x1 = (temp - temp_ref)) %>%
+    filter(
+    (round == 3 & count_total_round >= 400) |
+    (round == 2 & count_total_round > 30)
+    ) %>%
+    mutate() %>%
 #    filter( !(male %in% c("T231", "T260"))) %>% 
     mutate()
 
 make_plot = TRUE;
 
-glm_poisson <- glm(song_count ~
-                       (1 + male + (x1) + I(x1^2)), # + offset(-log(count_total_round)), 
+glm_poisson_1 <- glm(song_count ~
+                       (1 + male  +  (x1) + I(x1^2)),
                    data = data,
                    family = poisson(link = "log")
                    )
 
-summary(glm_poisson)
+summary(glm_poisson_1)
 
-## Note that using qpoisson doesn't affect MLE
-male_coef <-  coef(glm_poisson) %>% keep(str_detect(names(.), 'male'))
+## Add round effect
+glm_poisson_2 <- glm(song_count ~
+                       (1 + male + round +  (x1) + I(x1^2)),
+                   data = data,
+                   family = poisson(link = "log")
+                   )
+## Results support round effect
+summary(glm_poisson_2)
+
+male_coef <-  coef(glm_poisson_2) %>% keep(str_detect(names(.), 'male'))
 
 hist(male_coef, breaks = 30)
 
+## Remove male effect
+glm_poisson_3 <- glm(song_count ~
+                       (1 + round +  (x1) + I(x1^2)),
+                   data = data,
+                   family = poisson(link = "log")
+                   )
+## Note that using qpoisson doesn't affect MLE
+
+summary(glm_poisson_3)
 
 if(make_plot){
-    ifelse(length(dev.list()) < 3, dev.new(), dev.next())
+    ifelse(length(dev.list()) < 3, {dev.new(); dev.next()}, dev.next())
     par(mfrow = c(2, 2))
-    plot(glm_poisson, ask = FALSE)
+    plot(glm_poisson_2, ask = FALSE)
     page_label <- "glm with poisson error"
     mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
 }
 
-glm_qpoisson <- update(glm_poisson,
+glm_qpoisson_1 <- update(glm_poisson_1,
                        family = quasipoisson(link = "log")
                        )
-summary(glm_qpoisson)
+summary(glm_qpoisson_1)
 
 if(make_plot){
     ifelse(length(dev.list()) < 3, dev.new(), dev.next())
     par(mfrow = c(2, 2))
-    plot(glm_poisson, ask = FALSE)
+    plot(glm_qpoisson_1, ask = FALSE)
     page_label <- "glm with poisson error"
     mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
+##    dev.new()
+##    ggplot(data, aes(temp, song_count))
+}
 
-    dev.new()
-    ggplot(data, aes(temp_mean, song_count))
-    }
+glm_qpoisson_2 <- update(glm_poisson_2,
+                       family = quasipoisson(link = "log")
+                       )
+summary(glm_qpoisson_2)
+
+if(make_plot){
+    ifelse(length(dev.list()) < 3, dev.new(), dev.next())
+    par(mfrow = c(2, 2))
+    plot(glm_qpoisson_2, ask = FALSE)
+    page_label <- "glm with poisson error"
+    mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
+##    dev.new()
+##    ggplot(data, aes(temp, song_count))
+}
+
+
+glm_qpoisson_3 <- update(glm_poisson_3,
+                       family = quasipoisson(link = "log")
+                       )
+summary(glm_qpoisson_3)
+
+if(make_plot){
+    ifelse(length(dev.list()) < 3, dev.new(), dev.next())
+    par(mfrow = c(2, 2))
+    plot(glm_qpoisson_3, ask = FALSE)
+    page_label <- "glm with poisson error"
+    mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
+##    dev.new()
+##    ggplot(data, aes(temp, song_count))
+}
+
 ```
 
 ### Result
@@ -433,60 +484,3 @@ if(make_plot){
 - Don't how a `song_prop` approach will solve this issue.
   
 
-## Formal Model Fits to `song_prop`
-
-
-Using
-
-- `x = temp_mean -45C`
-- Most of teh code is taken from `third.fitting.Rmd`
-
-```{r}
-
-temp_ref <- 45
-verbose <- 0
-trace <- FALSE
-
-## Try filtering the data a bit more
-## Goal is to get good starting values
-
-data <- data_ind %>%
-    mutate(x1 = (temp_mean - temp_ref)) %>%
-#    filter( !(male %in% c("T231", "T260"))) %>% 
-    mutate()
-
-make_plot = TRUE;
-
-## Gamma has issue with 0 value, so add equivalent of 1 count to every observation (~ like a prior)
-glm_gamma <- glm((song_prop + 1/count_total_round) ~
-            1 + x1 + I(x1^2), 
-            data = data,
-        family = "Gamma"(link = 'log')
-       )
-
-summary(glm_gamma)
-
-ifelse(length(dev.list()) < 3, dev.new(), dev.next())
-par(mfrow = c(2, 2))
-plot(glm_gamma)
-page_label <- "glm with gamma error: unweighted"
-mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
-
-## From help(glm)
-## Non-NULL ‘weights’ can be used to indicate that different
-## observations have different dispersions (with the values in
-## ‘weights’ being inversely proportional to the dispersions)
-## prop_wt  = sum_x/sd(x) = count_total_round/sqrt(song_count + 1)
-glm_gamma_weighted <- update(glm_gamma,  weights = prop_wt)
-summary(glm_gamma_weighted)
-ifelse(length(dev.list()) < 3, dev.new(), dev.next())
-par(mfrow = c(2, 2))
-plot(glm_gamma_weighted)
-page_label <- "glm with gamma error: weights ~ 1/prop_wt"
-mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
-
-
-anova(glm_gamma, glm_gamma_weighted)
-
-
-```
