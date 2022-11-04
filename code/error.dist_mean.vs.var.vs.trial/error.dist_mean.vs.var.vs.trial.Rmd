@@ -10,7 +10,8 @@ knitr::opts_chunk$set(
   warning = TRUE, # show warnings
   message = TRUE, # show messages
   error = TRUE, # do not interrupt generation in case of errors,
-  echo = TRUE  # show R code
+  echo = TRUE#,  # show R code
+##  results="asis" # Hopefully print summary() in for loops
   )
 
 
@@ -50,6 +51,8 @@ library(viridisLite)
 library(GGally)
 library(reshape2)
 library(lme4)
+library(nlme)
+library(gnm)
 library(rsample) ## provides bootstraps()
 
 library(RVAideMemoire) # provides overdisp.glmer()
@@ -57,8 +60,36 @@ library(humidity) ## provides VPD
 library(weathermetrics)
 library(latex2exp)
 
-## Get stat_smooth_function
-source_gist("524eade46135f6348140")
+```
+## Local Functions
+
+```{r}
+
+kprint <- function(input, ...) {
+    print(knitr::kable(input, ...))
+cat('\n\n<!-- -->\n\n')
+}
+```
+
+## Plotting settings
+
+```{r}
+
+## From: https://data-se.netlify.app/2018/12/12/changing-the-default-color-scheme-in-ggplot2/
+
+theme_set(theme_minimal(base_size = 9))
+theme_update(
+    plot.title = element_text(size = rel(1.1)),
+    plot.subtitle = element_text(size = rel(1)))
+
+if(!exists("old_opts")) old_opts <- options()  # save old options
+
+options(ggplot2.continuous.colour="viridis")
+options(ggplot2.continuous.fill = "viridis")
+options(ggplot2.discrete.colour="viridis")
+options(ggplot2.discrete.fill = "viridis")
+
+
 ```
 
 ## Load Data
@@ -71,6 +102,9 @@ source_gist("524eade46135f6348140")
 
 ## Repeatability was done between round 1 and 2, female was present, but only one temp. so treating as `round = 2` and redefining `round = 2` as `round = 3`
 
+output_dir <- "output"
+
+if(!dir.exists(output_dir)) dir.create(output_dir)
 git_root <- system("git rev-parse --show-toplevel", intern = TRUE)
 
 data_raw = list()
@@ -166,7 +200,7 @@ data <- bind_rows(data_ind, data_comb)
 
 ```
 
-## Examine How Var and Mean change with Trial using `temp_target = 40`
+## Examine How Var varies with Mean `temp_target = 40`
 
 ```{r}
 
@@ -179,14 +213,21 @@ dim(data_40)
 stats_40 <- data_40 %>%
     group_by(male) %>%
     summarize(mean = mean(song_count), var = var(song_count, na.rm = TRUE), count = length(song_count)) %>% mutate(round = 0)
+
+print("We have 15 males, 5 of which we only have 1 observation at 40C")
 stats_40
 
 var_threshold <- 7500
+mean_threshold <- 40
 
 male_high_var <- stats_40 %>% filter(var > var_threshold) %>% pull(male)
 data_male_high_var <- data_40 %>% filter(male %in% male_high_var)
 
-ggplot(data_male_high_var) +
+male_low_mean <- stats_40 %>% filter(mean < mean_threshold) %>% pull(male)
+data_male_low_mean <- data_40 %>% filter(male %in% male_low_mean)
+
+
+g0 <- ggplot(data_male_high_var) +
     aes(x=song_count,
         color = male,
         fill = male) + 
@@ -196,72 +237,278 @@ ggplot(data_male_high_var) +
 
 ## We have 5 birds that have only 1 observation.
 
-song_stats <- filter(raw_stats_40, !is.na(var))
+song_stats <- filter(stats_40, !is.na(var))
 song_stats
 
-
 for(filter_high_var in c(FALSE, TRUE)){
+    for(filter_low_mean in c(FALSE, TRUE)){
 
-    data_tmp <- data_40
-    song_stats_tmp <- song_stats
-    
-    if(filter_high_var){
-        data_tmp <- filter(data_tmp, !(male %in% male_high_var) )
-        song_stats_tmp <- filter(song_stats_tmp, !(male %in% male_high_var) )
+        print(paste0("Mean vs Var; filter high var: ", filter_high_var, "; filter low mean: ", filter_low_mean))
+
+        data_tmp <- data_40
+        song_stats_tmp <- song_stats
+        
+        if(filter_high_var){
+            data_tmp <- filter(data_tmp, !(male %in% male_high_var) )
+            song_stats_tmp <- filter(song_stats_tmp, !(male %in% male_high_var) )
+        }
+
+        if(filter_low_mean){
+            data_tmp <- filter(data_tmp, !(male %in% male_low_mean) )
+            song_stats_tmp <- filter(song_stats_tmp, !(male %in% male_low_mean) )
+        }
+
+        g0 <- ggplot(data_tmp) +
+            aes(x=male,
+                y = song_count,
+                color = male,
+                fill = male) + 
+            geom_point() +
+            geom_rug(size=0.75) +
+            ## theme(axis.ticks.x=element_line(size=30))+
+            geom_point(
+                mapping = aes(x = male,
+                              y = mean,
+                              color = male),
+                size = 3,
+                shape = 24,
+                data = song_stats_tmp) +
+            theme(legend.position = "none", axis.text.x = element_text(angle = -45)) +
+            labs(title = "Raw Count Data")
+
+        g1 <- ggplot(data_tmp) +
+            aes(x=song_count,
+                color = male,
+                fill = male) + 
+            geom_histogram() +
+            labs(title = "Raw Count Data")
+        
+        formula = y ~ -1 + x
+        g2 <- ggplot(song_stats_tmp) +
+            aes(x=mean, y = var) + 
+            geom_point(aes(color = male)) +
+            geom_smooth(method='lm', formula = formula) +
+            ##stat_cor(label.y.npc = 0.95) +
+            stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
+            theme(legend.position = "none") +
+            labs(title = "Mean vs. var")
+
+        fit_g2 <- lm(var ~ -1 + mean, data = song_stats_tmp)
+        print(summary(fit_g2))
+        
+        g3 <- ggplot(song_stats_tmp) +
+            aes(x=mean, y = var) +
+            geom_point(aes(color = male)) +
+            geom_smooth(method='lm', formula= formula) +
+            stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
+            theme(legend.position = "none") +
+            labs(title = "Mean vs. Var",
+                 subtitle = "log(var) ~ log(mean)") + 
+            scale_x_log10() +
+            scale_y_log10()
+
+
+        formula <- y ~ -1 + x + I(x^2)
+        g4 <- ggplot(song_stats_tmp) +
+            aes(x=mean, y = var) +
+            geom_point(aes(color = male)) +
+            geom_smooth(method='lm', formula = formula) +
+            stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
+            theme(legend.position = "none") +
+            labs(title = "Mean vs. Var",
+                 subtitle = "var ~ mean + mean^2")
+                                        #    scale_x_log10() +
+                                        #    scale_y_log10()
+        fit_g4 <- lm(var ~ -1 + mean +  I(mean^2), data = song_stats_tmp)
+        print(summary(fit_g4))
+        
+        formula <- y ~ -1 + I(x^2)
+        g5 <- ggplot(song_stats_tmp) +
+            aes(x=mean, y = var) +
+            geom_point(aes(color = male)) +
+            geom_smooth(method='lm', formula = formula) +
+            stat_regline_equation(label.y.npc = 0.9,
+                                  aes(label = paste(
+                                          ..eq.label..,
+                                          ..adj.rr.label.., sep = "~~")),
+                                  formula = formula, size = 2.5) +
+            theme(legend.position = "none") +
+            labs(title = "Mean vs. Var",
+                 subtitle = "var ~ mean^2")
+                                        #    scale_x_log10() +
+                                        #    scale_y_log10()
+
+        fit_g5 <- lm(var ~ -1 + I(mean^2), data = song_stats_tmp)
+        print(summary(fit_g5))
+        #ifelse(length(dev.list()) < 4, dev.new(), dev.next())
+        
+        ga <- grid.arrange(g0, g2, g4, g5,
+                     ncol=2,
+                     top=textGrob(
+                         paste0("Mean vs. Var: Filter High Var = ", filter_high_var,
+                                ", Low Mean = ", filter_low_mean, "\n temp_target = 40C"),
+                         gp=gpar(fontsize = 11))
+                     )
+        ga
+        
+       dev.print(device = pdf, file = file.path(output_dir, paste0("mean.vs.var_filter.high-", filter_high_var, ".filter.low.mean-", filter_low_mean, ".pdf")))
+
     }
-    
-g1 <- ggplot(data_tmp) +
-    aes(x=song_count,
-        color = male,
-        fill = male) + 
-    geom_histogram() +
-    labs(title = "Raw Count Data")
-
-g2 <- ggplot(song_stats_tmp) +
-    aes(x=mean, y = var) + 
-    geom_point(aes(color = male)) +
-    geom_smooth(method='lm', formula= y~x) +
-    ## from source_gist("524eade46135f6348140")
-    stat_smooth_func(geom="text",method="lm",hjust=0,parse=TRUE) +
-    labs(title = "Mean vs. var for all rounds: temp_target = 40")
-
-g3 <- ggplot(song_stats_tmp) +
-    aes(x=mean, y = var) +
-    geom_point(aes(color = male)) +
-    geom_smooth(method='lm', formula= y~x) +
-    stat_smooth_func(geom="text",method="lm",hjust=0,parse=TRUE) +
-    labs(title = "Mean vs. Var for all rounds: temp_target = 40",
-         subtitle = "log(var) ~ log(mean)") + 
-    scale_x_log10() +
-    scale_y_log10()
-    
-#ggcoefstats(
-
-    formula <- y ~ -1 + x+I(x^2)
-    
-g4 <- ggplot(song_stats_tmp) +
-    aes(x=mean, y = var) +
-    geom_point(aes(color = male)) +
-    geom_smooth(method='glm', formula = formula) +
-    stat_smooth_func(geom="text",method="lm", formula = formula, hjust=0,parse=TRUE) +
-    labs(title = "Mean vs. Var for all rounds: temp_target = 40",
-         subtitle = "var ~ mean + mean^2")
-#    scale_x_log10() +
-#    scale_y_log10()
-
-    dev.new()
-    grid.arrange(g1, g2, g3, g4,
-                 ncol=2,
-                 top=textGrob(paste0("Mean vs. Var: Filter High Var = ", filter_high_var))
-                 )
-
 }
 
 ```
 
-## Compare Rounds 2 and 3
+
+### Results
+
+- Excluding males with very high variances indicates that for the remaining males `var ~ mean`, but overdispersed relative to the poisson.
+
+
+## Compare `song_count` vs `trial` at 40C
 
 ```{r}
+
+print("HERE")
+
+for(filter_high_var in c(FALSE, TRUE)){
+    for(filter_low_mean in c(FALSE, TRUE)){
+        
+
+        print(paste0("song_count vs. trial; filter.high: ", filter_high_var, "; filter.low.mean: ", filter_low_mean))
+        
+        data_tmp <- data_40 %>% group_by(male) %>%
+            arrange(trial, .by_group = TRUE) %>%
+            mutate(cummean = cummean(song_count)) %>%
+            select(male, trial, song_count, cummean)
+        
+        if(filter_high_var){
+            data_tmp <- filter(data_tmp, !(male %in% male_high_var) )
+        }
+
+        if(filter_low_mean){
+            data_tmp <- filter(data_tmp, !(male %in% male_low_mean) )
+        }
+        
+        
+
+
+        g1 <- ggplot(data_tmp) +
+            aes(x = trial, y = song_count) +
+            geom_point(aes(color = male), position = "jitter") +
+            geom_line(aes(x = trial, y = cummean, color = male)) +
+            theme(legend.position="bottom")
+        
+        legend <- get_legend(g1)
+
+
+        ## Apply a linear regression
+
+        formula <- y ~ 1 + x
+        g0 <- ggplot(data_tmp, aes(x = trial, y = song_count)) +
+            geom_point(aes(color = male))
+        
+        g2 <- g0 +
+            geom_smooth(method = 'lm', formula = formula) +
+            stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
+            theme(legend.position = "none") +
+            labs(title = "Linear")
+        ##g2
+
+        fit_g2 <- lm( song_count ~ 1 + trial, data = data_tmp)
+        print(summary(fit_g2))
+
+        g3 <- g0 + geom_smooth(method = 'glm',
+                               formula= formula,
+                               ## Can't use link = identity because it leads to negative expectations
+                               method.args = list(family = quasipoisson(link = "log"))) +
+            stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
+            theme(legend.position = "none") +
+            labs(title = "log-linear: family = qpoisson(link = log)")
+        ##g3
+        
+        fit_g3 <- glm( song_count ~ 1 + trial, data = data_tmp,
+                      family = quasipoisson(link = "log"))
+
+        print(summary(fit_g3))
+
+        formula <- y ~ 1 + x + I(x^2)
+        g4 <- g0 + geom_smooth(method='glm',
+                               formula= formula,
+                               ## Can't use link = identity because it leads to negative expectations
+                               method.args = list(family = quasipoisson(link = "log"))) +
+            stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
+            theme(legend.position = "none") +
+            labs(title = "log-quad: family = qpoisson(link = log)")
+        ##g4
+        
+        fit_g4 <- glm(song_count ~ 1 + trial + I(trial^2), data = data_tmp,
+                      family = quasipoisson(link = "log"))
+        print(summary(fit_g4))
+
+        ga <- grid.arrange(g2, g3, g4, as_ggplot(legend),
+                           ncol=2,
+                           top=textGrob(
+                               paste0("song_count vs. trial: Filter High Var = ", filter_high_var, ", Low Mean = ", filter_low_mean, "\n temp_target = 40C"),
+                               gp=gpar(fontsize = 11))
+                           )
+        ga
+        
+        dev.print(device = pdf, file = file.path(output_dir, paste0("song_count.vs.trial_filter.high-", filter_high_var, ".filter.low.mean-", filter_low_mean, ".pdf")))
+    }
+}
+
+
+```
+
+
+# End
+
+```{r, error = FALSE}
+
+knitr::knit_exit()
+
+```
+
+
+## Try asymptotic regression
+
+```{r}
+
+## See: https://www.statforbiology.com/nonlinearregression/usefulequations
+
+    if(FALSE) {
+        ## Try using `nlme`
+        ## I get errors
+        ## Also not specifying error model
+        getInitial(song_count ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)  
+        ar <- nls(song_count ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)
+
+        ## Try using song_count_plus_1
+        getInitial(song_count_plus_1 ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)  
+        ar <- nls(song_count_plus_1 ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)
+    }
+
+
+    
+    ## Try using gnm
+    ## a - (a - b) exp(-c x) = a - b' exp(-c x) = a - exp(b'' - c x)
+    ## According to TurnerAndFirth2007 R News, this model is written Exp(1 + trial)
+    ## However the model doesn't converge unless we use -1
+    ## I clearly don't understand the model 
+    formula <- song_count ~ 1 + Mult(Const(-1), Exp(1 + trial))
+    gnm_poisson <- gnm(formula = formula,
+                       data = data_tmp,
+                       ## start = c(50, -1, -0.1),
+                       family = poisson(link = "identity"),
+                       ##weights = 1/song_count_plus_1,
+                       trace = TRUE,
+                       iterMax = 5000
+                   )
+
+
+    
+    model <- drm(Y ~ X, fct = DRC.asymReg())
+
 
 count_total_round_2_and_3  <- data_ind %>%
     select(c(male, count_total_round, round)) %>%
@@ -330,7 +577,7 @@ glm_poisson_1 <- glm(song_count ~
                    family = poisson(link = "log")
                    )
 
-summary(glm_poisson_1)
+print(summary(glm_poisson_1))
 
 ## Add round effect
 glm_poisson_2 <- glm(song_count ~
@@ -339,7 +586,7 @@ glm_poisson_2 <- glm(song_count ~
                    family = poisson(link = "log")
                    )
 ## Results support round effect
-summary(glm_poisson_2)
+print(summary(glm_poisson_2))
 
 male_coef <-  coef(glm_poisson_2) %>% keep(str_detect(names(.), 'male'))
 
@@ -353,10 +600,10 @@ glm_poisson_3 <- glm(song_count ~
                    )
 ## Note that using qpoisson doesn't affect MLE
 
-summary(glm_poisson_3)
+print(summary(glm_poisson_3))
 
 if(make_plot){
-    ifelse(length(dev.list()) < 3, {dev.new(); dev.next()}, dev.next())
+ifelse(length(dev.list()) < 3, {dev.new(); dev.next()}, dev.next())
     par(mfrow = c(2, 2))
     plot(glm_poisson_2, ask = FALSE)
     page_label <- "glm with poisson error"
@@ -366,7 +613,7 @@ if(make_plot){
 glm_qpoisson_1 <- update(glm_poisson_1,
                        family = quasipoisson(link = "log")
                        )
-summary(glm_qpoisson_1)
+print(summary(glm_qpoisson_1))
 
 if(make_plot){
     ifelse(length(dev.list()) < 3, dev.new(), dev.next())
@@ -381,7 +628,7 @@ if(make_plot){
 glm_qpoisson_2 <- update(glm_poisson_2,
                        family = quasipoisson(link = "log")
                        )
-summary(glm_qpoisson_2)
+print(summary(glm_qpoisson_2))
 
 if(make_plot){
     ifelse(length(dev.list()) < 3, dev.new(), dev.next())
@@ -397,7 +644,7 @@ if(make_plot){
 glm_qpoisson_3 <- update(glm_poisson_3,
                        family = quasipoisson(link = "log")
                        )
-summary(glm_qpoisson_3)
+print(summary(glm_qpoisson_3))
 
 if(make_plot){
     ifelse(length(dev.list()) < 3, dev.new(), dev.next())
