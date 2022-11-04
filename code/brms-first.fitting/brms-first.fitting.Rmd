@@ -83,27 +83,55 @@ Yes.
 
 # Set up
 
-## Install libraries
+## Load libraries
 
 ```{r}
 
 ## load libraries
+
+library(rstan)
+#options(mc.cores = (parallel::detectCores())))
+rstan_options(auto_write = TRUE)
+if(FALSE) example(stan_model, package = "rstan", run.dontrun = TRUE)
+
+
+library(brms)
+
+if(FALSE) {
+    ## This often causes core dumps
+    prior1 <- prior(normal(0,10), class = b) +
+    prior(cauchy(0,2), class = sd)
+fit1 <- brm(count ~ zAge + zBase * Trt + (1|patient),
+            data = epilepsy, family = poisson(),
+            prior = prior1, chains = 1, cores = 1)
+
+fit2 <- brm(count ~ zAge + zBase * Trt + (1|patient),
+            data = epilepsy, family = poisson(),
+            prior = prior1, chains = 2, cores = 1)
+    
+fit3 <- brm(count ~ zAge + zBase * Trt + (1|patient),
+            data = epilepsy, family = poisson(),
+            prior = prior1, cores = 2, chains = 2)
+
+}
+
 
 library(rTPC)
 library(nls.multstart)
 library(broom)
 
 library(stats)
-library(brms)
+#library(brms)
 library(tidyverse)
-require(ggplot2)
-require(ggpubr)
-require(viridisLite)
-require(GGally)
-require(reshape2)
-require(humidity) ## provides VPD
-require(weathermetrics)
-require(latex2exp)
+library(ggplot2)
+library(ggpubr)
+library(ggsci) ## provides scale_fill_npg()
+library(viridisLite)
+library(GGally)
+library(reshape2)
+library(humidity) ## provides VPD
+library(weathermetrics)
+library(latex2exp)
 
 ```
 ## Local Functions
@@ -126,11 +154,55 @@ help_text <- function(...) {
 get_model_eq <- function(model) {
     txt <- help_text(model)
     eqn_line <- grep("^ +rate = .*$", txt, value = TRUE)
-    eqn <- gsub("(^ +rate = | *$)", "", eqn_line) %>% gsub("\\.", "*")
+    eqn <- gsub("(^ +rate = | *$)", "", eqn_line) %>% gsub("\\.([^0-9])", " * \\1", .)
     df <- tibble(model = model, eq = eqn)
     return(df)
 }
 
+
+plot_brms_fit <- function(brmsfit) {
+    plist = list()
+
+    plist[[1]] <- plot(brmsfit, title = paste("brm() summary: ", prior_index), ask = FALSE)
+    return(plist)
+}
+
+plot_stan_fit <- function(stanfit) {
+    plist = list();
+    i <- 1
+    
+    plist[[i]] <-  plot(stanfit, title = paste("stan() summary: ", prior_index))
+
+
+    ## Plotting routines from: www.weirdfishes.blog/blog/fitting-bayesian-models-with...
+    ##
+    mack_diagnostics <- rstan::get_sampler_params(stanfit) %>% 
+        set_names(1:4) %>% 
+        map_df(as_tibble,.id = 'chain') %>% 
+        group_by(chain) %>% 
+        mutate(iteration = 1:length(chain)) %>% 
+        mutate(warmup = iteration <= warmup) %>%
+        mutate()
+    i <- i+ 1
+    
+    plist[[i]] <- mack_diagnostics %>% 
+        group_by(warmup, chain) %>% 
+        summarise(percent_divergent = mean(divergent__ >0)) %>% 
+        ggplot() +
+        geom_col(aes(chain, percent_divergent, fill = warmup), position = 'dodge', color = 'black') + 
+        scale_y_continuous(labels = scales::percent, name = "% Divergent Runs")  + 
+        scale_fill_npg()
+
+    i<- i+1
+    plist[[i]] <- mack_diagnostics %>% 
+        ggplot(aes(iteration, treedepth__, color = chain)) + 
+        geom_line() + 
+        geom_hline(aes(yintercept = max_treedepth), color = 'red') + 
+        scale_color_locuszoom()
+
+    return(plist)
+
+}
 
 ```
 
@@ -139,7 +211,6 @@ get_model_eq <- function(model) {
 
 ```{r}
 model_def_tbl <- lapply(get_model_names(), get_model_eq) %>% bind_rows(, .id = NULL)
-
 print(model_def_tbl, n = 200)
 
 ```
@@ -160,7 +231,8 @@ data_raw = list()
 data_raw[[1]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
     ## Note T237 and T230 are missing numbers in the song_count column
     ## so we are filtering these observations out until they are found
-    filter(!is.na(song_count))
+    filter(!is.na(song_count)) %>%
+    ungroup()
 
 data_raw[[2]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Repeatability-Song-Count.csv")) %>%
     mutate(round = 2) %>%
@@ -196,6 +268,11 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     mutate(song_count_plus_1 = (song_count + 1)) %>%
     mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
     mutate(temp_target = as.numeric(temp_target)) %>%
+    ## Create generic 'temp' column which is either
+    ## temp_mean, if it exists, or temp_target, if it doesn't
+    mutate(temp = if_else(is.na(temp_mean),
+                          temp_target,
+                          temp_mean)) %>%
     ## Add column with total song_count for a given round
     group_by(male, round ) %>%
     mutate(count_total_round = sum(song_count) ) %>%
@@ -217,8 +294,6 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     ungroup() %>%
     relocate(song_count, song_prop, vpd, temp_mean, humidity_mean, .after = male) %>% 
     mutate() ## Dummy function so we can comment out lines above it w/o any issues
-
-
 ```
 
 
@@ -253,33 +328,43 @@ hist_count_total
 
   
 
-## Create & Plot Filtered Data
+## Create Filtered Data
 
 ```{r}
 
 data_ind <- data_full %>%
-    filter(round==3) %>%
-    filter(count_total_round >=150)
+    filter(
+    (round == 3 & count_total_round >=150) |
+    (round == 2 & count_total_round > 30)
+    )
+
+dim(data_ind)
 ## copy data frame and assign `male =  "combined")
 data_comb <- data_ind %>% mutate(male = "combined")
 
 data <- bind_rows(data_ind, data_comb)
+
+
+```
+
+
+## Plot Filtered Data
+```{r}
 
 xlab <- "Temperature"
 ylab <- "song_count"
 
 plot_temp_data <-
     ggplot(data) + 
-    aes(x = temp_mean,
+    aes(x = temp,
         y = song_count) +
     facet_wrap("male", scales = "free_y") +
     geom_point() +
 labs( title = paste( ylab, " vs ", xlab))
 last_plot()
 
-
-
 ```
+
 
 
 # First Analysis
@@ -287,585 +372,196 @@ last_plot()
 ## Formal Model Fits to `song_count`
 
 
-### Initial
+### Data Set Up
 
-Using
-
-- model: `modifiedgaussian`
-- `male` as a factor
 - Filter data
 
 ```{r}
 
-
-
-
 ## Filter the data a bit more to make things easier
+males_in_round_3 <- data_ind %>% select(male, round) %>% unique() %>% filter(round == 3) %>% pull(male)
 
 data <- data_ind %>%
-    filter( (male %in% c("T229", "T234", "T244", "T243","T247", "T258")))
+    ##    filter( (male %in% c("T229", "T234", "T244", "T243","T247", "T258"))) %>%
+    filter(male %in% males_in_round_3) %>% ## This is apparently unnecessary
+    mutate()
 
-nlform <- bf(song_count ~ rmax*exp(-0.5*(fabs(temp_mean - topt)/a)^b), #modifiedgaussian_2006(temp_mean, rmax, topt, a, b),
-             rmax ~ male,
-             topt ~ 1 + (1|male),
-             a ~ 1,
-             b ~1,
-             nl = TRUE)
+dim(data)
+```
 
-switch(1,
-{
-    ## gamma(alpha, beta) 
-    nlprior <- c(prior(gamma(1., 0.005), nlpar = "rmax", lb = 0),
-                 prior(normal(35, 10.), nlpar = "topt", lb = 0),
-                 prior(gamma(1., 0.01), nlpar = "a", lb = 0),
-                 prior(normal(0, 5), nlpar = "b", lb = 0))},
-{
-    nlprior <- c(prior(uniform(10, 1000 ), nlpar = "rmax"),
-                 prior(uniform(30, 45), nlpar = "topt"),
-                 prior(uniform(0, 100), nlpar = "a"),
-                 prior(uniform(0, 5), nlpar = "b"))}
-)
+## Fit `lactin1`
 
+- `male` as a factor
+- fixed `tmax = 45` 
+- Set `b = 0` (so essentially lactin1 which removes an unnecessary scaling term in the logan model).
+```{r, eval=FALSE}
 
-fit_mgauss_poisson1 <- brm(formula = nlform,
-                   data = data,
-                   family = poisson(link = "identity"),
-                   prior = nlprior,
-                   cores = 1,
-                   iter = 10000,
-                   verbose = TRUE)
+refit.model <- FALSE
+tmax = 45
+b = 0
+
+nlform <-
+    bf(song_count ~  exp(a * temp) - exp(a * tmax - ((tmax - temp)/delta_t)) + b,
+       delta_t ~ male - 1,
+       a ~ male -1,
+       nl = TRUE)
+
+iter = 20000
+warmup = floor(iter/2)
+max_treedepth = 14
+
+lactin1_nb = list()
 
 
-model_mgauss_nb1 <- make_stancode(formula = nlform,
-                   data = data,
-                   family = negbinomial(link = "identity", link_shape = "identity"),
-                   prior = nlprior,
-                   save = "mgauss.stan")
+for(prior_index in 1:2 ){
+
+    switch(prior_index,
+    {
+        ## bounded normals
+        nlprior <- c(prior(normal(400, 400), nlpar = "a", lb = 0),
+                     prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
+                     prior(normal(0, 3), nlpar = "a", lb = 0),
+                     prior(normal(0, 3), nlpar = "b", lb = 0))},
+    {
+        ## wider bounded normals
+        nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
+                     prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
+                     prior(normal(0, 10), nlpar = "a", lb = 0),
+                     prior(normal(0, 6), nlpar = "b", lb = 0))},
+    {
+        ## gamma(alpha = a , beta = b); E(x) = a/b; var(x) = a/b^2 
+        nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
+                     prior(normal(35, 20.), nlpar = "topt", lb = 0),
+                     prior(gamma(1, 0.01), nlpar = "a", lb = 0),
+                     prior(gamma(1, 0.01), nlpar = "b", lb = 0))},
+    )
 
 
-fit_mgauss_nb1 <- brm(formula = nlform,
-                   data = data,
-                   family = negbinomial(link = "identity", link_shape = "identity"),
-                   prior = nlprior,
-                   cores = 5)
+
+    lactin1_nb[[prior_index]] <- brm(formula = nlform,
+                                    data = data,
+                                    family = negbinomial(link = "identity",
+                                                         link_shape = "identity"),
+                                    prior = nlprior,
+                                    chains = 4, cores = 4,
+                                    iter = iter,
+                                    warmup = warmup,
+                                    save_model = "model_mgauss_nb_1.stan",
+                                    control = list(adapt_delta = 0.96))
+
+
+}
+
+```
+### Plot Fits
+
+```{r, eval=FALSE}
+
+
+for(prior_index in 1:2 ){
+    model <- lactin1_nb[[prior_index]]
+    ## plot_brms_fit(model)
+    print(plot_stan_fit(model$fit))
+    }
+    
+
+```
+
+
+## Fit `modifiedgaussian`
+
+- rTPC model: `modifiedgaussian`
+- `male` as a factor
+
+```{r}
+
+fit.file <- "output/mgauss_nb.Rda"
+refit.model <- FALSE
+
+nlform <-
+    bf(song_count ~ rmax*exp(-0.5*(fabs(temp - topt)/a)^b),
+       rmax ~ male -1,
+       topt ~ 1,
+       a ~ 1,
+       b ~ 1,
+       nl = TRUE)
+
+
+iter = 10000
+warmup = floor(iter/3)
+max_treedepth = 15
+
+if(!file.exists(fit.file) | refit.model) {
+
+    fit_list = list()
+
+
+    for(prior_index in 1:2) {
+
+        print(paste("fitting prior_index: ", prior_index))
+        
+        switch(prior_index,
+        {
+            ## bounded normals
+            nlprior <- c(prior(normal(400, 400), nlpar = "rmax", lb = 0),
+                         prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
+                         prior(normal(0, 3), nlpar = "a", lb = 0),
+                         prior(normal(0, 3), nlpar = "b", lb = 0))},
+        {
+            ## wider bounded normals
+            nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
+                         prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
+                         prior(normal(0, 10), nlpar = "a", lb = 0),
+                         prior(normal(0, 6), nlpar = "b", lb = 0))},
+        {
+            ## gamma(alpha = a , beta = b); E(x) = a/b; var(x) = a/b^2 
+            nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
+                         prior(normal(35, 20.), nlpar = "topt", lb = 0),
+                         prior(gamma(1, 0.01), nlpar = "a", lb = 0),
+                         prior(gamma(1, 0.01), nlpar = "b", lb = 0))},
+        )
 
 
 
-make_plot = FALSE;
+        fit_list[[prior_index]] <- brm(formula = nlform,
+                                        data = data,
+                                        family = negbinomial(link = "identity",
+                                                             link_shape = "identity"),
+                                        prior = nlprior,
+                                        chains = 4, cores = 4,
+                                        iter = iter,
+                                        warmup = warmup,
+                                        save_model = "model_mgauss_nb_1.stan",
+                                        control = list(adapt_delta = 0.96))
 
-glm_poisson <- glm(song_count ~
-                       1 + male + (x1) + I(x1^2), # + offset(log(count_total_round)), 
-                   data = data,
-                   family = poisson(link = "log")
-                   )
 
-summary(glm_poisson)
-
-if(make_plot) plot(glm_poisson, ask = FALSE)
-
-glm_qpoisson <- update(glm_poisson,
-                       family = quasipoisson(link = "log")
-                       )
-summary(glm_qpoisson)
-
-if(make_plot) {
-    plot(glm_qpoisson, ask = FALSE)
     }
 
-## Clearly the data is over dispersed
-## quasipoisson() doesn't seem to exist for glmer (but likely exists in nlme)
-
-## Try using negative binomial
-
-
-## This model formulation seems to be correct and converges!!
-## HOwever, it ignores the correlation between x1 and I(x1^2)
-formula_quad_RE <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2)||male)
-
-## This model doesn't converge due to high correlation mentioned above.
-formula_quad_RE <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2)|male)
-## Remove previous results to avoid confusion if model fails to fit
-rm(glmer_poisson) 
-glmer_poisson <- glmer(formula_quad_RE,
-                       data = data,
-                       control = glmerControl(
-                           optCtrl = list(maxiter = 1E5,
-                                          maxfun = 2E6,
-                                          trace = trace),
-                           optimizer="nloptwrap"),
-                       family = poisson(link = "log"),
-                       verbose = verbose
-                       )
-summary(glmer_poisson)
-if(make_plot) plot(glmer_poisson, ask = FALSE)
-
-## Results indicate that var in x1^2 term is very small (1E-4)
-## So we should drop that.
-## Except the model complains about convergence
-
-## Fit using `| male` instead of `|| male` to see what happens
-## An extra term, the correlation between the RE terms is estimated.
-## Random effects:
-##  Groups Name    Variance  Std.Dev. Corr
-##  male   x1      0.0472762 0.21743      
-##         I(x1^2) 0.0001374 0.01172  0.96
-## Fit improves, but I get convergence complaints.
-## This is likely due to the high correlation between the two RE.
-
-## WOudl like to post a question about this to SE
-## data_example <- data %>% mutate(f = as.factor(as.integer(male))) %>% select(f, x = temp_mean, y = song_count)
-
-                                        #tmp <- update(glmer_poisson, formula = formula_quad_RE <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2)||male)
-
-
-glmer_nb <- 
-    glmer.nb(formula_quad_RE,
-             data = data,
-             ## control values are used by the initial optimization
-             ## using a poisson glmer model, which doesn't converge
-             control = glmerControl(
-                 boundary.tol = 0,
-                 tolPwrss=1e-1,                 
-                 optCtrl = list(maxiter = 1E5,
-                                maxfun = 2E6,
-                                trace = trace),
-                 optimizer="nloptwrap"),
-             ## nb.control values are used by the second optimizer
-             ## Note need to set own optCtrl values
-             nb.control = list(
-                 optCtrl = list(maxit = 1000,
-                                maxfun = 2E5)),
-             verbose = verbose
-             )
-
-
-## Try dropping the quadratic RE
-formula_linear_RE <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1| male)
-rm(glmer_poisson_linear)
-
-try(glmer_poisson_linear <- update(glmer_poisson, formula = formula_linear_RE,
-                                   verbose = verbose)
-    );
-
-if(exists("glmer_poisson_linear")){
-    summary(glmer_poisson_linear);
-    if(make_plot) plot(glmer_poisson_linear, ask = FALSE)
-}
-
-## This model fails to converge, strangely.
-
-
-
-## NB model fails to converge
-## This appears to be because the variances of the RE become very small (on the order of E-11!)
-## See B. Bolker's notes on GLMM fitting and comparisons
-## https://bbolker.github.io/mixedmodels-misc/ecostats_chap.html#diagnostics-and-model-summaries
-glmer_nb_linear <- 
-    glmer.nb(formula_linear_RE,
-             data = data,
-             ## control values are used by the initial optimization
-             ## using a poisson glmer model, which doesn't converge
-             control = glmerControl(
-                 boundary.tol = 0,
-                 tolPwrss=1e-1,                 
-                 optCtrl = list(maxiter = 1E5,
-                                maxfun = 2E6,
-                                trace = trace),
-                 optimizer="nloptwrap"),
-             ## nb.control values are used by the second optimizer
-             ## Note need to set own optCtrl values
-             nb.control = list(
-                 optCtrl = list(maxit = 1000,
-                                maxfun = 2E5)),
-             verbose = verbose
-             )
-
-rm(make_plot, formula_quad_RE, formula_linear_RE)
-
-```
-
-### Result
-
-- Model doesn't converge.
-- Output includes 
-  > Model is nearly unidentifiable: very large eigenvalue
-  > - Rescale variables?;Model is nearly unidentifiable: large eigenvalue ratio
-  > - Rescale variables?
-  To me this initially suggested we should use `song_prop` and the glmer weights function.
-  However, I've made some progress in my understanding of ME models.
-  
-  
-###
-  
-
-## Use All Round 2 Data
-
-
-
-### Create fit_db
-
-```{r}
-vec_temp_ref <- c(27, 35, 44, 45)
-
-## Create a tibble for holding model result
-## filter out rows that won't get defined.
-      
-fit_db <- expand_grid(temp_ref = vec_temp_ref, model = c("glm", "glmer"), re = c("none", "linear", "quad", "both"), est_cov = c(TRUE, FALSE), dist = c("poisson", "qpoisson", "nb")) %>% 
-    filter( !(model == "glm" & est_cov ==TRUE)) %>%
-    filter( !(model == "glmer" & dist =="qpoisson")) %>%
-    add_column(fit = list(list(NA)) )
-
-## Try to understand how to work with fit_db
-
-## Filter fit's that are NA, but doesn't work if I assign glm objects to fit[[i]]
-subset(fit_db, is.na(fit[[1]]))
-
-## Doesn't know what fit is
-select(fit_db, is.na(fit[[1]]))
-
-```
-
-### GLM Fits
-
-- Just FE
-
-### Fit Fixed Effects models
-
-
-```{r}
-
-
-### Fit Fixed Effects models
-
-est_cov <- FALSE
-verbose <- 0
-trace <- FALSE
-
-for(temp_ref in vec_temp_ref ){
-
-    data <- data_ind %>%
-        mutate(x1 = (temp_mean - temp_ref))
-    print(paste("temp_ref:", temp_ref))
-
-    re <- "none"
-    
-    glm_poisson <-
-        glm(song_count ~ 1 + male + (x1) + I(x1^2), 
-            data = data,
-            family = poisson(link = "log")
-            )
-
-    summary(glm_poisson)
-    plot(glm_poisson, ask = FALSE)
-
-    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glm" &  fit_db$dist == "poisson" & fit_db$re == re & est_cov == est_cov, ]$fit  <- list(glm_poisson)
-    
-    glm_qpoisson <- update(glm_poisson,
-                           family = quasipoisson(link = "log")
-                           )
-    summary(glm_qpoisson)
-
-    plot(glm_qpoisson, ask = FALSE)
-
-    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glm" &  fit_db$dist == "qpoisson" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glm_qpoisson)
-    
-
-    glm_qpoisson <- update(glm_poisson,
-                           family = quasipoisson(link = "log")
-                           )
-    summary(glm_qpoisson)
-    ## Note the dispersion parameter is 29.7 rather than 1!!
-    ## Clearly the data is over dispersed
-    ## quasipoisson() doesn't seem to exist for glmer (but likely exists in nlme)
-    plot(glm_qpoisson, ask = FALSE)
-
-    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glm" &  fit_db$dist == "qpoisson" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glm_qpoisson)
-
-    
-    glm_nb <- glm.nb <-
-        glm(song_count ~ 1 + male + (x1) + I(x1^2), 
-            data = data
-            )
-    summary(glm_nb)
-    plot(glm_nb, ask = FALSE)
-
-    fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glm" &  fit_db$dist == "nb" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glm_nb)
-    ## Dispersion parameter is 4547!
+    mgauss_nb <- fit_list
+   
+    save(mgauss_nb, fit.file)
+} else {
+    load(fit.file)
 }
 
 
+
+
 ```
 
+### Plot Fits
 
-### Results
-
-- glm of `poisson` gives significant `x1` and `x1^2` terms, **but** if I adjust for overdispersion using `qpoisson` they become insignicant.
-- I see the same result, enormous CI for `x1` and `x1^2` terms, with `glm_nb`.
-- These results are the motivation for using RE.
-  That is, to deal with the heterogeneity in a more controlled manner.
-  However,  none of the `glmer_nb` model fittings work well
-  - There appears to be a negative correlation between the RE for `x1` and `x1^2`.
-  - The variance in the RE are pretty small which makes me wonder why don't the fixed effect models work well enough.
-
-## GLMM Fits 
-
-### No RE co-var:  `||` Formulation
-
-- On reflection the "both" is the only RE setting where `||` should differ from `|`
-
-```{r}
-
-est_cov <- FALSE
-verbose <- 0
-trace <- FALSE
-optimizer <- "bobyqa" #"nloptwrap" # "bobyqa"
-
-## Fit random effects models
-for(dist in c("poisson", "nb")) {
-    for(temp_ref in c(35)) { # vec_temp_ref ){
-        for(re in c("linear", "quad", "both")) {
-            
-            switch(re,
-                   both = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2) || male)),
-                   linear = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 || male)),
-                   quad = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 + I(x1^2) ||  male))
-                   )
-            ## This model formulation seems to be correct and converges with optimizer = "bobyqa"!!
-            ## HOwever, it ignores the correlation between x1 and I(x1^2)
-            ## formula_quad_RE <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2)||male)
-            ## I'm not sure what that means 
-            if(dist == "poisson"){
-                print(paste("temp_ref =", temp_ref,"glmer_poisson", "re = ", re))
-                glmer_poisson <- glmer(formula = formula_re,
-                                       data = data,
-                                       control = glmerControl(
-                                           optCtrl = list(maxiter = 1E5,
-                                                          maxfun = 2E6,
-                                                          trace = trace),
-                                           optimizer=optimizer),
-                                       family = poisson(link = "log"),
-                                       verbose = verbose
-                                       )
-
-                print(summary(glmer_poisson))
-                plot(glmer_poisson, ask=FALSE)
-                
-                fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glmer" &  fit_db$dist == "poisson" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glmer_poisson)
+```{r, eval=TRUE}
 
 
-                print("evaluate overdispersion")
-                
-                glmer_qpoisson <- overdisp.glmer(glmer_poisson)
-
-            }
-
-            if(dist == "nb"){
-                print(paste("temp_ref =", temp_ref,"glmer_nb", "re = ", re))
-                try(glmer_nb <- 
-                        glmer.nb(formula = formula_re,
-                                 data = data,
-                                 ## control values are used by the initial optimization
-                                 ## using a poisson glmer model, which doesn't converge
-                                 control = glmerControl(
-                                     boundary.tol = 0,
-                                     tolPwrss=1e-1,                 
-                                     optCtrl = list(maxiter = 1E5,
-                                                    maxfun = 2E6,
-                                                    trace = trace),
-                                     optimizer = optimizer),
-                                 ## nb.control values are used by the second optimizer
-                                 ## Note need to set own optCtrl values
-                                 nb.control = list(
-                                     optCtrl = list(maxit = 1000,
-                                                    maxfun = 2E5)),
-                                 verbose = verbose
-                                 )
-                    )
-
-                plot(glmer_nb, ask = FALSE)
-                print(summary(glmer_nb))
-
-                fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glmer" &  fit_db$dist == "nb" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glmer_nb)
-            }
-        }
+for(prior_index in 1:2) {
+    model <- mgauss_nb[[prior_index]]
+    plot_brms_fit(model)
+    print(plot_stan_fit(model$fit))
     }
-}
-
-
+    
 
 ```
-
-
-#### Results
-    
-- `glmer_poisson` and `glmer_nb` only converge under certain `re` and only when  when `optimizer = "bobyqa"`.
-- `glmer_poisson` summary
-  - `re = "linear"`: Singular/boundary fit
-  - `re = "quad"`: Fails to converge
-  - `re = "both"`: Converges, `overdisp.glmer` indicates data is greatly overdispersed.
-- `glmer_nb` summary
-  - `re = "linear"`: Singular/boundary fit
-  - `re = "quad"`: Singular/boundary fit
-  - `re = "both"`: Singular/boundary fit
-- It's note worthy that `glmer_nb` gives a singular value for the variance (i.e. effectively 0) for `x1` using `optimizer = "bobyqa"`, but gives the variance (i.e. effectively 0) for `x1^2` using `optimizer = "nloptwrap"`.
-  This seems consistent with them being highly correlated as suggested in the `||` fittings.
-- The `x1^2` term is often (always?) non-significant in the `nb` models
-
-
-### `|` Formulation
-
-```{r}
-
-est_cov <- TRUE
-verbose <- 0
-trace <- FALSE
-optimizer <- "bobyqa" #"nloptwrap" # "bobyqa"
-
-
-## Fit random effects models
-for(dist in c("poisson", "nb")) {
-    for(temp_ref in c(35)) { # vec_temp_ref ){
-        for(re in c("linear", "quad", "both")) {
-            
-            switch(re,
-                   both = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 + I(x1^2) | male)),
-                   linear = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 +  x1 | male)),
-                   quad = (formula_re <- song_count ~ -1 + male + x1 + I(x1^2) +  (-1 + I(x1^2) |  male))
-                   )
-
-            if(dist == "poisson"){
-                print(paste("temp_ref =", temp_ref,"glmer_poisson", "re = ", re))
-                glmer_poisson <- glmer(formula = formula_re,
-                                       data = data,
-                                       control = glmerControl(
-                                           optCtrl = list(maxiter = 1E5,
-                                                          maxfun = 2E6,
-                                                          trace = trace),
-                                           optimizer=optimizer),
-                                       family = poisson(link = "log"),
-                                       verbose = verbose
-                                       )
-
-                print(summary(glmer_poisson))
-                plot(glmer_poisson, ask=FALSE)
-                
-                fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glmer" &  fit_db$dist == "poisson" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glmer_poisson)
-
-
-                print("evaluate overdispersion")
-                
-                glmer_qpoisson <- overdisp.glmer(glmer_poisson)
-
-            }
-
-            if(dist == "nb"){
-                print(paste("temp_ref =", temp_ref,"glmer_nb", "re = ", re))
-                try(glmer_nb <- 
-                        glmer.nb(formula = formula_re,
-                                 data = data,
-                                 ## control values are used by the initial optimization
-                                 ## using a poisson glmer model, which doesn't converge
-                                 control = glmerControl(
-                                     boundary.tol = 0,
-                                     tolPwrss=1e-1,                 
-                                     optCtrl = list(maxiter = 1E5,
-                                                    maxfun = 2E6,
-                                                    trace = trace),
-                                     optimizer = optimizer),
-                                 ## nb.control values are used by the second optimizer
-                                 ## Note need to set own optCtrl values
-                                 nb.control = list(
-                                     optCtrl = list(maxit = 1000,
-                                                    maxfun = 2E5)),
-                                 verbose = verbose
-                                 )
-                    )
-
-                plot(glmer_nb, ask = FALSE)
-                print(summary(glmer_nb))
-
-                fit_db[fit_db$temp_ref==temp_ref &  fit_db$model == "glmer" &  fit_db$dist == "nb" & fit_db$re == re & est_cov == est_cov, ]$fit <- list(glmer_nb)
-            }
-        }
-    }
-}
-
-```
-
-#### Results 
-
-- Changing `temp_ref` alters the linear term, as expected, but has little impact on the overall model fit.
-- fixed effects qpoisson and nb indicates data is highly over dispersed
-- poisson and nb RE models do not converge
-  - With RE for both `x1` and `x1^2` we get failure to converge and the correlation between these two RE is 1 (this means there's really, at best, one RE|male rather than two).
-  - With single RE we get return `boundary(singular)` error because the var of teh RE is essentially zero.
-  This indicates the model is too complex given the data
-
-Basically, I don't think this avenue is fruitful, but I do need to understand how the covariance matrix is used in these models
-    - What is the difference between the `|` and `||` models?
-    - I believe the `|` is a correlated random effects approach
-    - Houseman test is used for comparing FE and RE
-    - Does one of these assume the random effects themselves vary between trials for the same male as some refernces suggest, i.e. the RE for `x1` for male `z` varies between replicates? Trials?
-    - Seems like we could compare a `lmList` result with the `glmer`
-    
-## Additional Fixed Effects fits
-
-### Fit Fixed Effects models
-
-```{r}
-
-est_cov <- FALSE
-verbose <- 0
-trace <- FALSE
-
-#for(temp_ref in vec_temp_ref ){
-temp_ref <- 35
-
-    data <- data_ind %>%
-        mutate(x1 = (temp_mean - temp_ref))
-    print(paste("temp_ref:", temp_ref))
-
-    re <- "none"
-    
-    glm_poisson <-
-        glm(song_count ~ 1 + male + x1/male + I(x1^2)/male, 
-            data = data,
-            family = poisson(link = "log")
-            )
-
-    summary(glm_poisson)
-    plot(glm_poisson, ask = FALSE)
-
-    glm_qpoisson <- update(glm_poisson,
-                           family = quasipoisson(link = "log")
-                           )
-    summary(glm_qpoisson)
-
-    ## Note the dispersion parameter is 29.7 rather than 1!!
-    ## Clearly the data is over dispersed
-    ## quasipoisson() doesn't seem to exist for glmer (but likely exists in nlme)
-    plot(glm_qpoisson, ask = FALSE)
-
-    
-    glm_nb <- glm.nb <-
-        glm(song_count ~ 1 + male + (x1/male) + I(x1^2)/male, 
-            data = data
-            )
-    summary(glm_nb)
-    plot(glm_nb, ask = FALSE)
-
-    ## Dispersion parameter is 4547!
-}
-
-
-```
-
-### Results
-
-- `poisson` model does give significant effects, but `qpoisson` indicates data is overdispersed.
-  When overdisperion is taken into account, significance disappears.
-  - This occurs even if you're only using `/male` on one of the `x1` terms.
-  
 # End
 
 ```{r, error = FALSE}
@@ -874,451 +570,3 @@ knitr::knit_exit()
 
 ```
 
-```{r}
-
-temp_ref = 35
-
-
-data <- data_ind %>%
-    mutate(x1 = (temp_mean - temp_ref))
-
-glm_poisson <-
-    glm(song_count ~ x1*male + I(x1^2),
-        data = data,
-        family = poisson(link = "log")
-        )
-
-
-## This results seems to suggest there are a few 'outliers' that likely cause problesm when fitting the model (i.e. birds with very high linear terms
-summary(glm_poisson)
-plot(glm_poisson, ask = FALSE)
-
-
-glm_qpoisson <- update(glm_poisson,
-                           family = quasipoisson(link = "log")
-                       )
-
-summary(glm_qpoisson)
-plot(glm_qpoisson, ask = FALSE)
-
-```
-
-#### Using LME -- Uses `nlme` package
-
-```{r}
-
-fm1<-lme(song_prop ~ exp( 1 + vpd_offset + I(vpd_offset^2)),
-         data = data_ind,
-         random = ~ 1|male,
-         weights = varFixed( ~ 1/prop_wt))  ## this should specify weights = var(song_prop) 
-
-initialize( varFixed( ~ 1/prop_wt), data_ind)
-
-
-           
-## Try filtering the data a bit more
-## Goal is to get good starting values
-
-
-glm_gaussian <- glm(song_prop ~
-            1 + vpd_offset + I(vpd_offset^2), 
-            data = data_ind,
-            weights = prop_wt,
-        family = "gaussian"(link = 'log')
-       )
-summary(glm_gaussian)
-
-## Even filtered data doesn't behave well
-fit_glmer_initial <- glmer(song_prop ~
-            vpd_offset + I(vpd_offset^2) + (vpd_offset||male),
-        data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
-        family = gaussian(link = "log"),
-        control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
-        )
-
-fit_glmer_qpoisson <- update(fig_glmer_initial, family = quasipoisson())
-
-
-tmp <- glmer(song_prop ~
-            vpd_offset + I(vpd_offset^2) + (vpd_offset + I(vpd_offset^2)||male),
-        data = data_ind,
-        family = poisson(link = "log"),
-        weights = prop_wt,
-        control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="bobyqa"),
-        verbose = verbose)
-
-summary(tmp)
-
-```
-
-
-
-## GLM Mixed Effects (glmer) Model fits
-
-```{r}
-
-glmer = list()
-
-glmer$poisson <- tmp <-
-    glmer(
-        song_count ~
-            (1 + temp_mean + (temp_mean||male) + I(temp_mean^2)),
-        data = data_ind,
-        family = poisson(link = "log"),
-        control = glmerControl(optCtrl = list(maxiter = 300)),
-        verbose = verbose)
-
-## Still a lot of overdispersion
-glmer$od <- overdisp.glmer(glmer$poisson)
-
-```
-
-
-
-
-
-
-# Other Stuff
-
-### Consider estimating overdispersion parameter
-
-```{r}
-
-data_tmp <- data_full %>% filter(round == 2) %>% dplyr::select(male, song_count) %>% group_by(male)
-
-tmp_summarized <- summarize(data_tmp, var(song_count), mean(song_count))
-
-## Methods of Moments: if x ~ NB(p, p/(p + r)), var(x) = p + p^2/r, mean(x) = p
-## Alternative parameterization
-## p = 1 - \mu/\sigma^2;
-## r = \mu^2/(\sigma^2 - \mu)
-## Where,
-##   \mu = mean(x) = p r/(1-p)
-##   \sigma^2 = var(x) = (1-p)/(1+p)^2
-
-
-var_tmp = var(data_tmp)
-
-
-tmp <- glm(song_count ~ male,
-           data = data_tmp,
-    family = quasipoisson()
-    )
-
-```
-
-## Make a model fit tibble - Not complete
-
-```{r}
-round_tbl <- tibble(round_1 = FALSE, round_2 = c(TRUE, FALSE),
-       round_3 = TRUE
-       ) %>% rep(2)
-
-
-
-model_cat <- c("lm", "glm", "glmer")
-round_1 <- FALSE
-round_2 <- c(FALSE, TRUE)
-round_3 <- TRUE
-male <- c(FALSE, TRUE)
-chamber <- c(FALSE, TRUE)
-trial_index <- c(FALSE, TRUE)
-
-fit_tbl_names <- c("model_cat",
-      "round_1",
-      "round_2",
-      "round_3",
-      "male",
-      "chamber",
-      "trial_index",
-      "temp_slope",
-      "temp_curve",
-      "male_x_temp_slope",
-      "male_x_temp_curve",
-      "residual_df".
-      "residual_ss"
-      "R2",
-      "AIC",
-      "fit_obj"
-      )
-
-fit_tbl <- data.frame("a" = 1, "b"= 1:2, "c" = 1:3)
-
-                 ,
-                  names = 
-      )
-)
-comment(fit_tbl) <- "temp_slope = temp, temp_curve = I(temp^2)"
-
-filter_data_lm() <- list(
-formulas_lm() <-
-    
-
-
-```
-
-## Earliest Analysis
-
-### Analyze `round 2 & 3`
-
-- In `round = 3`, 
-  - The only `trial_completed = FALSE` is in highest temp.
-  - Only one of 6 chambers was used for a given male, thus chamber and male are conflated.
-  - Actually makes life easier!
-
-```{r}
-
-data_r3 <- data_full %>% filter(round ==3)
-
-```
-### LM Fits on `log(song_counts_plus_one)`
-
-- None of these models fit very well
-
-
-
-#### Fit each individual separately
-
-- Learning how to use `lmList()` function
-
-```{r}
-
-## Individual fits to each male
-## This isn't that useful, but is my firstuse of lmList()
-
-lmList <- list()
-
-lmList$by_male <- tmp <-
-    lme4::lmList(log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2) | male,
-           data = data %>% filter(round %in% c(2,3)),
-           na.action = na.omit)
-           
-
-summary(tmp)
-
-plot.lmList4(tmp, log_song_count_plus1 ~ fitted(.)| male)
-
-
-```
-#### Fit multiple variations of grouping
-
-```{r}
-
-
-lm = list()
-
-formula <- as.formula("log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2)")
-
-## Note syntax below model `formula` doesn't appear in the model summary().
-## lm$basic <- lm(formula = formula , data = data_r3)
-
-## Here string of formula is shown in summary()
-## The .() forces the evaluation in bquote()
-## See: https://win-vector.com/2018/09/01/r-tip-how-to-pass-a-formula-to-lm/
-## for detailed explanation of how this works
-lm$basic <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
-summary(tmp)
-
-## Add trial_index effect
-formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_index+ temp_target + I(temp_target^2)")
-lm$trial_index <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
-summary(tmp)
-
-## Add male effect 
-formula <- as.formula("log_song_count_plus_1 ~ 1 + male + temp_target + I(temp_target^2)")
-lm$male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
-summary(tmp) 
-
-## Add chamber effect (fewer chambers than males)
-formula <- as.formula("log_song_count_plus_1 ~ 1+ chamber + temp_target + I(temp_target^2)")
-lm$chamber <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
-summary(tmp)
-
-## Add trial_index and male effects
-formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_index + male + temp_target + I(temp_target^2)")
-lm$trial_index_and_male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
-summary(tmp)
-
-
-## Add male x trial order
-## This doesn't work since we have as many coefficients as data points.
-## Oops
-formula <- as.formula("log_song_count_plus_1 ~ 1 + male*trial_index + temp_target + I(temp_target^2)")
-lm$trial_index_by_male <- tmp <- lm(formula = eval(formula) , data = data_r3)
-summary(tmp)
-
-
-## add slope x male interaction term
-
-lm$male_by_temp <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target*male + I(temp_target^2), data = data_r3)
-summary(tmp)
-
-
-## slope x male - male intercept
-## This suggests that the slopes are similar between males (though the SE are large)
-lm$male_by_temp <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target:male + I(temp_target^2), data = data_r3)
-summary(tmp)
-
-## curvature x male - male intercept
-## This suggests that the slopes are similar between males (though the SE are large)
-lm$male_by_temp_sq <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2):male, data = data_r3)
-summary(tmp)
-```
-
-## GLMM (glmer) Model fits
-
-```{r}
-
-glmer = list()
-
-## I think this is a correct fit.  If I don't include the 1 + temp... w/o the |male, I don't get any effects.
-glmer$nb_1 <- glmer.nb(
-    song_count ~ 1 + temp_target + I(temp_target^2) + trial_index + ((1 + temp_target + I(temp_target^2))|male),
-    data = data_r3,
-    family = poisson(link = "log"),
-    control = glmerControl(optCtrl = list(maxiter = 300)),
-    verbose = verbose)
-
-
-glmer$nb_2 <- update(glmer$nb_1, formula =  song_count ~ 1 + temp_target + I(temp_target^2) + ((1 + temp_target + I(temp_target^2))|male) )
-
-mode
-```
-
-
-### Compare Models
-
-```{r}
-
-
-## Results: Male is much better predictor than trial_index
-anova(lm$male, lm$trial_index)
-
-## Results: Male is better predictor than chamber.
-## This indicates males vary more than chambers
-anova(lm$male, lm$chamber)
-
-## Results: Adding trial_index to male provides no real gain in fit
-anova(lm$male, lm$trial_index_and_male)
-```
-
-### Notes
-
-- We do see evidence of male effects.
-  The important males have lower intercepts than the rest
-- There is little evidence of consistent trial_index effects.
-- Adjusted $R^2$ don't seem to vary much.
-
-
-## For Later: Lactin2 
-
-```{r}
-
-data <- data_full %>% filter(round ==3)
-
-data %>% group_by(temp_target) %>%
-    filter(song_count < 400) %>%
-    summarize(ave = mean(song_count, na.rm = TRUE), sd = sd(song_count, na.rm = TRUE)) 
-
-
-## show the data
-## windows()
-ggplot(data, aes(temp_target, song_count)) + 
-    geom_point() +
-    geom_jitter() +
-  theme_bw(base_size = 12) +
-  labs(x='Temperature (C)', 
-       y='Song Count', 
-       title = 'Song Count Across Temperature')
-
-## choose the model
-mod = 'lactin2_1995'
-
-## get starting values
-start_vals <- get_start_vals(data$temp_target, data$song_count, model_name = 'lactin2_1995')
-  
-## Get limits
-low_lims <- get_lower_lims(data$temp_target,data$song_count,model_name = 'lactin2_1995')
-upper_lims <- get_upper_lims(data$temp_target, data$song_count, model_name = 'lactin2_1995')
-
-start_vals
-low_lims
-upper_lims
-  
-## fit model
-fit <- nls_multstart(song_count~lactin2_1995(temp = temp_target, a,b,tmax,delta_t),
-                                  data = data,
-                                  iter = 600,
-                                  start_lower = start_vals-10,
-                                  start_upper = start_vals+10,
-                                  lower = low_lims,
-                                  upper = upper_lims,
-                                  supp_errors = 'Y',
-                                  convergence_count = FALSE)
-  
-## look at model fit
-summary(fit)
-
-## Predict new data 
-preds <- data.frame(temp = seq(min(data$temp_target), max(data$temp_target), length.out = 6))
-preds <- broom::augment(fit, newdata = preds)
-
-## plot data and model fit
-## windows()
-ggplot(preds)+
-  geom_point(aes(temp_target,song_count), data)+
-  geom_line(aes(temp, .fitted), preds, col = 'blue')+
-  theme_bw()+
-  labs(x='Temperature (C)',
-       y='Song Count',
-       title = 'Song Count Across Temperatures')
-
-
-```
-
-
-## Unweighted model
-
-- Fit 4 Chosen model formulations in rTPC
-
-
-```{r}
-
-d <-filter(heat_roundt2, Male =="T236")
-d_fits <- nest(d, data = c(temp_target,song_count)) %>%
-  mutate(lactin = map(data,~nls_multstart(song_count~lactin2_1995(temp = temp_target, a, b, tmax, delta_t),
-                      data = .x,
-                      iter = c(3,3,3,3),
-                      start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'lactin2_1995')-10,
-                      start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'lactin2_1995')+10,
-                      lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'lactin2_1995'),
-                      upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'lactin2_1995'),
-                      supp_errors = 'Y',
-                      convergence_count = FALSE)),
-weibull = map(data,~nls_multstart(song_count~weibull_1995(temp = temp_target, a, topt, b,c),
-                                  data = .x,
-                                  iter = c(4,4,4,4),
-                                  start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'weibull_1995')-10,
-                                  start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'weibull_1995')+10,
-                                  lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'weibull_1995'),
-                                  upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'weibull_1995'),
-                                  supp_errors = 'Y',
-                                  convergence_count = FALSE)),
-modifiedgaussian = map(data, ~nls_multstart(song_count~modifiedgaussian_2006(temp = temp_target, rmax,topt, a, b),
-                                            data = .x,
-                                            iter = c(3,3,3,3),
-                                            start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006')-10,
-                                            start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006')+10,
-                                            lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006'),
-                                            upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006'),
-                                            supp_errors = 'Y',
-                                            convergence_count = FALSE)),
-briere = map(data,nls_multstart(song_count~briere2_1999(temp = temp_target, tmin, tmax, a,b),
-                                data = .x,
-                                iter = c(4,4,4,4),
-                                start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'briere2_1999')-10,
-                                start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'briere2_1999')+10,
-                                lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'briere2_1999'),
-                                upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'briere2_1999'),
-                                supp_errors = 'Y',
-                                convergence_count = FALSE)))
