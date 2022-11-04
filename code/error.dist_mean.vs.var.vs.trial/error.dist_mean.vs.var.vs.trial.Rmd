@@ -11,7 +11,7 @@ knitr::opts_chunk$set(
   message = TRUE, # show messages
   error = TRUE, # do not interrupt generation in case of errors,
   echo = TRUE#,  # show R code
-##  results="asis" # Hopefully print summary() in for loops
+  ##results="asis" # Hopefully print summary() in for loops
   )
 
 
@@ -202,7 +202,9 @@ data <- bind_rows(data_ind, data_comb)
 
 ## Examine How Var varies with Mean `temp_target = 40`
 
-```{r}
+**WARNING:** `warning()` are off
+
+```{r, warning = FALSE}
 
 data_40  <- data_ind %>%
     filter(temp_target == 40) %>%
@@ -212,45 +214,45 @@ dim(data_40)
 
 stats_40 <- data_40 %>%
     group_by(male) %>%
-    summarize(mean = mean(song_count), var = var(song_count, na.rm = TRUE), count = length(song_count)) %>% mutate(round = 0)
+    summarize(mean = mean(song_count),
+              var = var(song_count, na.rm = TRUE),
+              cv = sqrt(var)/mean,
+              count = length(song_count), ) %>% mutate()
 
 print("We have 15 males, 5 of which we only have 1 observation at 40C")
 stats_40
 
-var_threshold <- 7500
-mean_threshold <- 40
+song_stats <- stats_40
 
-male_high_var <- stats_40 %>% filter(var > var_threshold) %>% pull(male)
-data_male_high_var <- data_40 %>% filter(male %in% male_high_var)
+print("Flag birds birds with a coefficient of variation `cv` > 0.5 & `mean` < 50") 
+cv_threshold <- 0.5
+mean_threshold <- 50
+
+male_high_cv <- stats_40 %>% filter(cv > cv_threshold) %>% pull(male)
+data_male_high_cv <- data_40 %>% filter(male %in% male_high_cv)
 
 male_low_mean <- stats_40 %>% filter(mean < mean_threshold) %>% pull(male)
 data_male_low_mean <- data_40 %>% filter(male %in% male_low_mean)
 
 
-g0 <- ggplot(data_male_high_var) +
+g0 <- ggplot(data_male_high_cv) +
     aes(x=song_count,
         color = male,
         fill = male) + 
     geom_histogram() +
-    labs(title = paste0("Data for males with exceptionally high variances", paste(male_high_var, collapse = " & "))
+    labs(title = paste0("Data for males with exceptionally high cviances", paste(male_high_cv, collapse = " & "))
          )
 
-## We have 5 birds that have only 1 observation.
 
-song_stats <- filter(stats_40, !is.na(var))
-song_stats
-
-for(filter_high_var in c(FALSE, TRUE)){
+for(filter_high_cv in c(FALSE, TRUE)){
     for(filter_low_mean in c(FALSE, TRUE)){
-
-        print(paste0("Mean vs Var; filter high var: ", filter_high_var, "; filter low mean: ", filter_low_mean))
 
         data_tmp <- data_40
         song_stats_tmp <- song_stats
         
-        if(filter_high_var){
-            data_tmp <- filter(data_tmp, !(male %in% male_high_var) )
-            song_stats_tmp <- filter(song_stats_tmp, !(male %in% male_high_var) )
+        if(filter_high_cv){
+            data_tmp <- filter(data_tmp, !(male %in% male_high_cv) )
+            song_stats_tmp <- filter(song_stats_tmp, !(male %in% male_high_cv) )
         }
 
         if(filter_low_mean){
@@ -270,7 +272,7 @@ for(filter_high_var in c(FALSE, TRUE)){
                 mapping = aes(x = male,
                               y = mean,
                               color = male),
-                size = 3,
+                size = 2.5,
                 shape = 24,
                 data = song_stats_tmp) +
             theme(legend.position = "none", axis.text.x = element_text(angle = -45)) +
@@ -281,25 +283,26 @@ for(filter_high_var in c(FALSE, TRUE)){
                 color = male,
                 fill = male) + 
             geom_histogram() +
+            xlim(0, NA) +
             labs(title = "Raw Count Data")
         
         formula = y ~ -1 + x
         g2 <- ggplot(song_stats_tmp) +
-            aes(x=mean, y = var) + 
+            aes(x=mean, y = var) +
             geom_point(aes(color = male)) +
-            geom_smooth(method='lm', formula = formula) +
+            geom_smooth(method='lm', formula = formula, fullrange = TRUE) +
             ##stat_cor(label.y.npc = 0.95) +
             stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
             theme(legend.position = "none") +
+            xlim(0, NA) +
             labs(title = "Mean vs. var")
 
         fit_g2 <- lm(var ~ -1 + mean, data = song_stats_tmp)
-        print(summary(fit_g2))
         
         g3 <- ggplot(song_stats_tmp) +
             aes(x=mean, y = var) +
             geom_point(aes(color = male)) +
-            geom_smooth(method='lm', formula= formula) +
+            geom_smooth(method='lm', formula= formula, fullrange = TRUE) +
             stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
             theme(legend.position = "none") +
             labs(title = "Mean vs. Var",
@@ -312,21 +315,21 @@ for(filter_high_var in c(FALSE, TRUE)){
         g4 <- ggplot(song_stats_tmp) +
             aes(x=mean, y = var) +
             geom_point(aes(color = male)) +
-            geom_smooth(method='lm', formula = formula) +
+            geom_smooth(method='lm', formula = formula, fullrange = TRUE) +
             stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
             theme(legend.position = "none") +
+            xlim(0, NA) +
             labs(title = "Mean vs. Var",
                  subtitle = "var ~ mean + mean^2")
                                         #    scale_x_log10() +
                                         #    scale_y_log10()
         fit_g4 <- lm(var ~ -1 + mean +  I(mean^2), data = song_stats_tmp)
-        print(summary(fit_g4))
         
         formula <- y ~ -1 + I(x^2)
         g5 <- ggplot(song_stats_tmp) +
             aes(x=mean, y = var) +
             geom_point(aes(color = male)) +
-            geom_smooth(method='lm', formula = formula) +
+            geom_smooth(method='lm', formula = formula, fullrange = TRUE) +
             stat_regline_equation(label.y.npc = 0.9,
                                   aes(label = paste(
                                           ..eq.label..,
@@ -335,54 +338,58 @@ for(filter_high_var in c(FALSE, TRUE)){
             theme(legend.position = "none") +
             labs(title = "Mean vs. Var",
                  subtitle = "var ~ mean^2")
-                                        #    scale_x_log10() +
-                                        #    scale_y_log10()
 
         fit_g5 <- lm(var ~ -1 + I(mean^2), data = song_stats_tmp)
-        print(summary(fit_g5))
         #ifelse(length(dev.list()) < 4, dev.new(), dev.next())
         
         ga <- grid.arrange(g0, g2, g4, g5,
                      ncol=2,
                      top=textGrob(
-                         paste0("Mean vs. Var: Filter High Var = ", filter_high_var,
+                         paste0("Mean vs. Var: Filter High CV = ", filter_high_cv,
                                 ", Low Mean = ", filter_low_mean, "\n temp_target = 40C"),
                          gp=gpar(fontsize = 11))
                      )
-        ga
-        
-       dev.print(device = pdf, file = file.path(output_dir, paste0("mean.vs.var_filter.high-", filter_high_var, ".filter.low.mean-", filter_low_mean, ".pdf")))
+        ##cat("\n\n\\pagebreak\n")
+        ##print("<P style='page-break-before: always'>")    #forced new-page happens here.
 
+        print(paste0("Mean vs Var; filter high cv: ", filter_high_cv, "; filter low mean: ", filter_low_mean))
+        print(summary(fit_g2))
+        print(summary(fit_g4))
+        print(summary(fit_g5))
+
+ga
+        
+        dev.print(device = pdf, file = file.path(output_dir, paste0("mean.vs.var_filter.high-", filter_high_cv, ".filter.low.mean-", filter_low_mean, ".pdf")))
+        
     }
 }
 
 ```
 
 
-### Results
+### Conclusion
 
 - Excluding males with very high variances indicates that for the remaining males `var ~ mean`, but overdispersed relative to the poisson.
+- Using multiple trials at one temp could be an effective way to identify 'reliable' males.
 
 
 ## Compare `song_count` vs `trial` at 40C
 
-```{r}
+**WARNING:** `warning()` are off
 
-print("HERE")
+```{r, warning = FALSE}
 
-for(filter_high_var in c(FALSE, TRUE)){
+for(filter_high_cv in c(FALSE, TRUE)){
     for(filter_low_mean in c(FALSE, TRUE)){
         
 
-        print(paste0("song_count vs. trial; filter.high: ", filter_high_var, "; filter.low.mean: ", filter_low_mean))
-        
         data_tmp <- data_40 %>% group_by(male) %>%
             arrange(trial, .by_group = TRUE) %>%
             mutate(cummean = cummean(song_count)) %>%
             select(male, trial, song_count, cummean)
         
-        if(filter_high_var){
-            data_tmp <- filter(data_tmp, !(male %in% male_high_var) )
+        if(filter_high_cv){
+            data_tmp <- filter(data_tmp, !(male %in% male_high_cv) )
         }
 
         if(filter_low_mean){
@@ -406,16 +413,17 @@ for(filter_high_var in c(FALSE, TRUE)){
         formula <- y ~ 1 + x
         g0 <- ggplot(data_tmp, aes(x = trial, y = song_count)) +
             geom_point(aes(color = male))
+
         
         g2 <- g0 +
-            geom_smooth(method = 'lm', formula = formula) +
+            geom_smooth(method = 'glm', formula = formula, fullrange = TRUE) +
             stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
             theme(legend.position = "none") +
+            xlim(1, NA) +
             labs(title = "Linear")
         ##g2
 
-        fit_g2 <- lm( song_count ~ 1 + trial, data = data_tmp)
-        print(summary(fit_g2))
+        fit_g2 <- glm( song_count ~ 1 + trial, data = data_tmp)
 
         g3 <- g0 + geom_smooth(method = 'glm',
                                formula= formula,
@@ -423,14 +431,12 @@ for(filter_high_var in c(FALSE, TRUE)){
                                method.args = list(family = quasipoisson(link = "log"))) +
             stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
             theme(legend.position = "none") +
+            xlim(1, NA) +
             labs(title = "log-linear: family = qpoisson(link = log)")
         ##g3
         
         fit_g3 <- glm( song_count ~ 1 + trial, data = data_tmp,
                       family = quasipoisson(link = "log"))
-
-        print(summary(fit_g3))
-
         formula <- y ~ 1 + x + I(x^2)
         g4 <- g0 + geom_smooth(method='glm',
                                formula= formula,
@@ -438,28 +444,40 @@ for(filter_high_var in c(FALSE, TRUE)){
                                method.args = list(family = quasipoisson(link = "log"))) +
             stat_regline_equation(label.y.npc = 0.9, aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~")), formula = formula, size = 2.5) +
             theme(legend.position = "none") +
+            xlim(1, NA) +
             labs(title = "log-quad: family = qpoisson(link = log)")
         ##g4
         
         fit_g4 <- glm(song_count ~ 1 + trial + I(trial^2), data = data_tmp,
                       family = quasipoisson(link = "log"))
-        print(summary(fit_g4))
 
         ga <- grid.arrange(g2, g3, g4, as_ggplot(legend),
                            ncol=2,
                            top=textGrob(
-                               paste0("song_count vs. trial: Filter High Var = ", filter_high_var, ", Low Mean = ", filter_low_mean, "\n temp_target = 40C"),
+                               paste0("song_count vs. trial: Filter High CV = ", filter_high_cv, ", Low Mean = ", filter_low_mean, "\n temp_target = 40C"),
                                gp=gpar(fontsize = 11))
                            )
+        ##cat("\n\n\\pagebreak\n")
+        ##print("<P style='page-break-before: always'>")    #forced new-page happens here.
+
+        print(paste0("song_count vs. trial; filter.high: ", filter_high_cv, "; filter.low.mean: ", filter_low_mean))
+
+        print(summary(fit_g2))
+        print(summary(fit_g3))
+        print(summary(fit_g4))
+
         ga
         
-        dev.print(device = pdf, file = file.path(output_dir, paste0("song_count.vs.trial_filter.high-", filter_high_var, ".filter.low.mean-", filter_low_mean, ".pdf")))
+        dev.print(device = pdf, file = file.path(output_dir, paste0("song_count.vs.trial_filter.high-", filter_high_cv, ".filter.low.mean-", filter_low_mean, ".pdf")))
     }
 }
 
 
 ```
 
+### Conclusion
+
+When filtering out low mean (which have few trials and, thus, bias the analysis towards a small intercept) results in no evidence that `song_count` increases with `trial`
 
 # End
 
