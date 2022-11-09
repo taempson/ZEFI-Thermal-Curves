@@ -214,10 +214,11 @@ dim(data_40)
 
 stats_40 <- data_40 %>%
     group_by(male) %>%
-    summarize(mean = mean(song_count),
+    summarize(count = length(song_count),
+              mean = mean(song_count),
               var = var(song_count, na.rm = TRUE),
               cv = sqrt(var)/mean,
-              count = length(song_count), ) %>% mutate()
+              dispersion = var/mean) %>% mutate()
 
 print("We have 15 males, 5 of which we only have 1 observation at 40C")
 stats_40
