@@ -7,12 +7,12 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-  warning = TRUE, # show warnings
-  message = TRUE, # show messages
-  error = TRUE, # do not interrupt generation in case of errors,
-  echo = TRUE#,  # show R code
-  ##results="asis" # Hopefully print summary() in for loops
-  )
+                      warning = TRUE, # show warnings
+                      message = TRUE, # show messages
+                      error = TRUE, # do not interrupt generation in case of errors,
+                      echo = TRUE#,  # show R code
+                      ##results="asis" # Hopefully print summary() in for loops
+                  )
 
 
 if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E5, output = TRUE)
@@ -43,10 +43,10 @@ library(grid) ## provides textGrob
 library(gridExtra)
 library(viridisLite)
 
-#options(ggplot2.continuous.colour="viridis",
-#        ggplot2.discrete.colour="viridis",
-#        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
-#        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
+                                        #options(ggplot2.continuous.colour="viridis",
+                                        #        ggplot2.discrete.colour="viridis",
+                                        #        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
+                                        #        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
 
 library(GGally)
 library(reshape2)
@@ -71,19 +71,21 @@ library(latex2exp)
 ## Use to get model equations for models in rTPC
 
 help_text <- function(...) {
-  file <- help(...)
-  path <- dirname(file)
-  dirpath <- dirname(path)
-  pkgname <- basename(dirpath)
-  RdDB <- file.path(path, pkgname)
-  rd <- tools:::fetchRdDB(RdDB, basename(file))
-  capture.output(tools::Rd2txt(rd, out="", options=list(underline_titles=FALSE)))
+    file <- help(...)
+    path <- dirname(file)
+    dirpath <- dirname(path)
+    pkgname <- basename(dirpath)
+    RdDB <- file.path(path, pkgname)
+    rd <- tools:::fetchRdDB(RdDB, basename(file))
+    capture.output(tools::Rd2txt(rd, out="", options=list(underline_titles=FALSE)))
 }
 
 get_model_eq <- function(model) {
     txt <- help_text(model)
     eqn_line <- grep("^ +rate = .*$", txt, value = TRUE)
+    print(paste(model, eqn_line))
     eqn <- gsub("(^ +rate = | *$)", "", eqn_line) %>%
+        gsub("([^0-9])\\.(\\w+)", "\\1 * \\2", .) %>%
         gsub("\\.([^0-9])", " * \\1", .) %>%
         gsub("\\_", "", .)    
     df <- tibble(model = model, eq = eqn)
@@ -137,6 +139,68 @@ plot_stan_fit <- function(stanfit) {
 
 ```
 
+- Copied from: (https://rmazing.wordpress.com/2012/07/19/a-weighting-function-for-nls-nlslm/)
+- Key usage: `wfct(1/fitted^2)` which uses the fitted value in nls
+
+```{r}
+
+wfct <- function(expr)
+{
+    expr <- deparse(substitute(expr))
+
+    ## create new environment
+    newEnv <- new.env()
+
+    ## get call
+    mc <- sys.calls()[[1]]
+    mcL <- as.list(mc)
+
+    ## get data and write to newEnv
+    DATA <- mcL[["data"]]
+    DATA <- eval(DATA)
+    DATA <- as.list(DATA)
+    NAMES <- names(DATA)
+    for (i in 1:length(DATA)) assign(NAMES[i], DATA[[i]], envir = newEnv)
+
+    ## get parameter, response and predictor names
+    formula <- as.formula(mcL[[2]])
+    VARS <- all.vars(formula)
+    RESP <- VARS[1]
+    RHS <- VARS[-1]
+    PRED <- match(RHS, names(DATA))
+    PRED <- names(DATA)[na.omit(PRED)]
+
+    ## calculate variances for response values if "error" is in expression
+    ## and write to newEnv
+    if (length(grep("error", expr)) > 0) {
+        y <- DATA[[RESP]]
+        x <- DATA[[PRED]]
+        ## test for replication
+        if (!any(duplicated(x))) stop("No replicates available to calculate error from!")
+        ## calculate error
+        error <- tapply(y, x, function(e) var(e, na.rm = TRUE))
+        error <- as.numeric(sqrt(error))
+        ## convert to original repititions
+        error <- rep(error, as.numeric(table(x)))
+        assign("error", error, envir = newEnv)
+    }
+
+    ## calculate fitted or residual values if "fitted"/"resid" is in expression
+    ## and write to newEnv
+    if (length(grep("fitted", expr)) > 0 || length(grep("resid", expr)) > 0) {
+        mc2 <- mc
+        mc2$weights <- NULL
+        MODEL <- eval(mc2)
+        fitted <- fitted(MODEL)
+        resid <- residuals(MODEL)
+        assign("fitted", fitted, newEnv)
+        assign("resid", resid, newEnv)
+    }
+
+    ## return evaluation in newEnv: vector of weights
+    OUT <- eval(parse(text = expr), envir = newEnv)
+    return(OUT)
+}
 
 ## Plotting settings
 
@@ -162,7 +226,7 @@ options(ggplot2.discrete.fill = "viridis")
 
 ```{r}
 model_def_tbl <- lapply(get_model_names(), get_model_eq) %>% bind_rows(, .id = NULL) %>% tibble()
-print(model_def_tbl, n = 200, width = 200)
+                                        #print(model_def_tbl, n = 200, width = 200)
 
 str_rm <- c("exp", "[0-9.]+", "log(2|10|)", "sin", "abs", "pi", "temp")
 pattern <- paste0("\\b", paste0(str_rm, collapse = "\\b|\\b"), "\\b")
@@ -171,8 +235,9 @@ n_param  <- stringi::stri_extract_all_words(model_def_tbl$eq) %>%
     lapply(., paste, collapse= " ") %>%
     str_replace_all(., pattern, "") %>%
     str_count(., boundary("word"))
-model_tbl <- bind_cols(model_def_tbl, n_param= n_param)
-
+model_tbl <- bind_cols(model_def_tbl, n_param= n_param) %>%
+    arrange(n_param, model) %>% relocate(eq, .after = n_param)
+## model_tbl
 ```
 
 ## Load Data
@@ -197,22 +262,184 @@ males_filtered_disp <- song_stats_40C %>%
 males_filtered_mean <- song_stats %>%
     filter(mean > 10) %>%
     pull(male)
+
 males_filtered <- intersect(males_filtered_mean, males_filtered_disp)
 
-data_ind <- song_data %>% filter(male %in% males_filtered)
+##males_selected <-
+
+data_ind <- song_data %>%
+    filter(male %in% males_filtered) %>%
+    arrange(male) %>%
+    ##    left_join(male_shape, by = "male") %>%
+    mutate()
 
 ## copy data frame and assign `male =  "combined")
 data_comb <- data_ind %>% mutate(male = "combined")
 
+stats_ind <- song_stats %>%
+    filter(male %in% males_filtered)
+
 ```
 
 
-# Analyze Data: Combined
+## Plot song_count
+
 
 ```{r}
-data <- data_comb
+
+g1 <- ggplot(data = data_ind) +
+    aes(x = temp, y = song_count, color = male, shape = male) +
+    ## Redefine shapes. Note need to set 'shape = male' above to prevent there from
+    ## begin two legends: 1 for shape and 1 for color.
+    scale_shape_manual(values = rep(c(16:18), length.out = length(males_filtered))) +
+    geom_point() +
+    scale_color_viridis_d() +
+    labs(title = "song_count") +
+    theme(legend.position="none")
+
+```
 
 
+
+```{r}
+
+g1 <- ggplot(data = data_ind) +
+    aes(x = temp, y = song_count, color = male, shape = male) +
+    ## Redefine shapes. Note need to set 'shape = male' above to prevent there from
+    ## begin two legends: 1 for shape and 1 for color.
+    scale_shape_manual(values = rep(c(16:18), length.out = length(males_filtered))) +
+    geom_point() +
+    scale_color_viridis_d() +
+    labs(title = "song_count") +
+    theme(legend.position="none")
+
+g2 <- ggplot(data = data_ind) +
+    aes(x = temp, y = song_prop, color = male, shape = male) +
+    scale_shape_manual(values = rep(c(16:18), length.out = length(males_filtered))) +
+    geom_point() +
+    scale_color_viridis_d() +
+    labs(title = "song_prop") +
+    theme(legend.position="bottom")
+
+
+legend <- get_legend(g2)
+
+g2 <- g2 + theme(legend.position="none")
+
+g3 <- tableGrob(format(data.frame(stats_ind %>% select(male, n_obs, total, mean) %>% unique() ),
+                       digits = 1),
+                theme = ttheme_default(base_size = 8))
+
+grid.arrange(g1, g2, g3, legend, ncol = 2,
+             top=textGrob("Males filtered for dispersion < 50 at 40C & count_mean < 10",
+                          gp=gpar(fontsize = 11))
+             )
+
+
+```
+
+# Analyze Data: 
+
+
+## Models with 3 or 4 parameters
+
+```{r}
+
+model_set <- model_tbl %>% filter(n_param < 5 & n_param > 2)
+model_grob <- tableGrob(model_set)
+
+grid.arrange(model_grob)
+```
+### Flinn
+
+```{r}
+
+data <- data_ind %>% rename(rate = song_prop) %>%
+    select(temp, rate, weights, song_count_plus_1) %>%
+    data.frame()
+
+fit_list <- list()
+graph_list <- list()
+tgrob_list <- list()
+
+for(model_str in model_set$model) {
+
+    n_param <- formals(model_str) %>% length() - 1
+    iter <- 500 ##rep(5, n_param)
+
+    model_fits <- list()
+    model_graphs <- list()
+    model_tgrobs <- list()
+
+
+    start_vals <- get_start_vals(data$temp, data$rate, model_name = model_str)
+    lower <- get_lower_lims(data$temp, data$rate, model_name = model_str)
+    upper <- get_upper_lims(data$temp, data$rate, model_name = model_str)
+
+    my.formals <- names(formals(model_str)) %>% paste(., collapse = ", ") %>% sub("temp,", "temp = temp,", .)
+    formula <- paste0("rate ~ ", model_str, "(", my.formals, ")") 
+    for(weights_index in 1:2) {
+
+        ## WARNING: if you use 'weights' as a variable, it uses the column in data$weights even if weights is locally defined.
+        
+        local.weights <- switch(weights_index,
+                                rep(1, nrow(data)),
+                                data$weights
+                                )
+        
+        
+        fit <- nls_multstart(formula = formula,
+                             data = data,
+                             iter = iter, 
+                             start_lower = lower*1.01,
+                             start_upper = upper*0.99,
+                             lower = lower,
+                             upper = upper,
+                             supp_errors = 'Y',
+                             modelweights =  local.weights,
+                             convergence_count = 100, ## only used if iter = INT
+                             control = c(maxiter = 1024, maxfev = 100000)
+                             )
+        
+
+
+
+        summary(fit) %>% print()
+        ##fit_list[[model_str]] <- fit
+
+        ## calculate additional traits
+        if(FALSE) calc_params(fit) %>% mutate_all(round, 2)
+
+        ## Get predictions of our model using broom::augment(), which is similar to predict(). These are then plotted over our original data.
+
+                                        # predict new data
+        new_data <- data.frame(temp = seq(min(data$temp), max(data$temp), 0.5))
+        preds <- augment(fit, newdata = new_data)
+
+                                        # plot data and model fit
+        g <- ggplot(data, aes(temp, rate)) +
+            geom_point() +
+            geom_line(aes(temp, .fitted), preds, col = 'blue') +
+            theme_bw(base_size = 12) +
+            labs(x = 'Temperature (ºC)',
+                 y = 'Song Count',
+                 title = paste0("Fitting ", model_str, ", using weight_index: ", weights_index))
+
+        model_fits[[weights_index]] <- fit
+        model_graphs[[weights_index]] <- g
+##        model_tgrobs[[weights_index]] <- text_grob(label = summary(fit))
+
+    }
+
+
+    ##grid.arrange(grobs = c(model_graphs, model_tgrobs), top = model_str)
+    grid.arrange(grobs = model_graphs, top = model_str)
+
+    fit_list[[model_str]] <- model_fits;
+    graph_list[[model_str]] <- model_graphs;
+    tgrob_list[[model_str]] <- model_tgrobs;
+
+}
 
 ```
 
