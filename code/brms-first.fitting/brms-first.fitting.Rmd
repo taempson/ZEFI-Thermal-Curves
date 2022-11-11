@@ -214,6 +214,17 @@ model_def_tbl <- lapply(get_model_names(), get_model_eq) %>% bind_rows(, .id = N
 print(model_def_tbl, n = 200)
 
 ```
+
+## Set Output
+
+```{r}
+
+output_dir = "output"
+if (!dir.exists(output_dir)) {dir.create(output_dir)}
+
+```
+
+
 ## Load Data
 
 ```{r}
@@ -389,85 +400,6 @@ data <- data_ind %>%
 dim(data)
 ```
 
-## Fit `lactin1`
-
-- `male` as a factor
-- fixed `tmax = 45` 
-- Set `b = 0` (so essentially lactin1 which removes an unnecessary scaling term in the logan model).
-```{r, eval=FALSE}
-
-refit.model <- FALSE
-tmax = 45
-b = 0
-
-nlform <-
-    bf(song_count ~  exp(a * temp) - exp(a * tmax - ((tmax - temp)/delta_t)) + b,
-       delta_t ~ male - 1,
-       a ~ male -1,
-       nl = TRUE)
-
-iter = 20000
-warmup = floor(iter/2)
-max_treedepth = 14
-
-lactin1_nb = list()
-
-
-for(prior_index in 1:2 ){
-
-    switch(prior_index,
-    {
-        ## bounded normals
-        nlprior <- c(prior(normal(400, 400), nlpar = "a", lb = 0),
-                     prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
-                     prior(normal(0, 3), nlpar = "a", lb = 0),
-                     prior(normal(0, 3), nlpar = "b", lb = 0))},
-    {
-        ## wider bounded normals
-        nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
-                     prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
-                     prior(normal(0, 10), nlpar = "a", lb = 0),
-                     prior(normal(0, 6), nlpar = "b", lb = 0))},
-    {
-        ## gamma(alpha = a , beta = b); E(x) = a/b; var(x) = a/b^2 
-        nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
-                     prior(normal(35, 20.), nlpar = "topt", lb = 0),
-                     prior(gamma(1, 0.01), nlpar = "a", lb = 0),
-                     prior(gamma(1, 0.01), nlpar = "b", lb = 0))},
-    )
-
-
-
-    lactin1_nb[[prior_index]] <- brm(formula = nlform,
-                                    data = data,
-                                    family = negbinomial(link = "identity",
-                                                         link_shape = "identity"),
-                                    prior = nlprior,
-                                    chains = 4, cores = 4,
-                                    iter = iter,
-                                    warmup = warmup,
-                                    save_model = "model_mgauss_nb_1.stan",
-                                    control = list(adapt_delta = 0.96))
-
-
-}
-
-```
-### Plot Fits
-
-```{r, eval=FALSE}
-
-
-for(prior_index in 1:2 ){
-    model <- lactin1_nb[[prior_index]]
-    ## plot_brms_fit(model)
-    print(plot_stan_fit(model$fit))
-    }
-    
-
-```
-
-
 ## Fit `modifiedgaussian`
 
 - rTPC model: `modifiedgaussian`
@@ -475,7 +407,9 @@ for(prior_index in 1:2 ){
 
 ```{r}
 
-fit.file <- "output/mgauss_nb.Rda"
+fit.file <- file.path(output_dir, "mgauss_nb.Rda")
+
+
 refit.model <- FALSE
 
 nlform <-
@@ -558,7 +492,7 @@ for(prior_index in 1:2) {
     model <- mgauss_nb[[prior_index]]
     plot_brms_fit(model)
     print(plot_stan_fit(model$fit))
-    }
+}
     
 
 ```
@@ -570,3 +504,81 @@ knitr::knit_exit()
 
 ```
 
+## Fit `lactin1`
+
+- `male` as a factor
+- fixed `tmax = 45` 
+- Set `b = 0` (so essentially lactin1 which removes an unnecessary scaling term in the logan model).
+```{r, eval=FALSE}
+
+refit.model <- FALSE
+tmax = 45
+b = 0
+
+nlform <-
+    bf(song_count ~  exp(a * temp) - exp(a * tmax - ((tmax - temp)/deltat)) + b,
+       deltat ~ male - 1,
+       a ~ male -1,
+       nl = TRUE)
+
+iter = 20000
+warmup = floor(iter/2)
+max_treedepth = 14
+
+lactin1_nb = list()
+
+### THESE PRIORS AREN'T CORRECT
+
+for(prior_index in 1:2 ){
+
+    switch(prior_index,
+    {
+        ## bounded normals
+        nlprior <- c(prior(normal(400, 400), nlpar = "a", lb = 0),
+                     prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
+                     prior(normal(0, 3), nlpar = "a", lb = 0),
+                     prior(normal(0, 3), nlpar = "b", lb = 0))},
+    {
+        ## wider bounded normals
+        nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
+                     prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
+                     prior(normal(0, 10), nlpar = "a", lb = 0),
+                     prior(normal(0, 6), nlpar = "b", lb = 0))},
+    {
+        ## gamma(alpha = a , beta = b); E(x) = a/b; var(x) = a/b^2 
+        nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
+                     prior(normal(35, 20.), nlpar = "topt", lb = 0),
+                     prior(gamma(1, 0.01), nlpar = "a", lb = 0),
+                     prior(gamma(1, 0.01), nlpar = "b", lb = 0))},
+    )
+
+
+
+    lactin1_nb[[prior_index]] <- brm(formula = nlform,
+                                    data = data,
+                                    family = negbinomial(link = "identity",
+                                                         link_shape = "identity"),
+                                    prior = nlprior,
+                                    chains = 4, cores = 4,
+                                    iter = iter,
+                                    warmup = warmup,
+                                    save_model = "model_mgauss_nb_1.stan",
+                                    control = list(adapt_delta = 0.96))
+
+
+}
+
+```
+### Plot Fits
+
+```{r, eval=FALSE}
+
+
+for(prior_index in 1:2 ){
+    model <- lactin1_nb[[prior_index]]
+    ## plot_brms_fit(model)
+    print(plot_stan_fit(model$fit))
+    }
+    
+
+```
