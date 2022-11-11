@@ -173,27 +173,37 @@ song_data_full <- full_join(song_data_raw[[1]], song_data_raw[[2]]) %>%
            count_mean_round = count_total_round/n_obs_round,
            count_sd_round = sd(song_count),
            count_cv_round = count_sd_round/count_mean_round) %>%
-    ungroup(round) %>%
+    ungroup() %>%
+    group_by(male) %>%
     mutate(count_total = sum(song_count),
            n_obs = length(song_count),
            count_mean = count_total/n_obs) %>% 
     mutate(trial = rank(date)) %>%
     mutate(song_prop_round = song_count/count_total_round) %>%
     mutate(song_prop = song_count/count_total) %>%
+    ungroup(male) %>% 
     ## assuming poisson error
     ## From glm man page
     ## > Non-‘NULL’ ‘weights’ can be used to indicate that different
     ## >  observations have different dispersions (with the values in
     ## >  ‘weights’ being inversely proportional to the dispersions);
-    ## add +1 to deal with single 0
-    ## Interpret dispersion as ~ sd(), wt ~ 1/disp = 1/sd var()
-    mutate(weight_count = sqrt(1/(song_count + 1))) %>%
+    ## From: https://www.r-bloggers.com/2014/01/ill-take-my-nls-with-weights-please/
+    ## > Minimum-variance estimation of the adjustable parameters in linear and non-linear
+    ## > least squares requires that the data be weighted inversely as their variances
+    ## > $w_i \propto \sigma^{-2}$.
+    ## Note from: https://www.r-bloggers.com/2012/07/a-weighting-function-for-nls-nlslm/
+    ## >  wfct() returns a vector of weights that are calculated from a user-defined expression and transfers this vector within nls.
+    ##  - one option is 1/fitted, which seems ideal.
+    ##
+    ## For now set weights = 1/(song_count + 1)
+    ## - add +1 to deal with 0's
+    mutate(weights = 1/(song_count + 1)) %>%
     ## need to rescale wts for song_prop data
-    mutate(weight_prop = weight_count * count_total_round) %>% 
+    ##mutate(weight_prop = weight_count * count_total_round) %>% 
     ## Add vpd 
-    mutate(svp = SVP(t = temp_mean + 273.15, isK = TRUE), vpd = svp*(1-humidity_mean/100) ) %>%
+    mutate(svp = SVP(t = temp_mean + 273.15, isK = TRUE),
+           vpd = svp*(1-humidity_mean/100) ) %>%
     rename(bill_date = date_morph_data_collected) %>% 
-    group_by(round) %>%
     mutate(vpd_offset = vpd - mean(vpd)) %>%
     ungroup() %>%
     relocate(round, trial_round, song_count, song_prop, temp_mean, humidity_mean, .after = male) %>% 
@@ -234,7 +244,6 @@ song_stats_40C <- song_data_40C %>%
               dispersion = var/mean) %>%
     replace(is.na(.), 0)
 
-d[is.na(d)] <- 0
 
 print("We have 15 males, 5 of which we only have 1 observation at 40C")
 song_stats_40C
@@ -257,7 +266,7 @@ save(list = save_obj, file = paste0(file.path("output", file_name)) )
 ```
 
 
-## Plot song_prop
+## Plot song_count
 
 
 ```{r}
