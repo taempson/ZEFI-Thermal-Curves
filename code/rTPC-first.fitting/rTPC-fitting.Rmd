@@ -136,6 +136,114 @@ plot_stan_fit <- function(stanfit) {
     return(plist)
 
 }
+```
+- Create `nls_multstart_allfits()` to get all model fits.
+
+```{r}
+
+nls_multstart_allfits <- function (formula, data = parent.frame(), iter, start_lower, 
+    start_upper, supp_errors = c("Y", "N"), convergence_count = NULL, 
+    control, modelweights, verbose = FALSE, ...) {
+    if (missing(supp_errors)) {
+        supp_errors <- "N"
+    }
+    formula <- stats::as.formula(formula)
+    if (any(class(data) %in% c("data.frame", "list", "environment"))) {
+        params_ind <- all.vars(formula[[3]])[all.vars(formula[[3]]) %in% 
+            names(data)]
+        params_est <- all.vars(formula[[3]])[!all.vars(formula[[3]]) %in% 
+            names(data)]
+        params_dep <- all.vars(formula[[2]])
+    }
+    else {
+        stop("data should be a data.frame, list or an environment")
+    }
+    if (missing(start_lower) || missing(start_upper)) {
+        cat("No boundaries specified for the starting values of sought parameters. \n", 
+            "Default values of +/- 1e+10 will be used. This is likely \n", 
+            "to slow the process of finding the best model. \n")
+        r <- readline("Continue with default values [y/n]? ")
+        if (tolower(r) == "n") {
+            stop("Please enter upper and lower parameter boundaries as start_lower and start_upper in function argument.")
+        }
+    }
+    if (missing(start_lower)) 
+        start_lower <- rep(-10^10, length(params_est))
+    if (missing(start_upper)) 
+        start_upper <- rep(10^10, length(params_est))
+    if (length(start_lower) != length(params_est) || length(start_upper) != 
+        length(params_est)) {
+        stop("There must be as many parameter starting bounds as there are parameters")
+    }
+    params_bds <- data.frame(param = params_est, low.bds = unlist(start_lower), 
+        high.bds = unlist(start_upper), stringsAsFactors = FALSE)
+    if (missing(control)) {
+        control <- minpack.lm::nls.lm.control(maxiter = 1000, 
+            ftol = .Machine$double.eps, ptol = .Machine$double.eps)
+    }
+    silent <- ifelse(supp_errors == "Y", TRUE, FALSE)
+    if (silent == TRUE) {
+        oo <- options(warn = -1)
+        on.exit(options(oo))
+    }
+    if ("modelweights" %in% all.vars(formula)) {
+        stop(paste0("The variable name 'modelweights' is reserved for model weights. Please change the name\n", 
+            "of this variable"))
+    }
+    if (missing(modelweights)) {
+        data$modelweights <- rep(1, length(data[[params_dep]]))
+    }
+    else {
+        data$modelweights <- eval(substitute(modelweights), data)
+    }
+    if (length(iter) == 1) {
+        multistart_type <- "shotgun"
+    }
+    else if (length(iter) == nrow(params_bds)) {
+        multistart_type <- "gridstart"
+    }
+    else {
+        stop(paste0("iter should be of length 1 for shotgun approach and of the same length as the\n", 
+            "number of parameters for the gridstart approach."))
+    }
+
+    if (multistart_type == "shotgun") {
+        if(verbose) print("Setting up shotgun strt...")
+        strt <- purrr::map2(params_bds$low.bds, params_bds$high.bds, 
+            ~runif(iter, .x, .y))
+        names(strt) <- params_bds$param
+        strt <- dplyr::bind_rows(strt)
+    }
+    if (multistart_type == "gridstart") {
+        params_bds$iter <- iter
+        strt <- purrr::pmap(as.list(params_bds[, -1]), function(low.bds, 
+            high.bds, iter) seq(from = low.bds, to = high.bds, 
+            length.out = iter))
+        names(strt) <- params_bds$param
+        strt <- tibble::as_tibble(expand.grid(strt))
+    }
+
+    if(verbose) {
+        print(paste0("strt values for ", multistart_type))
+        print(strt)
+    }
+
+    strt$iteration <- 1:nrow(strt)
+    allfits <- tidyr::nest(strt, startpars = -iteration)
+    fit <- NULL
+    fit_best <- NULL
+    get_fit <- function(start.vals) {
+        try(fit <- minpack.lm::nlsLM(formula, start = start.vals, 
+                                         control = control, data = data, weights = modelweights, 
+                                         ...), silent = silent)
+        return(fit)
+    }
+        
+    fit_db <- dplyr::mutate(allfits,
+                            fit = purrr::map(startpars, get_fit)) ##, AICval = get_aic(fit))
+    return(fit_db)
+    
+}
 
 ```
 
@@ -273,7 +381,17 @@ data_ind <- song_data %>%
     ##    left_join(male_shape, by = "male") %>%
     mutate()
 
+data_aug <- tibble(
+    male = rep.int(
+    (data_ind$male %>% unique()), 5),
+    temp = 46,
+    song_count = 0,
+    song_prop = 0,
+    round = 0,
+    weights = 10) %>%
+    bind_rows(data_ind, .)
 ## copy data frame and assign `male =  "combined")
+
 data_comb <- data_ind %>% mutate(male = "combined")
 
 stats_ind <- song_stats %>%
@@ -350,95 +468,161 @@ model_grob <- tableGrob(model_set)
 
 grid.arrange(model_grob)
 ```
-### Flinn
+### Mulitple Fits
 
 ```{r}
 
-data <- data_ind %>% rename(rate = song_prop) %>%
-    select(temp, rate, weights, song_count_plus_1) %>%
-    data.frame()
+maxiter <- 4000
+minFactor <- min(1/(2*maxiter), 1/1024)
 
-fit_list <- list()
-graph_list <- list()
-tgrob_list <- list()
+weights_index <- 1:1
+data_indexes <- 1:2
+data_descriptions <- c("Unaugmented", "song_count at 46C Augmented")
 
-for(model_str in model_set$model) {
-
-    n_param <- formals(model_str) %>% length() - 1
-    iter <- 500 ##rep(5, n_param)
-
-    model_fits <- list()
-    model_graphs <- list()
-    model_tgrobs <- list()
-
-
-    start_vals <- get_start_vals(data$temp, data$rate, model_name = model_str)
-    lower <- get_lower_lims(data$temp, data$rate, model_name = model_str)
-    upper <- get_upper_lims(data$temp, data$rate, model_name = model_str)
-
-    my.formals <- names(formals(model_str)) %>% paste(., collapse = ", ") %>% sub("temp,", "temp = temp,", .)
-    formula <- paste0("rate ~ ", model_str, "(", my.formals, ")") 
-    for(weights_index in 1:2) {
-
-        ## WARNING: if you use 'weights' as a variable, it uses the column in data$weights even if weights is locally defined.
-        
-        local.weights <- switch(weights_index,
-                                rep(1, nrow(data)),
-                                data$weights
-                                )
-        
-        
-        fit <- nls_multstart(formula = formula,
-                             data = data,
-                             iter = iter, 
-                             start_lower = lower*1.01,
-                             start_upper = upper*0.99,
-                             lower = lower,
-                             upper = upper,
-                             supp_errors = 'Y',
-                             modelweights =  local.weights,
-                             convergence_count = 100, ## only used if iter = INT
-                             control = c(maxiter = 1024, maxfev = 100000)
-                             )
-        
+for(data_index in data_indexes ){
+    data <- switch(data_index,
+                   data_ind,
+                   data_aug
+                   )
+    data_desc <- data_descriptions[[data_index]]
+    data <- data %>% rename(rate = song_prop) %>%
+        select(temp, rate, weights, song_count_plus_1) %>%
+        data.frame()
 
 
+    ## Define x_range for predictions
+    x_range <- data.frame(temp = seq(min(data$temp), max(data$temp), 0.5))
 
-        summary(fit) %>% print()
-        ##fit_list[[model_str]] <- fit
+    pred_tbl <- tibble(x_range)
 
-        ## calculate additional traits
-        if(FALSE) calc_params(fit) %>% mutate_all(round, 2)
-
-        ## Get predictions of our model using broom::augment(), which is similar to predict(). These are then plotted over our original data.
-
-                                        # predict new data
-        new_data <- data.frame(temp = seq(min(data$temp), max(data$temp), 0.5))
-        preds <- augment(fit, newdata = new_data)
-
-                                        # plot data and model fit
-        g <- ggplot(data, aes(temp, rate)) +
-            geom_point() +
-            geom_line(aes(temp, .fitted), preds, col = 'blue') +
-            theme_bw(base_size = 12) +
-            labs(x = 'Temperature (ºC)',
-                 y = 'Song Count',
-                 title = paste0("Fitting ", model_str, ", using weight_index: ", weights_index))
-
-        model_fits[[weights_index]] <- fit
-        model_graphs[[weights_index]] <- g
-##        model_tgrobs[[weights_index]] <- text_grob(label = summary(fit))
-
+    fit_list <- list()
+    graph_list <- list()
+    tgrob_list <- list()
+    pred_list <- list()
+    for(wts in weights_index){
+        pred_list[[wts]] <- x_range
     }
 
 
-    ##grid.arrange(grobs = c(model_graphs, model_tgrobs), top = model_str)
-    grid.arrange(grobs = model_graphs, top = model_str)
+    g_base <- ggplot(data, aes(temp, rate)) +
+        geom_point()
 
-    fit_list[[model_str]] <- model_fits;
-    graph_list[[model_str]] <- model_graphs;
-    tgrob_list[[model_str]] <- model_tgrobs;
+    g_preds <- g_base
+    
+    for(model_str in model_set$model) {
 
+        n_param <- formals(model_str) %>% length() - 1
+        iter <- 1000 ##rep(5, n_param)
+
+        model_fits <- list()
+        model_graphs <- list()
+        model_tgrobs <- list()
+        ##    model_preds <- list()
+
+
+        start_vals <- get_start_vals(data$temp, data$rate, model_name = model_str)
+        lower <- get_lower_lims(data$temp, data$rate, model_name = model_str)
+        if(sum(!is.finite(lower))) {
+            print(paste0("Warning() in ", model_str, " lower = ", lower, " replacing problematic values with -1000"))
+            lower[!is.finite(lower)] <- -1000
+        }
+        upper <- get_upper_lims(data$temp, data$rate, model_name = model_str)
+        if(sum(!is.finite(upper))) {
+            print(paste0("Warning() in ", model_str, " upper = ", upper, " replacing problematic values with 1000", collapse = " "))
+            upper[!is.finite(upper)] <- 1000
+        }
+        
+        my.formals <- names(formals(model_str)) %>% paste(., collapse = ", ") %>% sub("temp,", "temp = temp,", .)
+        formula <- paste0("rate ~ ", model_str, "(", my.formals, ")") 
+        for(wts in weights_index) {
+
+            ## WARNING: if you use 'weights' as a variable, it uses the column in data$weights even if weights is locally defined.
+            
+            local.weights <- switch(wts,
+                                    rep(1, nrow(data)),
+                                    data$weights
+                                    )
+            
+            
+            fits_all <- nls_multstart_allfits(formula = formula,
+                                 data = data,
+                                 iter = iter, 
+                                 start_lower = lower*1.01,
+                                 start_upper = upper*0.99,
+                                 ## lower = lower, ## These are passed to nls
+                                 ## upper = upper, ## These are passed to nls
+                                 supp_errors = 'Y',
+                                 modelweights =  local.weights,
+                                 convergence_count = FALSE, ## misleading terminology, set to FALSE
+                                 control = c(maxiter = maxiter,
+                                             maxfev = 100000,
+                                             minFactor = minFactor)
+                                 )
+            
+            AIC_all <-  get_aic <- function(fit) {
+                AICval <- ifelse(!is.null(fit), stats::AIC(fit), 
+                                 Inf)
+                return(AICval)
+            }
+            fit <- first(fits_all)
+            
+
+            summary(fit) %>% print()
+            ##fit_list[[model_str]] <- fit
+
+            ## calculate additional traits
+            if(FALSE) calc_params(fit) %>% mutate_all(round, 2)
+            
+            ## Get predictions of our model using broom::augment(newdata = x_range)
+            ## `newdata` argument runs the predict() function and returns
+            ## predictor values (temp) and fitted values (.fitted).
+            preds <- augment(fit, newdata = x_range)
+            ## plot data and model fit
+            g <- g_base +
+                geom_line(aes(temp, .fitted), preds, col = 'blue') +
+                theme_bw(base_size = 12) +
+                labs(x = 'Temperature (ºC)',
+                     y = 'Song Count',
+                     title = paste0("Fitting ", model_str, ", using weight_index: ", wts))
+            g_preds <- g_preds +
+                geom_line(aes(temp, .fitted), preds, col = 'blue')
+            model_graphs[[wts]] <- g
+
+            model_fits[[wts]] <- fit
+            pred_list[[wts]] <- left_join(pred_list[[wts]], preds, by = "temp") %>%
+                rename("{model_str}" := .fitted)
+            
+            ##        model_tgrobs[[wts]] <- text_grob(label = summary(fit))
+
+        }
+
+        if(FALSE) {
+            ##grid.arrange(grobs = c(model_graphs, model_tgrobs), top = model_str)
+            grid.arrange(grobs = model_graphs, top = model_str)
+        }
+        
+        fit_list[[model_str]] <- model_fits;
+        graph_list[[model_str]] <- model_graphs;
+        tgrob_list[[model_str]] <- model_tgrobs;
+
+    }
+
+}
+
+
+
+for(data_index in data_indexes ){
+    data_desc <- data_descriptions[[data_index]]
+    for(wts in weights_index){
+        pred_data <- pred_list[[wts]]
+        data_long <- melt(pred_data, id = "temp", variable_name= "model")
+        
+        g <- g_base + geom_line(data = data_long, aes(x = temp, y = value, color = variable)) +
+            labs(x = 'Temperature (ºC)',
+                 y = 'Song Prop',
+                 title = paste0("Using weight_index: ", wts, " and data: ", data_desc ))
+    }
+    print(g)
 }
 
 ```
