@@ -83,65 +83,26 @@ help_text <- function(...) {
 get_model_eq <- function(model) {
     txt <- help_text(model)
     eqn_line <- grep("^ +rate = .*$", txt, value = TRUE)
-    print(paste(model, eqn_line))
+    #print(paste(model, eqn_line))
     eqn <- gsub("(^ +rate = | *$)", "", eqn_line) %>%
         gsub("([^0-9])\\.(\\w+)", "\\1 * \\2", .) %>%
         gsub("\\.([^0-9])", " * \\1", .) %>%
-        gsub("\\_", "", .)    
+        gsub("\\_", "", .)  %>%
+        gsub(" / ", "/", .)  %>%
+        sub("(^ +| +$)", "", .) %>%
+        paste(., collapse = "; ")
+#    print(eqn)
     df <- tibble(model = model, eq = eqn)
     return(df)
 }
 
 
-plot_brms_fit <- function(brmsfit) {
-    plist = list()
-
-    plist[[1]] <- plot(brmsfit, title = paste("brm() summary: ", prior_index), ask = FALSE)
-    return(plist)
-}
-
-plot_stan_fit <- function(stanfit) {
-    plist = list();
-    i <- 1
-    
-    plist[[i]] <-  plot(stanfit, title = paste("stan() summary: ", prior_index))
-
-
-    ## Plotting routines from: www.weirdfishes.blog/blog/fitting-bayesian-models-with...
-    ##
-    mack_diagnostics <- rstan::get_sampler_params(stanfit) %>% 
-        set_names(1:4) %>% 
-        map_df(as_tibble,.id = 'chain') %>% 
-        group_by(chain) %>% 
-        mutate(iteration = 1:length(chain)) %>% 
-        mutate(warmup = iteration <= warmup) %>%
-        mutate()
-    i <- i+ 1
-    
-    plist[[i]] <- mack_diagnostics %>% 
-        group_by(warmup, chain) %>% 
-        summarise(percent_divergent = mean(divergent__ >0)) %>% 
-        ggplot() +
-        geom_col(aes(chain, percent_divergent, fill = warmup), position = 'dodge', color = 'black') + 
-        scale_y_continuous(labels = scales::percent, name = "% Divergent Runs")  + 
-        scale_fill_npg()
-
-    i<- i+1
-    plist[[i]] <- mack_diagnostics %>% 
-        ggplot(aes(iteration, treedepth__, color = chain)) + 
-        geom_line() + 
-        geom_hline(aes(yintercept = max_treedepth), color = 'red') + 
-        scale_color_locuszoom()
-
-    return(plist)
-
-}
 ```
-- Create `nls_multstart_allfits()` to get all model fits.
+- Create `nls_multstart_fit_db()` to get all model fits.
 
 ```{r}
 
-nls_multstart_allfits <- function (formula, data = parent.frame(), iter, start_lower, 
+nls_multstart_db <- function (formula, data = parent.frame(), iter, start_lower, 
     start_upper, supp_errors = c("Y", "N"), convergence_count = NULL, 
     control, modelweights, verbose = FALSE, ...) {
     if (missing(supp_errors)) {
@@ -229,7 +190,8 @@ nls_multstart_allfits <- function (formula, data = parent.frame(), iter, start_l
     }
 
     strt$iteration <- 1:nrow(strt)
-    allfits <- tidyr::nest(strt, startpars = -iteration)
+    strt <- tidyr::nest(strt, startpars = -iteration)
+
     fit <- NULL
     fit_best <- NULL
     get_fit <- function(start.vals) {
@@ -238,9 +200,17 @@ nls_multstart_allfits <- function (formula, data = parent.frame(), iter, start_l
                                          ...), silent = silent)
         return(fit)
     }
-        
-    fit_db <- dplyr::mutate(allfits,
-                            fit = purrr::map(startpars, get_fit)) ##, AICval = get_aic(fit))
+
+    browser()
+    
+    fits <- purrr::map(strt$startpars, get_fit) %>% tibble("fit" = .)
+    fit_db <- bind_cols(strt, fits) %>% mutate( aic = ifelse(!is.null(fit), stats::AIC(fit), 
+                                 Inf) )
+                                        #dplyr::mutate(allfits,
+                            ## purrr works, but fit is embedded in a list.
+                            ## fit = purrr::map(startpars, get_fit)) ##, AICval = get_aic(fit))
+                                        #fit = get_fit(unlist(startpars)) ) ##, AICval = get_aic(fit))
+    
     return(fit_db)
     
 }
@@ -333,18 +303,51 @@ options(ggplot2.discrete.fill = "viridis")
 ## Create Model Tibble
 
 ```{r}
+
 model_def_tbl <- lapply(get_model_names(), get_model_eq) %>% bind_rows(, .id = NULL) %>% tibble()
                                         #print(model_def_tbl, n = 200, width = 200)
 
 str_rm <- c("exp", "[0-9.]+", "log(2|10|)", "sin", "abs", "pi", "temp")
 pattern <- paste0("\\b", paste0(str_rm, collapse = "\\b|\\b"), "\\b")
-n_param  <- stringi::stri_extract_all_words(model_def_tbl$eq) %>%
+
+## more robust than param_old
+param <- lapply(model_def_tbl$model, function(x) {
+    args <- names(formals(x))
+    args <- args[args !="temp"]
+    str <- paste(args, collapse = ", ")
+}) %>% unlist()
+
+names(param) <- model_def_tbl$model
+
+param_old  <- stringi::stri_extract_all_words(model_def_tbl$eq) %>%
     lapply(., unique) %>%
     lapply(., paste, collapse= " ") %>%
     str_replace_all(., pattern, "") %>%
-    str_count(., boundary("word"))
+    str_replace_all(., "( +$|^ +)", "") %>%
+    str_split(., " +") %>%
+    lapply(., sort) %>%
+    lapply(., paste, collapse = ", ") %>% unlist()
+
+
+n_param <- param %>% str_count(., boundary("word"))
+
 model_tbl <- bind_cols(model_def_tbl, n_param= n_param) %>%
-    arrange(n_param, model) %>% relocate(eq, .after = n_param)
+    bind_cols(. , param = param) %>%
+    arrange(n_param, model) %>%
+    relocate(eq, .after = param) %>%
+    mutate(tmax = as.integer(grepl(pattern = "tmax", x = param, fixed = TRUE))) %>% 
+    mutate(tmin = as.integer(grepl(pattern = "tmin", x = param, fixed = TRUE)))
+
+grid.arrange(tableGrob(model_tbl))
+
+model_tbl_tmax <- model_tbl %>% filter(tmax == 1)
+
+model_tbl_tmax %>% arrange("model")
+
+model_tbl_tmin <- model_tbl %>% filter(tmax == 1)
+
+model_tbl_tmax_no_tmin <- model_tbl %>% filter(tmax == 1 & tmin == 0)
+
 ## model_tbl
 ```
 
@@ -512,7 +515,7 @@ for(data_index in data_indexes ){
     for(model_str in model_set$model) {
 
         n_param <- formals(model_str) %>% length() - 1
-        iter <- 1000 ##rep(5, n_param)
+        iter <- 10 ##rep(5, n_param)
 
         model_fits <- list()
         model_graphs <- list()
@@ -544,7 +547,7 @@ for(data_index in data_indexes ){
                                     )
             
             
-            fits_all <- nls_multstart_allfits(formula = formula,
+            fit_db <- nls_multstart_db(formula = formula,
                                  data = data,
                                  iter = iter, 
                                  start_lower = lower*1.01,
@@ -559,11 +562,13 @@ for(data_index in data_indexes ){
                                              minFactor = minFactor)
                                  )
             
-            AIC_all <-  get_aic <- function(fit) {
+            get_aic <- function(fit) {
                 AICval <- ifelse(!is.null(fit), stats::AIC(fit), 
                                  Inf)
                 return(AICval)
             }
+
+            AIC_all <- lapply(fits_all, get_aic)
             fit <- first(fits_all)
             
 
