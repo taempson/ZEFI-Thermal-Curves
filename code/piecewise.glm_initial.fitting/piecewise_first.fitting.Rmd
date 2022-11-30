@@ -44,10 +44,13 @@ library(broom)
 library(tidyverse)
 library(viridisLite)
 library(rstan)
-#options(ggplot2.continuous.colour="viridis",
-#        ggplot2.discrete.colour="viridis",
-#        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
-#        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
+options(mc.cores = (parallel::detectCores()-2))
+rstan_options(auto_write = TRUE)
+
+## options(ggplot2.continuous.colour="viridis",
+##        ggplot2.discrete.colour="viridis",
+##        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
+##        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
 
 library(reshape2)
 library(lme4)
@@ -219,24 +222,35 @@ fit_1 <- stan(file = "one.step_piecewise_normal.stan",
     
 ```{r}
 
-y <- data_ind %>% pull(song_count)
-x <- data_ind %>% pull(temp)
+song_count <- data_ind %>% pull(song_count)
+temp <- data_ind %>% pull(temp)
 N <- length(y)
 iter <- 6000
-fit_2 <- stan(file = "one.step_piecewise_poisson.stan",
-              model_name = "one step poisson",
-              data=list(x = x, y = y,
-                        N = N,
-                        tmax = 46,
-                        y_tmax = 0),
-              chains = 4,
-              cores = 4,
-              iter = iter,
-              warmup = iter/2)
 
-## Examine output
+for(t1max in c(46, 45)) {
+    fit_2 <- stan(file = "one.step_piecewise_poisson.stan",
+                  model_name = "one step poisson",
+                  data=list(t = temp,
+                            y = song_count,
+                            N = N,
+                            tmax = 46,
+                            t1max = t1max, ## max threshold value.
+                            ## having it too close to tmax *sometimes* leads to sampling
+                            ## near tmax, but with lower lp and very high E13) b1 values
+                            y_tmax = 0),
+                  chains = 4,
+                  cores = 4,
+                  iter = iter,
+                  warmup = iter/2)
 
-traceplot(fit_2, pars = c("a1, bt1"), inc_warmup = TRUE)
+    ## Examine output
+    main = paste0("t1max = ", t1max)
+    print(main)
+    print(fit_2)
+    traceplot(fit_2, pars = c("t1", "b1", "lp__"), inc_warmup = FALSE, main = main)
+    plot(fit_2, pars = c("t1", "b1", "lp__"), main = main)
+    pairs(fit_2, pars = c("t1", "b1", "lp__"), main = main)
+}
 
 ```
 
