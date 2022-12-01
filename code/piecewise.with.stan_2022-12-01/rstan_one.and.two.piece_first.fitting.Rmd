@@ -1,11 +1,11 @@
 ---
-title: "Piecewise Regression"
+title: "Piecewise Regression using STAN Directly"
 author: "Michael Gilchrist"
 date: "date: 2022-11-29"
 output: pdf_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, }
 knitr::opts_chunk$set(
   warning = TRUE, # show warnings
   message = TRUE, # show messages
@@ -14,7 +14,7 @@ knitr::opts_chunk$set(
 )
 
 
-if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E5, output = TRUE)
+if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E3, output = TRUE)
 
 ```
 # Goal
@@ -27,9 +27,9 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E5, ou
 
 ## Install libraries
 
-```{r}
+```{r, message = FALSE}
 
-## install packages user might not have by replacing FALSE with TRUE
+# install packages user might not have by replacing FALSE with TRUE
 
 ## load libraries
 library(stats)
@@ -39,7 +39,6 @@ library(ggpubr)
 library(grid)
 library(gridExtra)
 library(GGally)
-library(segmented)
 library(broom)
 library(tidyverse)
 library(viridisLite)
@@ -109,7 +108,7 @@ stats_ind <- song_stats %>%
 ## Plot song_count
 
 
-```{r}
+```{r, echo = FALSE}
 
 g1 <- ggplot(data = data_ind) +
   aes(x = temp, y = song_count, color = male, shape = male) +
@@ -172,37 +171,42 @@ glm_qpoisson_0 <- glm(song_count ~
 
 summary(glm_qpoisson_0)
 
-glm_qpoisson_1 <- glm(song_count ~
-                        (1 + male),
-                      data = data_ind,
-                      family = quasipoisson(link = "identity")
-                      )
-
-
-summary(glm_qpoisson_1)
+# Following analysis not needed
+#
+# glm_qpoisson_1 <- glm(song_count ~
+#                        (1 + male),
+#                      data = data_ind,
+#                      family = quasipoisson(link = "identity")
+#                      )
+#
+#
+#summary(glm_qpoisson_1)
 
 ```
 
-## Stan
+# Stan
 
 
-### Data
+## Set Up Data
 
 ```{r}
 
 song_count <- data_ind %>% pull(song_count)
 temp <- data_ind %>% pull(temp)
 N <- length(temp)
+## parameters to be printed
 
+pars <- c("t1", "y0")
+pars_full <- c(pars, "b1", "lp__")
 ```
-### Normal error
+## Normal error
 
 ```{r}
 
 iter <- 10000
-fit_1 <- stan(file = "one.step_piecewise_normal.stan",
-              model_name = "one step gaussian",
-              data=list(x = x, y = y,
+fit_norm <- stan(file = "two.piece_normal.stan",
+              model_name = "Two piece gaussian",
+              data=list(x = temp, y = song_count,
                         N = N,
                         tmax = 46,
                         y_tmax = 0),
@@ -214,6 +218,7 @@ fit_1 <- stan(file = "one.step_piecewise_normal.stan",
 
 - Even with a (poorly chosen) prior on sigma, this fails to converge.
 Here's some output.
+````{verbatim}
 
 > Chain 1: Iteration: 6000 / 6000 [100%]  (Sampling)
 > Chain 1: 
@@ -239,19 +244,28 @@ Here's some output.
 > Running the chains for more iterations may help. See
 > https://mc-stan.org/misc/warnings.html#tail-ess 
 
+````
 
+## Poisson: Threshold (`t1`) and slope (`b`) formulation
 
-### Poisson
+- Model can be fitted
+  - Data is overdispersed.
+    (See comparison to `quasipoisson` below.)
+  - Alternative formulation trying to estimate 'y0' directly does not currently work.
 
-#### Threshold (`t1`) and slope (`b`) formulation
+### Null Model
 
 ```{r}
 
 iter <- 5000
 tmax <- 46
-t1max <- tmax - 0.75;
-t1min <- 25;
-fit_2 <- stan(file = "one.step_piecewise_poisson_t1.and.b1.stan",
+t1min <- 25
+t1max <- tmax - 0.001
+t1min <- t1max - 0.001
+## values to use for model predictions
+tp = seq(25, t1max, length.out = 100)
+
+fit_1 <- stan(file = "two.piece_poisson.stan",
               model_name = "one step poisson",
               data=list(t = temp,
                         y = song_count,
@@ -261,29 +275,89 @@ fit_2 <- stan(file = "one.step_piecewise_poisson_t1.and.b1.stan",
                         t1max = t1max, ## max threshold value.
                         ## having it too close to tmax *sometimes* leads to sampling
                         ## near tmax, but with lower lp and very high E13) b1 values
-                        y_tmax = 0),
+                        y_tmax = 0,
+                        tp = tp),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2))
+
+yp <- extract(fit_1)$yp
+
+## get xy predictions
+xyp_tibble <- tibble(xp = tp, yp = t(yp))
+
+xyp_summary <- xyp_tibble %>% transmute(x = tp, y = mean(yp), lci = quantile(yp, 0.025), uci = quantile(yp, 0.975))
+
+
+g1 + geom_smooth(
+
+## Examine output
+main <- "One piece"
+print(main)
+
+
+
+print(fit_1, pars = pars)
+traceplot(fit_1, pars = pars, inc_warmup = FALSE, main = main)
+plot(fit_1, pars = pars, main = main)
+pairs(fit_1, pars = pars_full, main = main)
+main = paste0("t1max = ", t1max)
+```
+
+## Two Piece Model
+
+- Examination of posterior pr values indicate this fits substantially better than the one piece model.
+- LOO analysis below indicates it has more `problems`, however.
+
+```{r}
+
+iter <- 5000
+tmax <- 46
+t1max <- tmax - 0.75;
+t1min <- 25;
+## values to use for model predictions
+tp = seq(25, tmax, length.out = 100)
+
+fit_2 <- stan(file = "two.piece_poisson.stan",
+              model_name = "Two Piece poisson",
+              data=list(t = temp,
+                        y = song_count,
+                        N = N,
+                        tmax = tmax,
+                        t1min = t1min,
+                        t1max = t1max, ## max threshold value.
+                        ## having it too close to tmax *sometimes* leads to sampling
+                        ## near tmax, but with lower lp and very high E13) b1 values
+                        y_tmax = 0,
+                        tp = tp),
               chains = 4,
               cores = 4,
               iter = iter,
               warmup = floor(iter/2))
 
 ## Examine output
-pars <- c("t1", "b1", "y0", "lp__")
-main = paste0("t1max = ", t1max)
+main <- "Two piece"
 print(main)
 print(fit_2, pars = pars)
 traceplot(fit_2, pars = pars, inc_warmup = FALSE, main = main)
 plot(fit_2, pars = pars, main = main)
-pairs(fit_2, pars = pars, main = main)
+pairs(fit_2, pars = pars_full, main = main)
 
 #ggplot()
+```
 
+### Leave One Out (LOO) analysis
+
+
+```{r}
 ## Code from:
 # Extract pointwise log-likelihood
 # using merge_chains=FALSE returns an array, which is easier to 
 # use with relative_eff()
-log_lik_1 <- extract_log_lik(fit_1, merge_chains = FALSE)
-
+for(fit in c("fit_1", "fit_2")) {
+  print(paste0("Model Fit: ", fit))  
+  log_lik_1 <- extract_log_lik(eval(parse(text = fit)), merge_chains = FALSE)
 # as of loo v2.0.0 we can optionally provide relative effective sample sizes
 # when calling loo, which allows for better estimates of the PSIS effective
 # sample sizes and Monte Carlo error
@@ -292,53 +366,23 @@ r_eff <- relative_eff(exp(log_lik_1), cores = 2)
 # preferably use more than 2 cores (as many cores as possible)
 # will use value of 'mc.cores' option if cores is not specified
 loo_1 <- loo(log_lik_1, r_eff = r_eff, cores = 2)
-print(loo_1)
+  print(loo_1)
+}
+
 ```
-
-#### Null Model
-```{r}
-
-tmax <- 46
-t1max <- tmax - 0.001
-t1min <- t1max - 0.001
+- Don't really know how to interpret these results.
 
 
-fit_0 <- stan(file = "one.step_piecewise_poisson_t1.and.b1.stan",
-              model_name = "one step poisson",
-              data=list(t = temp,
-                        y = song_count,
-                        N = N,
-                        tmax = tmax,
-                        t1min = t1min,
-                        t1max = t1max, ## max threshold value.
-                        ## having it too close to tmax *sometimes* leads to sampling
-                        ## near tmax, but with lower lp and very high E13) b1 values
-                        y_tmax = 0),
-              chains = 4,
-              cores = 4,
-              iter = iter,
-              warmup = floor(iter/2))
-
-## Examine output
-pars <- c("t1", "b1", "y0", "lp__")
-main = paste0("t1max = ", t1max)
-print(main)
-print(fit_0, pars = pars)
-traceplot(fit_0, pars = pars, inc_warmup = FALSE, main = main)
-plot(fit_0, pars = pars, main = main)
-pairs(fit_0, pars = pars, main = main)
-```
-
-### Comparing Fits
+## Comparing Fits
 
 
-### GLM_QPoisson vs. STAN Poisson
+### Null Models: GLM\_Poisson, GLM\_Quasipoisson vs. STAN Poisson
 
 ```{r}
 
 summary(glm_poisson_0)
 summary(glm_qpoisson_0)
-print(fit_0, pars = c("y0"))
+print(fit_1, pars = c("y0"))
 
 ```
 - We see that all three approaches give the same best estimate of `y0 = 116.5`.
@@ -348,9 +392,22 @@ print(fit_0, pars = c("y0"))
     I was hoping that the `stan` model would match the `quasipoisson` estimates.
       
 
+
+### One vs. Two Piece
+
+```{r}
+
+
+```
+
+
+```{r}
+knitr::knit_exit()
+```
+
 # CRUFT
 
-#### Threshold (`t1`) and pre-threshold level (`y0`) formulation
+### Threshold (`t1`) and pre-threshold level (`y0`) formulation
 
 
 - This has problems when run so, until they are debugged, don't run.
@@ -391,7 +448,7 @@ pairs(fit_2, pars = c("t1", "y0", "lp__"), main = main)
 
 
 
-### Stan data example
+## Stan data example
 ```{r}
 
 y_1 <- c(3, 5)

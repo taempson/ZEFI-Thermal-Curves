@@ -11,11 +11,15 @@ data {
   real tmax; // max temp
   real t1min; //min threshold value
   real t1max; //max threshold value
-  real y_tmax; // y value at tmax, generally will be 0  
+  real y_tmax; // y value at tmax, generally will be 0
+  vector[100] tp; // points used to create predictions for plotting
+
+  
 }
 
 transformed data {
   vector[N] s  = tmax - t;
+  vector[100] sp = tmax - tp;
 }
 
 parameters {
@@ -48,6 +52,12 @@ generated quantities {
   // Get LLik values for each data point
   // These are used in the LOO analysis of model fit(s)
   vector[N] log_lik;
+  vector[100] yp; //predicted values based on xp
+  
+  //yp = y_tmax + fmin(sp, s1) * a1;
+  for(n in 1:100) {
+      yp[n] = y_tmax + fmin(sp[n], s1) * a1;
+  }
   for (n in 1:N) {
     log_lik[n] = poisson_lpmf(y[n] | lambda[n]);
   }
