@@ -11,7 +11,7 @@ knitr::opts_chunk$set(
   message = TRUE, # show messages
   error = TRUE, # do not interrupt generation in case of errors,
   echo = TRUE  # show R code
-  )
+)
 
 
 if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E5, output = TRUE)
@@ -46,6 +46,8 @@ library(viridisLite)
 library(rstan)
 options(mc.cores = (parallel::detectCores()-2))
 rstan_options(auto_write = TRUE)
+library(loo)
+
 
 ## options(ggplot2.continuous.colour="viridis",
 ##        ggplot2.discrete.colour="viridis",
@@ -76,30 +78,30 @@ load(file.path("input", "data.processing_2022-11-09.Rda"),
 filter_data <- TRUE
 
 if(filter_data) {
-    males_filtered_disp <- song_stats_40C %>%
-        filter(dispersion < 50) %>%
-        pull(male)
-    
-    males_filtered_mean <- song_stats %>%
-        filter(mean > 10) %>%
-        pull(male)
+  males_filtered_disp <- song_stats_40C %>%
+    filter(dispersion < 50) %>%
+    pull(male)
 
-    male_vector <- intersect(males_filtered_mean, males_filtered_disp)
+  males_filtered_mean <- song_stats %>%
+    filter(mean > 10) %>%
+    pull(male)
+
+  male_vector <- intersect(males_filtered_mean, males_filtered_disp)
 } else {
-    male_vector <- song_data %>% select(male) %>% distinct()
+  male_vector <- song_data %>% select(male) %>% distinct()
 }
 
 
 ##males_selected <-
 
 data_ind <- song_data %>%
-    filter(male %in% male_vector) %>%
-    arrange(male) %>%
-    ##    left_join(male_shape, by = "male") %>%
-    mutate()
+  filter(male %in% male_vector) %>%
+  arrange(male) %>%
+  ##    left_join(male_shape, by = "male") %>%
+  mutate()
 
 stats_ind <- song_stats %>%
-    filter(male %in% male_vector)
+  filter(male %in% male_vector)
 
 ```
 
@@ -110,22 +112,22 @@ stats_ind <- song_stats %>%
 ```{r}
 
 g1 <- ggplot(data = data_ind) +
-    aes(x = temp, y = song_count, color = male, shape = male) +
-    ## Redefine shapes. Note need to set 'shape = male' above to prevent there from
-    ## begin two legends: 1 for shape and 1 for color.
-    scale_shape_manual(values = rep(c(16:18), length.out = length(male_vector))) +
-    geom_point() +
-    scale_color_viridis_d() +
-    labs(title = "song_count") +
-    theme(legend.position="none")
+  aes(x = temp, y = song_count, color = male, shape = male) +
+  ## Redefine shapes. Note need to set 'shape = male' above to prevent there from
+  ## begin two legends: 1 for shape and 1 for color.
+  scale_shape_manual(values = rep(c(16:18), length.out = length(male_vector))) +
+  geom_point() +
+  scale_color_viridis_d() +
+  labs(title = "song_count") +
+  theme(legend.position="none")
 
 g2 <- ggplot(data = data_ind) +
-    aes(x = temp, y = song_prop, color = male, shape = male) +
-    scale_shape_manual(values = rep(c(16:18), length.out = length(male_vector))) +
-    geom_point() +
-    scale_color_viridis_d() +
-    labs(title = "song_prop") +
-    theme(legend.position="bottom")
+  aes(x = temp, y = song_prop, color = male, shape = male) +
+  scale_shape_manual(values = rep(c(16:18), length.out = length(male_vector))) +
+  geom_point() +
+  scale_color_viridis_d() +
+  labs(title = "song_prop") +
+  theme(legend.position="bottom")
 
 
 legend <- get_legend(g2)
@@ -133,10 +135,10 @@ legend <- get_legend(g2)
 g2 <- g2 + theme(legend.position="none")
 
 g3 <- tableGrob(format(
-    data.frame(stats_ind %>%
+  data.frame(stats_ind %>%
                select(male, n_obs, total, mean) %>% unique()),
-                       digits = 1),
-    theme = ttheme_default(base_size = 8))
+  digits = 1),
+  theme = ttheme_default(base_size = 8))
 
 grid.arrange(g1, g2, g3, legend, ncol = 2,
              top=textGrob("Males filtered for dispersion < 50 at 40C & count_mean < 10",
@@ -154,11 +156,27 @@ grid.arrange(g1, g2, g3, legend, ncol = 2,
 
 ```{r}
 
+glm_poisson_0 <- glm(song_count ~
+                        1,
+                      data = data_ind,
+                      family = poisson(link = "identity")
+                      )
+
+summary(glm_poisson_0)
+
+glm_qpoisson_0 <- glm(song_count ~
+                        1,
+                      data = data_ind,
+                      family = quasipoisson(link = "identity")
+                      )
+
+summary(glm_qpoisson_0)
+
 glm_qpoisson_1 <- glm(song_count ~
-                       (1 + male),
-                   data = data_ind,
-                   family = quasipoisson(link = "identity")
-                   )
+                        (1 + male),
+                      data = data_ind,
+                      family = quasipoisson(link = "identity")
+                      )
 
 
 summary(glm_qpoisson_1)
@@ -168,13 +186,19 @@ summary(glm_qpoisson_1)
 ## Stan
 
 
+### Data
+
+```{r}
+
+song_count <- data_ind %>% pull(song_count)
+temp <- data_ind %>% pull(temp)
+N <- length(temp)
+
+```
 ### Normal error
 
 ```{r}
 
-y <- data_ind %>% pull(song_count)
-x <- data_ind %>% pull(temp)
-N <- length(y)
 iter <- 10000
 fit_1 <- stan(file = "one.step_piecewise_normal.stan",
               model_name = "one step gaussian",
@@ -189,70 +213,183 @@ fit_1 <- stan(file = "one.step_piecewise_normal.stan",
 ```
 
 - Even with a (poorly chosen) prior on sigma, this fails to converge.
-  Here's some output.
-  
-  > Chain 1: Iteration: 6000 / 6000 [100%]  (Sampling)
-  > Chain 1: 
-  > Chain 1:  Elapsed Time: 15.038 seconds (Warm-up)
-  > Chain 1:                14.647 seconds (Sampling)
-  > Chain 1:                29.685 seconds (Total)
-  > Chain 1: 
-  > Warning messages:
-  > 1: There were 1 divergent transitions after warmup. See
-  > https://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup
-  > to find out why this is a problem and how to eliminate them. 
-  > 2: There were 3819 transitions after warmup that exceeded the maximum treedepth. Increase max_treedepth above 10. See
-  > https://mc-stan.org/misc/warnings.html#maximum-treedepth-exceeded 
-  > 3: Examine the pairs() plot to diagnose sampling problems
-  >  
-  > 4: The largest R-hat is 1.55, indicating chains have not mixed.
-  > Running the chains for more iterations may help. See
-  > https://mc-stan.org/misc/warnings.html#r-hat 
-  > 5: Bulk Effective Samples Size (ESS) is too low, indicating posterior means and medians may be unreliable.
-  > Running the chains for more iterations may help. See
-  > https://mc-stan.org/misc/warnings.html#bulk-ess 
-  > 6: Tail Effective Samples Size (ESS) is too low, indicating posterior variances and tail quantiles may be unreliable.
-  > Running the chains for more iterations may help. See
-  > https://mc-stan.org/misc/warnings.html#tail-ess 
-  
-  
+Here's some output.
+
+> Chain 1: Iteration: 6000 / 6000 [100%]  (Sampling)
+> Chain 1: 
+> Chain 1:  Elapsed Time: 15.038 seconds (Warm-up)
+> Chain 1:                14.647 seconds (Sampling)
+> Chain 1:                29.685 seconds (Total)
+> Chain 1: 
+> Warning messages:
+> 1: There were 1 divergent transitions after warmup. See
+> https://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup
+> to find out why this is a problem and how to eliminate them. 
+> 2: There were 3819 transitions after warmup that exceeded the maximum treedepth. Increase max_treedepth above 10. See
+> https://mc-stan.org/misc/warnings.html#maximum-treedepth-exceeded 
+> 3: Examine the pairs() plot to diagnose sampling problems
+>  
+> 4: The largest R-hat is 1.55, indicating chains have not mixed.
+> Running the chains for more iterations may help. See
+> https://mc-stan.org/misc/warnings.html#r-hat 
+> 5: Bulk Effective Samples Size (ESS) is too low, indicating posterior means and medians may be unreliable.
+> Running the chains for more iterations may help. See
+> https://mc-stan.org/misc/warnings.html#bulk-ess 
+> 6: Tail Effective Samples Size (ESS) is too low, indicating posterior variances and tail quantiles may be unreliable.
+> Running the chains for more iterations may help. See
+> https://mc-stan.org/misc/warnings.html#tail-ess 
+
+
 
 ### Poisson
 
-    
+#### Threshold (`t1`) and slope (`b`) formulation
+
 ```{r}
 
-song_count <- data_ind %>% pull(song_count)
-temp <- data_ind %>% pull(temp)
-N <- length(y)
-iter <- 6000
+iter <- 5000
+tmax <- 46
+t1max <- tmax - 0.75;
+t1min <- 25;
+fit_2 <- stan(file = "one.step_piecewise_poisson_t1.and.b1.stan",
+              model_name = "one step poisson",
+              data=list(t = temp,
+                        y = song_count,
+                        N = N,
+                        tmax = tmax,
+                        t1min = t1min,
+                        t1max = t1max, ## max threshold value.
+                        ## having it too close to tmax *sometimes* leads to sampling
+                        ## near tmax, but with lower lp and very high E13) b1 values
+                        y_tmax = 0),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2))
 
-for(t1max in c(46, 45)) {
-    fit_2 <- stan(file = "one.step_piecewise_poisson.stan",
-                  model_name = "one step poisson",
-                  data=list(t = temp,
-                            y = song_count,
-                            N = N,
-                            tmax = 46,
-                            t1max = t1max, ## max threshold value.
-                            ## having it too close to tmax *sometimes* leads to sampling
-                            ## near tmax, but with lower lp and very high E13) b1 values
-                            y_tmax = 0),
-                  chains = 4,
-                  cores = 4,
-                  iter = iter,
-                  warmup = iter/2)
+## Examine output
+pars <- c("t1", "b1", "y0", "lp__")
+main = paste0("t1max = ", t1max)
+print(main)
+print(fit_2, pars = pars)
+traceplot(fit_2, pars = pars, inc_warmup = FALSE, main = main)
+plot(fit_2, pars = pars, main = main)
+pairs(fit_2, pars = pars, main = main)
 
-    ## Examine output
-    main = paste0("t1max = ", t1max)
-    print(main)
-    print(fit_2)
-    traceplot(fit_2, pars = c("t1", "b1", "lp__"), inc_warmup = FALSE, main = main)
-    plot(fit_2, pars = c("t1", "b1", "lp__"), main = main)
-    pairs(fit_2, pars = c("t1", "b1", "lp__"), main = main)
-}
+#ggplot()
+
+## Code from:
+# Extract pointwise log-likelihood
+# using merge_chains=FALSE returns an array, which is easier to 
+# use with relative_eff()
+log_lik_1 <- extract_log_lik(fit_1, merge_chains = FALSE)
+
+# as of loo v2.0.0 we can optionally provide relative effective sample sizes
+# when calling loo, which allows for better estimates of the PSIS effective
+# sample sizes and Monte Carlo error
+r_eff <- relative_eff(exp(log_lik_1), cores = 2) 
+
+# preferably use more than 2 cores (as many cores as possible)
+# will use value of 'mc.cores' option if cores is not specified
+loo_1 <- loo(log_lik_1, r_eff = r_eff, cores = 2)
+print(loo_1)
+```
+
+#### Null Model
+```{r}
+
+tmax <- 46
+t1max <- tmax - 0.001
+t1min <- t1max - 0.001
+
+
+fit_0 <- stan(file = "one.step_piecewise_poisson_t1.and.b1.stan",
+              model_name = "one step poisson",
+              data=list(t = temp,
+                        y = song_count,
+                        N = N,
+                        tmax = tmax,
+                        t1min = t1min,
+                        t1max = t1max, ## max threshold value.
+                        ## having it too close to tmax *sometimes* leads to sampling
+                        ## near tmax, but with lower lp and very high E13) b1 values
+                        y_tmax = 0),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2))
+
+## Examine output
+pars <- c("t1", "b1", "y0", "lp__")
+main = paste0("t1max = ", t1max)
+print(main)
+print(fit_0, pars = pars)
+traceplot(fit_0, pars = pars, inc_warmup = FALSE, main = main)
+plot(fit_0, pars = pars, main = main)
+pairs(fit_0, pars = pars, main = main)
+```
+
+### Comparing Fits
+
+
+### GLM_QPoisson vs. STAN Poisson
+
+```{r}
+
+summary(glm_poisson_0)
+summary(glm_qpoisson_0)
+print(fit_0, pars = c("y0"))
 
 ```
+- We see that all three approaches give the same best estimate of `y0 = 116.5`.
+  In addition,
+  - `poisson` and `stan` fits match in terms of their error estimate: 1.05.
+    This is substantially smaller than the `quasipoisson` estimate of 8.25.
+    I was hoping that the `stan` model would match the `quasipoisson` estimates.
+      
+
+# CRUFT
+
+#### Threshold (`t1`) and pre-threshold level (`y0`) formulation
+
+
+- This has problems when run so, until they are debugged, don't run.
+Instead, use previous model that calculates y0 from `t1` and `b0`.
+
+```{r}
+
+iter <- 6000
+t1max = 45
+
+fit_3 <- stan(file = "one.step_piecewise_poisson_t1.and.y0.stan",
+              model_name = "one step poisson: ",
+              data=list(t = temp,
+                        y = song_count,
+                        N = N,
+                        tmax = 46,
+                        t1min = t1min, ## min threshold value
+                        t1max = t1max, ## max threshold value
+                        ## having it too close to tmax *sometimes* leads to sampling
+                        ## near tmax, but with lower lp and very high E13) b1 values
+                        y_tmax = 0),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = iter/2)
+
+## Examine output
+main = paste0("t1max = ", t1max)
+print(main)
+print(fit_2)
+traceplot(fit_2, pars = c("t1", "y0", "lp__"), inc_warmup = FALSE, main = main)
+plot(fit_2, pars = c("t1", "y0", "lp__"), main = main)
+pairs(fit_2, pars = c("t1", "y0", "lp__"), main = main)
+
+
+```
+
+
+
 
 ### Stan data example
 ```{r}
