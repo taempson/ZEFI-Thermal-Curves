@@ -19,7 +19,7 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E3, ou
 ```
 # Goal
 
-- Fit piecewise GLM 
+- Fit one and two piece Poisson and Quasiposson GLM 
 
 ## Recap
 
@@ -203,7 +203,7 @@ pars_full <- c(pars, "b1", "lp__")
 
 ```{r}
 
-iter <- 10000
+iter <- 6000 ## increasing to 10k doesn't really help
 fit_norm <- stan(file = "two.piece_normal.stan",
               model_name = "Two piece gaussian",
               data=list(x = temp, y = song_count,
@@ -281,16 +281,6 @@ fit_1 <- stan(file = "two.piece_poisson.stan",
               cores = 4,
               iter = iter,
               warmup = floor(iter/2))
-
-yp <- extract(fit_1)$yp
-
-## get xy predictions
-xyp_tibble <- tibble(xp = tp, yp = t(yp))
-
-xyp_summary <- xyp_tibble %>% transmute(x = tp, y = mean(yp), lci = quantile(yp, 0.025), uci = quantile(yp, 0.975))
-
-
-g1 + geom_smooth(
 
 ## Examine output
 main <- "One piece"
@@ -393,17 +383,37 @@ print(fit_1, pars = c("y0"))
       
 
 
-### One vs. Two Piece
-
-```{r}
-
-
-```
-
-
 ```{r}
 knitr::knit_exit()
 ```
+
+
+### Plot One vs. Two Piece
+
+```{r}
+
+fit <- fit_1
+
+yp_summary <- extract(fit)$yp %>% data.frame() %>% t()#%>% transmute(mean = across(everything(), mean))
+
+%>% transmute(
+                                         mean = mean(yp),
+                                         lci = quantile(yp, 0.025),
+                                         uci = quantile(yp, 0.975)
+                                         )
+
+## get xy predictions
+xyp_tibble <- tibble(xp = tp, yp = t(yp)) #%>% unnest(cols = yp)
+
+
+)xyp_summary <- xyp_tibble %>% transmute(x = tp, y = mean(yp), lci = quantile(yp, 0.025), uci = quantile(yp, 0.975))
+
+
+g1 + geom_smooth(
+       
+
+```
+
 
 # CRUFT
 
