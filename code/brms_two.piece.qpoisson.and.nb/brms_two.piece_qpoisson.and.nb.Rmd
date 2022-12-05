@@ -211,77 +211,48 @@ dim(data)
 
 # BRMS Fits
 
+- see discussions at 
+  1. Piecewise Models: (https://discourse.mc-stan.org/t/piecewise-linear-mixed-models-with-a-random-change-point/5306/9)
+  2. Overdispersed poisson: (https://solomonkurz.netlify.app/post/2021-07-12-got-overdispersion-try-observation-level-random-effects-with-the-poisson-lognormal-mixture/)
+
 
 ## Poisson 
 
 ```{r}
 
-fit.file <- file.path(output_dir, "two.piecee_poisson.Rda")
+fit.file <- file.path(output_dir, "two.piece_poisson.Rda")
 
 
-refit.model <- FALSE
-
-nlform <-
-    bf(song_count ~ if(rmax*exp(-0.5*(fabs(temp - topt)/a)^b),
-       rmax ~ male -1,
-       topt ~ 1,
-       a ~ 1,
-       b ~ 1,
-       nl = TRUE)
+refit.model <- TRUE
 
 
-iter = 10000
-warmup = floor(iter/3)
-max_treedepth = 15
+iter = 1000
+tmax <- 46
+
+formula <- bf(song_count ~ y0 * (1 + step(temp - t0) * (-(temp - t0)/(tmax - t0))),
+              y0 ~ 1|male,
+              t0 ~ 1|male,
+              tmax ~ 1,
+              nl = TRUE)
+
+
+prior <- prior(uniform(), nlpar = y0, lb = 0, ub = 1000) +
+  prior(uniform(), nlpar = t0, ub = 45.9, lb = 30) +
+  prior(constant(46), nlpar = tmax)
+
+brm(formula = formula,
+    data = data_ind,
+    prior = prior,
+    family = poisson)
+
+,
+    nl = TRUE)
+
 
 if(!file.exists(fit.file) | refit.model) {
 
-    fit_list = list()
 
-
-    for(prior_index in 1:2) {
-
-        print(paste("fitting prior_index: ", prior_index))
-        
-        switch(prior_index,
-        {
-            ## bounded normals
-            nlprior <- c(prior(normal(400, 400), nlpar = "rmax", lb = 0),
-                         prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
-                         prior(normal(0, 3), nlpar = "a", lb = 0),
-                         prior(normal(0, 3), nlpar = "b", lb = 0))},
-        {
-            ## wider bounded normals
-            nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
-                         prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
-                         prior(normal(0, 10), nlpar = "a", lb = 0),
-                         prior(normal(0, 6), nlpar = "b", lb = 0))},
-        {
-            ## gamma(alpha = a , beta = b); E(x) = a/b; var(x) = a/b^2 
-            nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
-                         prior(normal(35, 20.), nlpar = "topt", lb = 0),
-                         prior(gamma(1, 0.01), nlpar = "a", lb = 0),
-                         prior(gamma(1, 0.01), nlpar = "b", lb = 0))},
-        )
-
-
-
-        fit_list[[prior_index]] <- brm(formula = nlform,
-                                        data = data,
-                                        family = negbinomial(link = "identity",
-                                                             link_shape = "identity"),
-                                        prior = nlprior,
-                                        chains = 4, cores = 4,
-                                        iter = iter,
-                                        warmup = warmup,
-                                        save_model = "model_mgauss_nb_1.stan",
-                                        control = list(adapt_delta = 0.96))
-
-
-    }
-
-    mgauss_nb <- fit_list
-   
+  
     save(mgauss_nb, fit.file)
 } else {
     load(fit.file)
