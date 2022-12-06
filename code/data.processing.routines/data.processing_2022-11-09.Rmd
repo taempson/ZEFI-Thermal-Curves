@@ -152,13 +152,13 @@ song_data_full <- full_join(song_data_raw[[1]], song_data_raw[[2]]) %>%
     discard(~all(is.na(.) | . =="")) %>% ## get rid of columns of only NA
     mutate(n_obs_completed = !(is.na(song_count)) ) %>%
     mutate(song_count = ifelse(is.na(song_count), 0, song_count)) %>%
-    mutate(song_count = song_count*1.0) %>% ## convert to a double so it's not treated as an integer
+#    mutate(song_count = song_count*1.0) %>% ## convert to a double so it's not treated as an integer
     mutate(chamber = as.factor(chamber), male = as.factor(male)) %>%
     ## create a male specific round and global trial index `trial`
     group_by(male, round) %>%
     mutate(trial_round = rank(date)) %>%
     ungroup() %>%
-    mutate(song_count_plus_1 = (song_count + 1)) %>%
+    mutate(song_count_plus_1 = as.integer((song_count + 1))) %>%
     mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
     mutate(temp_target = as.numeric(temp_target)) %>%
     ## Create generic 'temp' column which is either
@@ -178,7 +178,7 @@ song_data_full <- full_join(song_data_raw[[1]], song_data_raw[[2]]) %>%
     mutate(count_total = sum(song_count),
            n_obs = length(song_count),
            count_mean = count_total/n_obs) %>% 
-    mutate(trial = rank(date)) %>%
+    mutate(trial = as.integer(rank(date))) %>%
     mutate(song_prop_round = song_count/count_total_round) %>%
     mutate(song_prop = song_count/count_total) %>%
     ungroup(male) %>% 
@@ -201,13 +201,14 @@ song_data_full <- full_join(song_data_raw[[1]], song_data_raw[[2]]) %>%
     ## need to rescale wts for song_prop data
     ##mutate(weight_prop = weight_count * count_total_round) %>% 
     ## Add vpd 
-    mutate(svp = SVP(t = temp_mean + 273.15, isK = TRUE),
+  mutate(svp = SVP(t = temp_mean + 273.15, isK = TRUE),
            vpd = svp*(1-humidity_mean/100) ) %>%
-    rename(bill_date = date_morph_data_collected) %>% 
-    mutate(vpd_offset = vpd - mean(vpd)) %>%
-    ungroup() %>%
-    relocate(round, trial_round, song_count, song_prop, temp_mean, humidity_mean, .after = male) %>% 
-    mutate() ## Dummy function so we can comment out lines above it w/o any issues
+  rename(bill_date = date_morph_data_collected) %>% 
+  mutate(vpd_offset = vpd - mean(vpd)) %>%
+  ungroup() %>%
+  relocate(round, trial_round, song_count, song_prop, temp_mean, humidity_mean, .after = male) %>%
+  mutate() #song_count = as_integer(song_count),
+         #) ## Dummy function so we can comment out lines above it w/o any issues
 
 
 
