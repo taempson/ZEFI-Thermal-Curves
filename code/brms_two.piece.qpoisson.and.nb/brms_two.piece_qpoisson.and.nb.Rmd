@@ -1,4 +1,4 @@
----
+--
 title: "Piecewise Regression using BRMS"
 author: "Michael Gilchrist"
 date: "date: 2022-12-02"
@@ -24,9 +24,9 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E3, ou
 ## Recap
 
 - was able to fit two piece poisson using rstan, but
-  - data is overdispersed
-  - plotting of model and predictions was limited.
-  
+- data is overdispersed
+- plotting of model and predictions was limited.
+
 # Set up
 
 ## Install libraries
@@ -69,6 +69,8 @@ library(latex2exp)
 ```{r}
 load(file.path("input", "data.processing_2022-11-09.Rda"),
      verbose = TRUE)
+
+output_dir <- file.path("output")
 
 ```
 
@@ -161,10 +163,10 @@ grid.arrange(g1, g2, g3, legend, ncol = 2,
 ```{r}
 
 glm_poisson_0 <- glm(song_count ~
-                        1,
-                      data = data_ind,
-                      family = poisson(link = "identity")
-                      )
+                       1,
+                     data = data_ind,
+                     family = poisson(link = "identity")
+                     )
 
 summary(glm_poisson_0)
 
@@ -202,9 +204,9 @@ summary(glm_qpoisson_0)
 males_in_round_3 <- data_ind %>% select(male, round) %>% unique() %>% filter(round == 3) %>% pull(male)
 
 data <- data_ind %>%
-    ##    filter( (male %in% c("T229", "T234", "T244", "T243","T247", "T258"))) %>%
-    filter(male %in% males_in_round_3) %>% ## This is apparently unnecessary
-    mutate()
+  ##    filter( (male %in% c("T229", "T234", "T244", "T243","T247", "T258"))) %>%
+  filter(male %in% males_in_round_3) %>% ## This is apparently unnecessary
+  mutate()
 
 dim(data)
 ```
@@ -212,51 +214,97 @@ dim(data)
 # BRMS Fits
 
 - see discussions at 
-  1. Piecewise Models: (https://discourse.mc-stan.org/t/piecewise-linear-mixed-models-with-a-random-change-point/5306/9)
-  2. Overdispersed poisson: (https://solomonkurz.netlify.app/post/2021-07-12-got-overdispersion-try-observation-level-random-effects-with-the-poisson-lognormal-mixture/)
+1. Piecewise Models: (https://discourse.mc-stan.org/t/piecewise-linear-mixed-models-with-a-random-change-point/5306/9)
+2. Overdispersed poisson: (https://solomonkurz.netlify.app/post/2021-07-12-got-overdispersion-try-observation-level-random-effects-with-the-poisson-lognormal-mixture/)
 
 
 ## Poisson 
 
 ```{r}
 
-fit.file <- file.path(output_dir, "two.piece_poisson.Rda")
+file_basename <- "two.piece_poisson"
+fit_file <- file.path(output_dir, paste0(file_basename, ".Rda"))
+stan_file <- file.path(output_dir, paste0(file_basename, ".stan"))
+
+refit_model <- TRUE
 
 
-refit.model <- TRUE
+iter = 5000
+xmax <- 20
+b0 <- 100
+b1 <- 15
+b2 <- b0/(xmax-b1)
+x <- 1:xmax %>% rep(100)
+
+data <- tibble(x = x) %>%
+  mutate(lambda = if_else(x < 15, b0, b0 - b2 * (x - b1))) %>%
+  mutate( y = rpois(length(x), lambda))
+
+plot(x = data$x, y = data$y)
+
+#(1 + step(temp - 40) *
 
 
-iter = 1000
-tmax <- 46
+formula <- bf(y ~ fmax(0.01, b0 * (1 - step(x - b1) * b2)),
+              b0 ~ 1,
+              b1 ~ 1,
+              b2 ~ 1,
+              nl = TRUE )
 
-formula <- bf(song_count ~ y0 * (1 + step(temp - t0) * (-(temp - t0)/(tmax - t0))),
-              y0 ~ 1|male,
-              t0 ~ 1|male,
+##y0 * step(temp - 40) * (-(temp - 40)/(46 - 40)))
+
+prior <- prior(uniform(30, 200), nlpar = "b0", lb = 30, ub = 200) +
+  prior(uniform(1, 19), nlpar = "b1", lb = 1, ub = 19) +
+  prior(uniform(1, 100), nlpar = "b2", lb = 5, ub = 50)
+
+fit <- brm(formula = formula,
+    data = data,
+    prior = prior,
+    iter = iter,
+    family = poisson(link = "identity"),
+    control = list(adapt_delta = 0.9),
+    save_model = stan_file
+    )
+
+
+summary(fit)
+plot(fit)
+plot(conditional_effects(fit))
+pp_check(fit)
+
+
+#    nl = TRUE)
+
+,
+    prior = prior, nl = TRUE)
+
+
+,
+              t0 ~ 1,
+              y0 ~ 1,
               tmax ~ 1,
               nl = TRUE)
 
 
-prior <- prior(uniform(), nlpar = y0, lb = 0, ub = 1000) +
+ prior <- prior(uniform(), nlpar = y0, lb = 0, ub = 1000) +
   prior(uniform(), nlpar = t0, ub = 45.9, lb = 30) +
   prior(constant(46), nlpar = tmax)
 
 brm(formula = formula,
-    data = data_ind,
+    data = data,
     prior = prior,
-    family = poisson)
-
-,
+    family = poisson,
     nl = TRUE)
 
 
-if(!file.exists(fit.file) | refit.model) {
+if(!file.exists(fit_file) | refit_model) {
 
 
   
-    save(mgauss_nb, fit.file)
-} else {
-    load(fit.file)
-}
+  save(fit, fit_file)
+} #else {
+#  load(fit_file)
+#}
 
 ```
 
@@ -273,12 +321,12 @@ fit.file <- file.path(output_dir, "mgauss_nb.Rda")
 refit.model <- FALSE
 
 nlform <-
-    bf(song_count ~ rmax*exp(-0.5*(fabs(temp - topt)/a)^b),
-       rmax ~ male -1,
-       topt ~ 1,
-       a ~ 1,
-       b ~ 1,
-       nl = TRUE)
+  bf(song_count ~ rmax*exp(-0.5*(fabs(temp - topt)/a)^b),
+     rmax ~ male -1,
+     topt ~ 1,
+     a ~ 1,
+     b ~ 1,
+     nl = TRUE)
 
 
 iter = 10000
@@ -287,55 +335,55 @@ max_treedepth = 15
 
 if(!file.exists(fit.file) | refit.model) {
 
-    fit_list = list()
+  fit_list = list()
 
 
-    for(prior_index in 1:2) {
+  for(prior_index in 1:2) {
 
-        print(paste("fitting prior_index: ", prior_index))
-        
-        switch(prior_index,
-        {
-            ## bounded normals
-            nlprior <- c(prior(normal(400, 400), nlpar = "rmax", lb = 0),
-                         prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
-                         prior(normal(0, 3), nlpar = "a", lb = 0),
-                         prior(normal(0, 3), nlpar = "b", lb = 0))},
-        {
-            ## wider bounded normals
-            nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
-                         prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
-                         prior(normal(0, 10), nlpar = "a", lb = 0),
-                         prior(normal(0, 6), nlpar = "b", lb = 0))},
-        {
-            ## gamma(alpha = a , beta = b); E(x) = a/b; var(x) = a/b^2 
-            nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
-                         prior(normal(35, 20.), nlpar = "topt", lb = 0),
-                         prior(gamma(1, 0.01), nlpar = "a", lb = 0),
-                         prior(gamma(1, 0.01), nlpar = "b", lb = 0))},
-        )
-
-
-
-        fit_list[[prior_index]] <- brm(formula = nlform,
-                                        data = data,
-                                        family = negbinomial(link = "identity",
-                                                             link_shape = "identity"),
-                                        prior = nlprior,
-                                        chains = 4, cores = 4,
-                                        iter = iter,
-                                        warmup = warmup,
-                                        save_model = "model_mgauss_nb_1.stan",
-                                        control = list(adapt_delta = 0.96))
+    print(paste("fitting prior_index: ", prior_index))
+    
+    switch(prior_index,
+    {
+      ## bounded normals
+      nlprior <- c(prior(normal(400, 400), nlpar = "rmax", lb = 0),
+                   prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
+                   prior(normal(0, 3), nlpar = "a", lb = 0),
+                   prior(normal(0, 3), nlpar = "b", lb = 0))},
+    {
+      ## wider bounded normals
+      nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
+                   prior(normal(35, 20), nlpar = "topt", lb = 0, ub = 45),
+                   prior(normal(0, 10), nlpar = "a", lb = 0),
+                   prior(normal(0, 6), nlpar = "b", lb = 0))},
+    {
+      ## gamma(alpha = a , beta = b); E(x) = a/b; var(x) = a/b^2 
+      nlprior <- c(prior(normal(400, 800), nlpar = "rmax", lb = 0),
+                   prior(normal(35, 20.), nlpar = "topt", lb = 0),
+                   prior(gamma(1, 0.01), nlpar = "a", lb = 0),
+                   prior(gamma(1, 0.01), nlpar = "b", lb = 0))},
+    )
 
 
-    }
 
-    mgauss_nb <- fit_list
-   
-    save(mgauss_nb, fit.file)
+    fit_list[[prior_index]] <- brm(formula = nlform,
+                                   data = data,
+                                   family = negbinomial(link = "identity",
+                                                        link_shape = "identity"),
+                                   prior = nlprior,
+                                   chains = 4, cores = 4,
+                                   iter = iter,
+                                   warmup = warmup,
+                                   save_model = "model_mgauss_nb_1.stan",
+                                   control = list(adapt_delta = 0.96))
+
+
+  }
+
+  mgauss_nb <- fit_list
+  
+  save(mgauss_nb, fit.file)
 } else {
-    load(fit.file)
+  load(fit.file)
 }
 
 
@@ -377,15 +425,15 @@ pars_full <- c(pars, "b1", "lp__")
 
 iter <- 6000 ## increasing to 10k doesn't really help
 fit_norm <- stan(file = "two.piece_normal.stan",
-              model_name = "Two piece gaussian",
-              data=list(x = temp, y = song_count,
-                        N = N,
-                        tmax = 46,
-                        y_tmax = 0),
-              chains = 4,
-              cores = 4,
-              iter = iter,
-              warmup = iter/2)
+                 model_name = "Two piece gaussian",
+                 data=list(x = temp, y = song_count,
+                           N = N,
+                           tmax = 46,
+                           y_tmax = 0),
+                 chains = 4,
+                 cores = 4,
+                 iter = iter,
+                 warmup = iter/2)
 ```
 
 - Even with a (poorly chosen) prior on sigma, this fails to converge.
@@ -421,9 +469,9 @@ Here's some output.
 ## Poisson: Threshold (`t1`) and slope (`b`) formulation
 
 - Model can be fitted
-  - Data is overdispersed.
-    (See comparison to `quasipoisson` below.)
-  - Alternative formulation trying to estimate 'y0' directly does not currently work.
+- Data is overdispersed.
+(See comparison to `quasipoisson` below.)
+- Alternative formulation trying to estimate 'y0' directly does not currently work.
 
 ### Null Model
 
@@ -520,14 +568,14 @@ pairs(fit_2, pars = pars_full, main = main)
 for(fit in c("fit_1", "fit_2")) {
   print(paste0("Model Fit: ", fit))  
   log_lik_1 <- extract_log_lik(eval(parse(text = fit)), merge_chains = FALSE)
-# as of loo v2.0.0 we can optionally provide relative effective sample sizes
-# when calling loo, which allows for better estimates of the PSIS effective
-# sample sizes and Monte Carlo error
-r_eff <- relative_eff(exp(log_lik_1), cores = 2) 
+  # as of loo v2.0.0 we can optionally provide relative effective sample sizes
+  # when calling loo, which allows for better estimates of the PSIS effective
+  # sample sizes and Monte Carlo error
+  r_eff <- relative_eff(exp(log_lik_1), cores = 2) 
 
-# preferably use more than 2 cores (as many cores as possible)
-# will use value of 'mc.cores' option if cores is not specified
-loo_1 <- loo(log_lik_1, r_eff = r_eff, cores = 2)
+  # preferably use more than 2 cores (as many cores as possible)
+  # will use value of 'mc.cores' option if cores is not specified
+  loo_1 <- loo(log_lik_1, r_eff = r_eff, cores = 2)
   print(loo_1)
 }
 
@@ -550,9 +598,9 @@ print(fit_1, pars = c("y0"))
 - We see that all three approaches give the same best estimate of `y0 = 116.5`.
   In addition,
   - `poisson` and `stan` fits match in terms of their error estimate: 1.05.
-    This is substantially smaller than the `quasipoisson` estimate of 8.25.
-    I was hoping that the `stan` model would match the `quasipoisson` estimates.
-      
+  This is substantially smaller than the `quasipoisson` estimate of 8.25.
+  I was hoping that the `stan` model would match the `quasipoisson` estimates.
+  
 
 
 ```{r}
@@ -569,10 +617,10 @@ fit <- fit_1
 yp_summary <- extract(fit)$yp %>% data.frame() %>% t()#%>% transmute(mean = across(everything(), mean))
 
 %>% transmute(
-                                         mean = mean(yp),
-                                         lci = quantile(yp, 0.025),
-                                         uci = quantile(yp, 0.975)
-                                         )
+  mean = mean(yp),
+  lci = quantile(yp, 0.025),
+  uci = quantile(yp, 0.975)
+)
 
 ## get xy predictions
 xyp_tibble <- tibble(xp = tp, yp = t(yp)) #%>% unnest(cols = yp)
@@ -582,7 +630,7 @@ xyp_tibble <- tibble(xp = tp, yp = t(yp)) #%>% unnest(cols = yp)
 
 
 g1 + geom_smooth(
-       
+  
 
 ```
 
