@@ -1,0 +1,235 @@
+---
+title: "Piecewise Regression using STAN Directly"
+author: "Michael Gilchrist"
+date: "date: 2022-12-12"
+output: pdf_document
+---
+
+```{r setup, include=FALSE, }
+knitr::opts_chunk$set(
+  warning = TRUE, # show warnings
+  message = TRUE, # show messages
+  error = TRUE, # do not interrupt generation in case of errors,
+  echo = TRUE  # show R code
+)
+
+
+if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E3, output = TRUE)
+
+```
+# Goal
+
+- Fit two piece Negative Binomial 
+
+## Recap
+
+# Set up
+
+## Install libraries
+
+```{r, message = FALSE}
+
+# install packages user might not have by replacing FALSE with TRUE
+
+## load libraries
+library(stats)
+library(MASS) # provides negative binomial fitting:  glm.nb
+library(ggplot2)
+library(ggpubr)
+library(grid)
+library(gridExtra)
+library(GGally)
+library(broom)
+library(tidyverse)
+library(viridisLite)
+library(rstan)
+options(mc.cores = (parallel::detectCores()-2))
+rstan_options(auto_write = TRUE)
+library(loo)
+
+
+## options(ggplot2.continuous.colour="viridis",
+##        ggplot2.discrete.colour="viridis",
+##        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
+##        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
+
+library(reshape2)
+library(lme4)
+library(latex2exp)
+
+```
+
+## Load Data
+
+```{r}
+load(file.path("input", "data.processing_2022-11-09.Rda"),
+     verbose = TRUE)
+
+```
+
+
+# Examine Data
+
+## Create Working Dataset
+
+```{r}
+
+filter_data <- TRUE
+
+if(filter_data) {
+  males_filtered_disp <- song_stats_40C %>%
+    filter(dispersion < 50) %>%
+    pull(male)
+
+  males_filtered_mean <- song_stats %>%
+    filter(mean > 10) %>%
+    pull(male)
+
+  male_vector <- intersect(males_filtered_mean, males_filtered_disp)
+} else {
+  male_vector <- song_data %>% select(male) %>% distinct()
+}
+
+
+##males_selected <-
+
+data_ind <- song_data %>%
+  filter(male %in% male_vector) %>%
+  arrange(male) %>%
+  ##    left_join(male_shape, by = "male") %>%
+  mutate()
+
+stats_ind <- song_stats %>%
+  filter(male %in% male_vector)
+
+```
+
+
+# Simulate Data
+
+From `rnbinom` help
+  >  An alternative parametrization (often used in ecology) is by the
+  >   _mean_ ‘mu’ (see above), and ‘size’, the _dispersion parameter_,
+  >   where ‘prob’ = ‘size/(size+mu)’.  The variance is ‘mu + mu^2/size’
+  >   in this parametrization.
+
+```{r}
+sim_counts <- function(temp, y0, tau0, tmax, phi) {
+
+    ## Calculate expected value given parametes
+    mu <- ifelse(temp < tau0, y0, y0 * (1-(temp-tau0)/(tmax-tau0))) 
+    
+    ## calculate size parameter based on mu and phi
+    size = y0/(phi - 1) 
+    rnbinom(1, size = size, mu = mu)
+    }
+
+data_sim <- data_ind[, c("male", "temp")] %>% mutate(male = droplevels(male)) %>% mutate(male = as.integer(male))
+
+
+male <- data_sim$male %>% unique()
+n_male <- male  %>% length()
+n_male
+
+
+## Generate 'true' parameters
+y0 <- rnorm(n_male, 200, 60) %>% round(0)
+tau0 <- rnorm(n_male, 39, 2) %>% round(1)
+phi <- 8 ## overdispersion parameter
+tmax <- 46
+
+## Match y0 and tau0 to males
+data_sim <- data_sim %>% mutate(y0 = y0[ male], tau0 = tau0[male] )
+    
+data_sim %>% rowwise() %>% mutate(song_count = sim_counts(temp, y0, tau0, tmax = tmax, phi = phi))
+
+
+
+## t_target <- c(30, 35, 38, 40, 42, 44)
+
+
+```
+
+# Analyze Data:
+
+
+# Stan
+
+
+## Set Up Data
+
+```{r}
+
+song_count <- data_ind %>% pull(song_count)
+temp <- data_ind %>% pull(temp)
+N <- length(temp)
+## parameters to be printed
+
+pars <- c("t1", "y0")
+pars_full <- c(pars, "b1", "lp__")
+```
+## Two Piece Model
+
+```{r}
+
+iter <- 5000
+tmax <- 46
+t1max <- tmax - 0.75;
+t1min <- 25;
+## values to use for model predictions
+tp = seq(25, tmax, length.out = 100)
+
+fit_2 <- stan(file = "two.piece_poisson.stan",
+              model_name = "Two Piece poisson",
+              data=list(t = temp,
+                        y = song_count,
+                        N = N,
+                        tmax = tmax,
+                        t1min = t1min,
+                        t1max = t1max, ## max threshold value.
+                        ## having it too close to tmax *sometimes* leads to sampling
+                        ## near tmax, but with lower lp and very high E13) b1 values
+                        y_tmax = 0,
+                        tp = tp),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2))
+
+## Examine output
+main <- "Two piece"
+print(main)
+print(fit_2, pars = pars)
+traceplot(fit_2, pars = pars, inc_warmup = FALSE, main = main)
+plot(fit_2, pars = pars, main = main)
+pairs(fit_2, pars = pars_full, main = main)
+
+#ggplot()
+```
+
+### Leave One Out (LOO) analysis
+
+
+```{r}
+## Code from:
+# Extract pointwise log-likelihood
+# using merge_chains=FALSE returns an array, which is easier to 
+# use with relative_eff()
+for(fit in c("fit_1", "fit_2")) {
+  print(paste0("Model Fit: ", fit))  
+  log_lik_1 <- extract_log_lik(eval(parse(text = fit)), merge_chains = FALSE)
+# as of loo v2.0.0 we can optionally provide relative effective sample sizes
+# when calling loo, which allows for better estimates of the PSIS effective
+# sample sizes and Monte Carlo error
+r_eff <- relative_eff(exp(log_lik_1), cores = 2) 
+
+# preferably use more than 2 cores (as many cores as possible)
+# will use value of 'mc.cores' option if cores is not specified
+loo_1 <- loo(log_lik_1, r_eff = r_eff, cores = 2)
+  print(loo_1)
+}
+
+```
+- Don't really know how to interpret these results.
+
+
