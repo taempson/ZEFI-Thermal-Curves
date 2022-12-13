@@ -1,5 +1,5 @@
 ---
-title: "Piecewise Regression using STAN Directly"
+title: "Piecewise Regression on Simulated and Observed Data using STAN Directly"
 author: "Michael Gilchrist"
 date: "date: 2022-12-12"
 output: pdf_document
@@ -95,13 +95,20 @@ if(filter_data) {
 
 data_ind <- song_data %>%
   filter(male %in% male_vector) %>%
-  arrange(male) %>%
+    arrange(male) %>%
+    select(male, song_count, temp, round, trial_round, date, counter) %>% 
   ##    left_join(male_shape, by = "male") %>%
   mutate()
 
 stats_ind <- song_stats %>%
   filter(male %in% male_vector)
 
+data_ind <- data_ind %>% filter(temp < 38) %>%
+    group_by(male) %>% mutate(y0_obs = mean(song_count), phi_ind = var(song_count)/y0_obs)
+
+summary(data_ind)
+
+summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_obs), y0_sd = sd(y0_obs), phi_bar = median(phi_ind))
 ```
 
 
@@ -120,29 +127,43 @@ sim_counts <- function(temp, y0, tau0, tmax, phi) {
     mu <- ifelse(temp < tau0, y0, y0 * (1-(temp-tau0)/(tmax-tau0))) 
     
     ## calculate size parameter based on mu and phi
-    size = y0/(phi - 1) 
+    size = mu/(phi - 1)
+    #print(paste("size: ", size, "count: ", count))
     rnbinom(1, size = size, mu = mu)
     }
 
-data_sim <- data_ind[, c("male", "temp")] %>% mutate(male = droplevels(male)) %>% mutate(male = as.integer(male))
+
+phi <- summary_stats$phi_bar ## overdispersion parameter
+tmax <- 46
+
+data_tmp <- data_ind[, c("male", "temp", "y0_obs")] %>%
+    mutate(male = droplevels(male)) %>%
+    mutate(male = as.integer(male))
 
 
-male <- data_sim$male %>% unique()
-n_male <- male  %>% length()
+male_tmp <- data_tmp$male %>% unique()
+n_male <- male_tmp  %>% length()
 n_male
 
 
 ## Generate 'true' parameters
-y0 <- rnorm(n_male, 200, 60) %>% round(0)
+## If TRUE, replace estimated y_0 with simulated values,
+## else use estimates from observed data 
+if(FALSE) {
+    set.seed(2022)
+    y0_sim <- rnorm(n_male, summary_stats$y0_bar, summary_stats$y0_sd) %>% round(0)
+    data_tmp <- data_tmp %>% mutate(y0 = y0_sim[.data$male])
+} else {
+    data_tmp <- data_tmp %>% mutate(y0 = y0_obs)
+}
+
+## made these tau0 values up
+set.seed(2021)
 tau0 <- rnorm(n_male, 39, 2) %>% round(1)
-phi <- 8 ## overdispersion parameter
-tmax <- 46
-
 ## Match y0 and tau0 to males
-data_sim <- data_sim %>% mutate(y0 = y0[ male], tau0 = tau0[male] )
+data_tmp <- data_tmp %>% mutate(tau0 = tau0[.data$male])
     
-data_sim %>% rowwise() %>% mutate(song_count = sim_counts(temp, y0, tau0, tmax = tmax, phi = phi))
-
+data_sim <- data_tmp %>% rowwise() %>% mutate(song_count = sim_counts(temp, y0, tau0, tmax = tmax, phi = phi))
 
 
 ## t_target <- c(30, 35, 38, 40, 42, 44)
@@ -160,8 +181,10 @@ data_sim %>% rowwise() %>% mutate(song_count = sim_counts(temp, y0, tau0, tmax =
 
 ```{r}
 
-song_count <- data_ind %>% pull(song_count)
-temp <- data_ind %>% pull(temp)
+data <- data_sim
+
+song_count <- data %>% pull(song_count)
+temp <- data %>% pull(temp)
 N <- length(temp)
 ## parameters to be printed
 
