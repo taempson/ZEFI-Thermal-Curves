@@ -253,9 +253,6 @@ t0min <- 25;
 ## values to use for model predictions
 tp = seq(25, xmax, length.out = 100)
 
-male <-
-
-    
 model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
               model_name = "Two piece poisson pooled",
               data=list(x = temp,
@@ -270,7 +267,8 @@ model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
                         ## max threshold value.
                         ## having it too close to xmax *sometimes* leads to sampling
                         ## near xmax, but with lower lp and very high E13) b0 values
-                        y_xmax = 0),
+                        y_xmax = 0,
+                        sd_y_prior = 100),
               chains = 4,
               cores = 4,
               iter = iter,
@@ -290,16 +288,13 @@ t0min <- 25;
 ## values to use for model predictions
 tp = seq(25, xmax, length.out = 100)
 
-male <-
-
-    
 model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
               model_name = "Two piece poisson pooled",
               data=list(x = temp,
                         y = song_count,
                         N = N,
                         L = n_male,
-                        ll = male,
+                        ll = data_sim$male,
                         xmax = tmax,
                         x0min = t0min,
                         x0max = t0max,
@@ -307,12 +302,28 @@ model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
                         ## max threshold value.
                         ## having it too close to xmax *sometimes* leads to sampling
                         ## near xmax, but with lower lp and very high E13) b0 values
-                        y_xmax = 0),
+                        y_xmax = 0,
+                        sd_y_prior = 100),
               chains = 4,
               cores = 4,
               iter = iter,
               warmup = floor(iter/2),
               verbose = TRUE)
+
+pars <- c("y0", "x0")
+plot(model, pars = c("x0"))
+plot(model, pars = c("y0"))
+
+
+pars_est <- summary(model, pars = pars, probs = NULL)$summary %>%
+                                                    as_tibble(rownames = "par")
+
+pars_est %>% separate_wider_regex(cols = par, c(pars = "^[a-z]+", "[", male = "[0-9]+", "]"))
+
+pars_sim <- data_sim %>% select(male, y0, tau0)
+
+
+fit_poisson_pooled <- model
 
 
 ```

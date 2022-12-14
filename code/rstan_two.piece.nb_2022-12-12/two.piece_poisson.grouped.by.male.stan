@@ -7,7 +7,7 @@ data {
   int<lower=1> N;  // # of data points
   int<lower=1> L; // Levels = # of males;
   array[N] int<lower=0> y; //song_count
-  array[N] real x; // predictor: temp values at each observation
+  vector[N] x; // predictor: temp values at each observation
   // This, along with male, is the predictor
   array[N] int<lower=1, upper=L> ll; // male id, one for each observation
   // max value and response at max value
@@ -17,6 +17,7 @@ data {
   real x0min; //min threshold value
   real<lower=x0min+1> x0max; //max threshold value
   //  vector[100] tp; // points used to create predictions for plotting
+  real<lower=1> sd_y_prior;
 }
 
 //transformed data {
@@ -25,17 +26,16 @@ data {
 //}
 
 parameters { // One set of parameters for each level (male) 
-  array[L] real<upper=0>b0; // slope of decrease
-  // Doesn't work: array[L] vector<lower=x0min,upper=x0max>[D] x0; //first threshold,
-  array[L] real<lower=x0min,upper=x0max> x0; //first threshold,
+  vector<upper=0>[L] b0; // slope of decrease
+  vector<lower=x0min,upper=x0max>[L] x0; //first threshold,
 }
 
 transformed parameters {
   //  array[L] real<lower=x0min,upper=x0max> s0 = xmax - x0; // first threshold
   //array[L] real<lower=x0min,upper=x0max> a0 = - b0; // slope of decrease
-  //vector[L] y0;
-  //y0[ll] = (xmax - x0[ll]);// .* b0[ll]; // pre-threshold level
-//  vector[N] lambda = (y_xmax  - fmin(xmax - x, xmax - x0[ll]) .* b0[ll]);
+  vector<lower=1>[L] y0;
+  y0 = -(xmax - x0) .* b0; // pre-threshold level
+  //  vector[N] lambda = (y_xmax  - fmin(xmax - x, xmax - x0[ll]) .* b0[ll]);
 }
 
 model {
@@ -47,8 +47,10 @@ model {
   vector[N] lambda;
 
   //Priors
-  //  for (l in 1:L) {
-  // }
+    for (l in 1:L) {
+      //x0[l] ~ uniform(30, 44);
+      y0[l] ~ normal(150, sd_y_prior);
+   }
   //Data 
   for (n in 1:N) {
     val1 = xmax - x[n];
