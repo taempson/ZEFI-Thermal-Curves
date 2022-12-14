@@ -186,32 +186,39 @@ data <- data_sim
 song_count <- data %>% pull(song_count)
 temp <- data %>% pull(temp)
 N <- length(temp)
+male <- data %>% pull(male)
 ## parameters to be printed
 
-pars <- c("t1", "y0")
-pars_full <- c(pars, "b1", "lp__")
+pars <- c("t0", "y0")
+pars_full <- c(pars, "b0", "lp__")
 ```
 ## Two Piece Model
+
+
+### All Males Pooled
+
+#### Original Code: Can't be used to pool males
 
 ```{r}
 
 iter <- 5000
 tmax <- 46
-t1max <- tmax - 0.75;
-t1min <- 25;
+t0max <- tmax - 0.75;
+t0min <- 25;
 ## values to use for model predictions
 tp = seq(25, tmax, length.out = 100)
 
-fit_2 <- stan(file = "two.piece_poisson.stan",
-              model_name = "Two Piece poisson",
+model <- stan(file = "two.piece_poisson.stan",
+              model_name = "Two piece poisson",
               data=list(t = temp,
                         y = song_count,
                         N = N,
                         tmax = tmax,
-                        t1min = t1min,
-                        t1max = t1max, ## max threshold value.
+                        t0min = t0min,
+                        t0max = t0max,
+                        ## max threshold value.
                         ## having it too close to tmax *sometimes* leads to sampling
-                        ## near tmax, but with lower lp and very high E13) b1 values
+                        ## near tmax, but with lower lp and very high E13) b0 values
                         y_tmax = 0,
                         tp = tp),
               chains = 4,
@@ -219,17 +226,96 @@ fit_2 <- stan(file = "two.piece_poisson.stan",
               iter = iter,
               warmup = floor(iter/2))
 
+
 ## Examine output
-main <- "Two piece"
-print(main)
-print(fit_2, pars = pars)
-traceplot(fit_2, pars = pars, inc_warmup = FALSE, main = main)
-plot(fit_2, pars = pars, main = main)
-pairs(fit_2, pars = pars_full, main = main)
+title <- "Two piece"
+print(title)
+print(model, pars = pars)
+traceplot(model, pars = pars, inc_warmup = FALSE, title = title)
+plot(model, pars = pars) #, ggtitle(title)) 
+pairs(model, pars = pars_full, title = title)
+
+fit_poisson <- model
 
 #ggplot()
 ```
 
+
+
+#### Updated Code: Males can be pooled but aren't.
+
+```{r}
+
+iter <- 5000
+tmax <- 46
+t0max <- tmax - 0.75;
+t0min <- 25;
+## values to use for model predictions
+tp = seq(25, xmax, length.out = 100)
+
+male <-
+
+    
+model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
+              model_name = "Two piece poisson pooled",
+              data=list(x = temp,
+                        y = song_count,
+                        N = N,
+                        L = 1,
+                        ll = rep(1,N),
+                        xmax = tmax,
+                        x0min = t0min,
+                        x0max = t0max,
+                        ##tp = tp,
+                        ## max threshold value.
+                        ## having it too close to xmax *sometimes* leads to sampling
+                        ## near xmax, but with lower lp and very high E13) b0 values
+                        y_xmax = 0),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2),
+              verbose = TRUE)
+
+
+```
+
+### Males Not Pooled
+```{r}
+
+iter <- 5000
+tmax <- 46
+t0max <- tmax - 0.75;
+t0min <- 25;
+## values to use for model predictions
+tp = seq(25, xmax, length.out = 100)
+
+male <-
+
+    
+model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
+              model_name = "Two piece poisson pooled",
+              data=list(x = temp,
+                        y = song_count,
+                        N = N,
+                        L = n_male,
+                        ll = male,
+                        xmax = tmax,
+                        x0min = t0min,
+                        x0max = t0max,
+                        ##tp = tp,
+                        ## max threshold value.
+                        ## having it too close to xmax *sometimes* leads to sampling
+                        ## near xmax, but with lower lp and very high E13) b0 values
+                        y_xmax = 0),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2),
+              verbose = TRUE)
+
+
+```
 ### Leave One Out (LOO) analysis
 
 
@@ -238,7 +324,7 @@ pairs(fit_2, pars = pars_full, main = main)
 # Extract pointwise log-likelihood
 # using merge_chains=FALSE returns an array, which is easier to 
 # use with relative_eff()
-for(fit in c("fit_1", "fit_2")) {
+for(fit in c("fit_1", "fit_p")) {
   print(paste0("Model Fit: ", fit))  
   log_lik_1 <- extract_log_lik(eval(parse(text = fit)), merge_chains = FALSE)
 # as of loo v2.0.0 we can optionally provide relative effective sample sizes
