@@ -1,4 +1,4 @@
-male,chamber,date,song_count,song_rate,counter,temp_target,temp_mean,temp_median,humidity_mean,test_order,mass,bill_length,bill_depth,bill_width,date_morph_data_collected,time_spent_panting_30-15_before_female,time_spent_panting_15-0_before_female,time_spent_panting_0-15_after_female,time_spent_panting_15-30_after_female
+male,chamber,date,motif_count,song_rate,counter,temp_target,temp_mean,temp_median,humidity_mean,test_order,mass,bill_length,bill_depth,bill_width,date_morph_data_collected,time_spent_panting_30-15_before_female,time_spent_panting_15-0_before_female,time_spent_panting_0-15_after_female,time_spent_panting_15-30_after_female
 T247,2,06/06/22,185,6.17,KIM,40,39.4045254,40.5,23.87969095,1,16.5,8.5,7.3,6.4,06/23/22,,,,
 T247,2,06/08/22,120,4,KIM,42,40.9321192,42.5,25.97406181,2,,,,,,,,,
 T247,2,06/10/22,117,3.9,KIM,35,34.5518764,35.5,28.36203091,3,,,,,,,,,
