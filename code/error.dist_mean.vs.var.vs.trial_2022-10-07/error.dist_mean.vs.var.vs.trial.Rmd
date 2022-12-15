@@ -1,5 +1,5 @@
 ---
-title: "Evaluate How `song_count` changes with trial at 40C"
+title: "Evaluate How `motif_count` changes with trial at 40C"
 author: "Michael Gilchrist"
 date: "date: 2022-10-20"
 output: pdf_document
@@ -20,7 +20,7 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E5, ou
 ```
 # Goal
 
-- Evaluate trends in song_count under a (near) constant temperature.
+- Evaluate trends in motif_count under a (near) constant temperature.
 
 # Set up
 
@@ -110,9 +110,9 @@ git_root <- system("git rev-parse --show-toplevel", intern = TRUE)
 data_raw = list()
 
 data_raw[[1]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
-    ## Note T237 and T230 are missing numbers in the song_count column
+    ## Note T237 and T230 are missing numbers in the motif_count column
     ## so we are filtering these observations out until they are found
-    filter(!is.na(song_count))
+    filter(!is.na(motif_count))
 
 data_raw[[2]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Repeatability-Song-Count.csv")) %>%
     mutate(round = 2) %>%
@@ -137,9 +137,9 @@ data_raw[[3]] <-read.csv(file.path(git_root, "data", "collated", "HSPi-Round-2-H
 data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     full_join(data_raw[[3]]) %>%
     discard(~all(is.na(.) | . =="")) %>% ## get rid of columns of only NA
-    mutate(trial_completed = !(is.na(song_count)) ) %>%
-    mutate(song_count = ifelse(is.na(song_count), 0, song_count)) %>%
-    mutate(song_count = song_count*1.0) %>% ## convert to a double so it's not treated as an integer
+    mutate(trial_completed = !(is.na(motif_count)) ) %>%
+    mutate(motif_count = ifelse(is.na(motif_count), 0, motif_count)) %>%
+    mutate(motif_count = motif_count*1.0) %>% ## convert to a double so it's not treated as an integer
     mutate(chamber = as.factor(chamber), male = as.factor(male)) %>%
     ## create a male specific round and global trial index `trial`
     group_by(male, round) %>%
@@ -147,19 +147,19 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     ungroup(round) %>% 
     mutate(trial = rank(date)) %>%
     ungroup() %>%
-    mutate(song_count_plus_1 = (song_count + 1)) %>%
-    mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
+    mutate(motif_count_plus_1 = (motif_count + 1)) %>%
+    mutate(log_motif_count_plus_1 = log(motif_count + 1)) %>%
     mutate(temp_target = as.numeric(temp_target)) %>%
     ## Create generic 'temp' column which is either
     ## temp_mean, if it exists, or temp_target, if it doesn't
     mutate(temp = if_else(is.na(temp_mean),
                           temp_target,
                           temp_mean)) %>%
-    ## Add column with total song_count for a given round
+    ## Add column with total motif_count for a given round
     group_by(male, round) %>%
-    mutate(count_total_round = sum(song_count)) %>%
+    mutate(count_total_round = sum(motif_count)) %>%
     ungroup() %>%
-    mutate(song_prop = song_count/count_total_round) %>%
+    mutate(motif_prop = motif_count/count_total_round) %>%
     ## assuming poisson error
     ## From glm man page
     ## > Non-‘NULL’ ‘weights’ can be used to indicate that different
@@ -167,15 +167,15 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     ## >  ‘weights’ being inversely proportional to the dispersions);
     ## add +1 to deal with single 0
     ## Interpret dispersion as ~sd() or se() not var()
-    mutate(count_wt = sqrt(1/(song_count + 1))) %>%
-    ## need to rescale wts for song_prop data
+    mutate(count_wt = sqrt(1/(motif_count + 1))) %>%
+    ## need to rescale wts for motif_prop data
     mutate(prop_wt = count_wt * count_total_round) %>% 
     ## Add vpd 
     mutate(svp = SVP(t = temp_mean + 273.15, isK = TRUE), vpd = svp*(1-humidity_mean/100) ) %>%
     group_by(round) %>%
     mutate(vpd_offset = vpd - mean(vpd)) %>%
     ungroup() %>%
-    relocate(song_count, song_prop, vpd, temp_mean, humidity_mean, .after = male) %>% 
+    relocate(motif_count, motif_prop, vpd, temp_mean, humidity_mean, .after = male) %>% 
     mutate() ## Dummy function so we can comment out lines above it w/o any issues
 
 
@@ -214,16 +214,16 @@ dim(data_40)
 
 stats_40 <- data_40 %>%
     group_by(male) %>%
-    summarize(count = length(song_count),
-              mean = mean(song_count),
-              var = var(song_count, na.rm = TRUE),
+    summarize(count = length(motif_count),
+              mean = mean(motif_count),
+              var = var(motif_count, na.rm = TRUE),
               cv = sqrt(var)/mean,
               dispersion = var/mean) %>% mutate()
 
 print("We have 15 males, 5 of which we only have 1 observation at 40C")
 stats_40
 
-song_stats <- stats_40
+motif_stats <- stats_40
 
 print("Flag birds birds with a coefficient of variation `cv` > 0.5 & `mean` < 50") 
 cv_threshold <- 0.5
@@ -237,7 +237,7 @@ data_male_low_mean <- data_40 %>% filter(male %in% male_low_mean)
 
 
 g0 <- ggplot(data_male_high_cv) +
-    aes(x=song_count,
+    aes(x=motif_count,
         color = male,
         fill = male) + 
     geom_histogram() +
@@ -249,21 +249,21 @@ for(filter_high_cv in c(FALSE, TRUE)){
     for(filter_low_mean in c(FALSE, TRUE)){
 
         data_tmp <- data_40
-        song_stats_tmp <- song_stats
+        motif_stats_tmp <- motif_stats
         
         if(filter_high_cv){
             data_tmp <- filter(data_tmp, !(male %in% male_high_cv) )
-            song_stats_tmp <- filter(song_stats_tmp, !(male %in% male_high_cv) )
+            motif_stats_tmp <- filter(motif_stats_tmp, !(male %in% male_high_cv) )
         }
 
         if(filter_low_mean){
             data_tmp <- filter(data_tmp, !(male %in% male_low_mean) )
-            song_stats_tmp <- filter(song_stats_tmp, !(male %in% male_low_mean) )
+            motif_stats_tmp <- filter(motif_stats_tmp, !(male %in% male_low_mean) )
         }
 
         g0 <- ggplot(data_tmp) +
             aes(x=male,
-                y = song_count,
+                y = motif_count,
                 color = male,
                 fill = male) + 
             geom_point() +
@@ -275,12 +275,12 @@ for(filter_high_cv in c(FALSE, TRUE)){
                               color = male),
                 size = 2.5,
                 shape = 24,
-                data = song_stats_tmp) +
+                data = motif_stats_tmp) +
             theme(legend.position = "none", axis.text.x = element_text(angle = -45)) +
             labs(title = "Raw Count Data")
 
         g1 <- ggplot(data_tmp) +
-            aes(x=song_count,
+            aes(x=motif_count,
                 color = male,
                 fill = male) + 
             geom_histogram() +
@@ -288,7 +288,7 @@ for(filter_high_cv in c(FALSE, TRUE)){
             labs(title = "Raw Count Data")
         
         formula = y ~ -1 + x
-        g2 <- ggplot(song_stats_tmp) +
+        g2 <- ggplot(motif_stats_tmp) +
             aes(x=mean, y = var) +
             geom_point(aes(color = male)) +
             geom_smooth(method='lm', formula = formula, fullrange = TRUE) +
@@ -298,9 +298,9 @@ for(filter_high_cv in c(FALSE, TRUE)){
             xlim(0, NA) +
             labs(title = "Mean vs. var")
 
-        fit_g2 <- lm(var ~ -1 + mean, data = song_stats_tmp)
+        fit_g2 <- lm(var ~ -1 + mean, data = motif_stats_tmp)
         
-        g3 <- ggplot(song_stats_tmp) +
+        g3 <- ggplot(motif_stats_tmp) +
             aes(x=mean, y = var) +
             geom_point(aes(color = male)) +
             geom_smooth(method='lm', formula= formula, fullrange = TRUE) +
@@ -313,7 +313,7 @@ for(filter_high_cv in c(FALSE, TRUE)){
 
 
         formula <- y ~ -1 + x + I(x^2)
-        g4 <- ggplot(song_stats_tmp) +
+        g4 <- ggplot(motif_stats_tmp) +
             aes(x=mean, y = var) +
             geom_point(aes(color = male)) +
             geom_smooth(method='lm', formula = formula, fullrange = TRUE) +
@@ -324,10 +324,10 @@ for(filter_high_cv in c(FALSE, TRUE)){
                  subtitle = "var ~ mean + mean^2")
                                         #    scale_x_log10() +
                                         #    scale_y_log10()
-        fit_g4 <- lm(var ~ -1 + mean +  I(mean^2), data = song_stats_tmp)
+        fit_g4 <- lm(var ~ -1 + mean +  I(mean^2), data = motif_stats_tmp)
         
         formula <- y ~ -1 + I(x^2)
-        g5 <- ggplot(song_stats_tmp) +
+        g5 <- ggplot(motif_stats_tmp) +
             aes(x=mean, y = var) +
             geom_point(aes(color = male)) +
             geom_smooth(method='lm', formula = formula, fullrange = TRUE) +
@@ -340,7 +340,7 @@ for(filter_high_cv in c(FALSE, TRUE)){
             labs(title = "Mean vs. Var",
                  subtitle = "var ~ mean^2")
 
-        fit_g5 <- lm(var ~ -1 + I(mean^2), data = song_stats_tmp)
+        fit_g5 <- lm(var ~ -1 + I(mean^2), data = motif_stats_tmp)
         #ifelse(length(dev.list()) < 4, dev.new(), dev.next())
         
         ga <- grid.arrange(g0, g2, g4, g5,
@@ -374,7 +374,7 @@ ga
 - Using multiple trials at one temp could be an effective way to identify 'reliable' males.
 
 
-## Compare `song_count` vs `trial` at 40C
+## Compare `motif_count` vs `trial` at 40C
 
 **WARNING:** `warning()` are off
 
@@ -386,8 +386,8 @@ for(filter_high_cv in c(FALSE, TRUE)){
 
         data_tmp <- data_40 %>% group_by(male) %>%
             arrange(trial, .by_group = TRUE) %>%
-            mutate(cummean = cummean(song_count)) %>%
-            select(male, trial, song_count, cummean)
+            mutate(cummean = cummean(motif_count)) %>%
+            select(male, trial, motif_count, cummean)
         
         if(filter_high_cv){
             data_tmp <- filter(data_tmp, !(male %in% male_high_cv) )
@@ -401,7 +401,7 @@ for(filter_high_cv in c(FALSE, TRUE)){
 
 
         g1 <- ggplot(data_tmp) +
-            aes(x = trial, y = song_count) +
+            aes(x = trial, y = motif_count) +
             geom_point(aes(color = male), position = "jitter") +
             geom_line(aes(x = trial, y = cummean, color = male)) +
             theme(legend.position="bottom")
@@ -412,7 +412,7 @@ for(filter_high_cv in c(FALSE, TRUE)){
         ## Apply a linear regression
 
         formula <- y ~ 1 + x
-        g0 <- ggplot(data_tmp, aes(x = trial, y = song_count)) +
+        g0 <- ggplot(data_tmp, aes(x = trial, y = motif_count)) +
             geom_point(aes(color = male))
 
         
@@ -424,7 +424,7 @@ for(filter_high_cv in c(FALSE, TRUE)){
             labs(title = "Linear")
         ##g2
 
-        fit_g2 <- glm( song_count ~ 1 + trial, data = data_tmp)
+        fit_g2 <- glm( motif_count ~ 1 + trial, data = data_tmp)
 
         g3 <- g0 + geom_smooth(method = 'glm',
                                formula= formula,
@@ -436,7 +436,7 @@ for(filter_high_cv in c(FALSE, TRUE)){
             labs(title = "log-linear: family = qpoisson(link = log)")
         ##g3
         
-        fit_g3 <- glm( song_count ~ 1 + trial, data = data_tmp,
+        fit_g3 <- glm( motif_count ~ 1 + trial, data = data_tmp,
                       family = quasipoisson(link = "log"))
         formula <- y ~ 1 + x + I(x^2)
         g4 <- g0 + geom_smooth(method='glm',
@@ -449,19 +449,19 @@ for(filter_high_cv in c(FALSE, TRUE)){
             labs(title = "log-quad: family = qpoisson(link = log)")
         ##g4
         
-        fit_g4 <- glm(song_count ~ 1 + trial + I(trial^2), data = data_tmp,
+        fit_g4 <- glm(motif_count ~ 1 + trial + I(trial^2), data = data_tmp,
                       family = quasipoisson(link = "log"))
 
         ga <- grid.arrange(g2, g3, g4, as_ggplot(legend),
                            ncol=2,
                            top=textGrob(
-                               paste0("song_count vs. trial: Filter High CV = ", filter_high_cv, ", Low Mean = ", filter_low_mean, "\n temp_target = 40C"),
+                               paste0("motif_count vs. trial: Filter High CV = ", filter_high_cv, ", Low Mean = ", filter_low_mean, "\n temp_target = 40C"),
                                gp=gpar(fontsize = 11))
                            )
         ##cat("\n\n\\pagebreak\n")
         ##print("<P style='page-break-before: always'>")    #forced new-page happens here.
 
-        print(paste0("song_count vs. trial; filter.high: ", filter_high_cv, "; filter.low.mean: ", filter_low_mean))
+        print(paste0("motif_count vs. trial; filter.high: ", filter_high_cv, "; filter.low.mean: ", filter_low_mean))
 
         print(summary(fit_g2))
         print(summary(fit_g3))
@@ -469,7 +469,7 @@ for(filter_high_cv in c(FALSE, TRUE)){
 
         ga
         
-        dev.print(device = pdf, file = file.path(output_dir, paste0("song_count.vs.trial_filter.high-", filter_high_cv, ".filter.low.mean-", filter_low_mean, ".pdf")))
+        dev.print(device = pdf, file = file.path(output_dir, paste0("motif_count.vs.trial_filter.high-", filter_high_cv, ".filter.low.mean-", filter_low_mean, ".pdf")))
     }
 }
 
@@ -478,7 +478,7 @@ for(filter_high_cv in c(FALSE, TRUE)){
 
 ### Conclusion
 
-When filtering out low mean (which have few trials and, thus, bias the analysis towards a small intercept) results in no evidence that `song_count` increases with `trial`
+When filtering out low mean (which have few trials and, thus, bias the analysis towards a small intercept) results in no evidence that `motif_count` increases with `trial`
 
 # End
 
@@ -499,12 +499,12 @@ knitr::knit_exit()
         ## Try using `nlme`
         ## I get errors
         ## Also not specifying error model
-        getInitial(song_count ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)  
-        ar <- nls(song_count ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)
+        getInitial(motif_count ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)  
+        ar <- nls(motif_count ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)
 
-        ## Try using song_count_plus_1
-        getInitial(song_count_plus_1 ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)  
-        ar <- nls(song_count_plus_1 ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)
+        ## Try using motif_count_plus_1
+        getInitial(motif_count_plus_1 ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)  
+        ar <- nls(motif_count_plus_1 ~ SSasymp(trial, Asym, resp0, lrc), data = data_tmp)
     }
 
 
@@ -514,12 +514,12 @@ knitr::knit_exit()
     ## According to TurnerAndFirth2007 R News, this model is written Exp(1 + trial)
     ## However the model doesn't converge unless we use -1
     ## I clearly don't understand the model 
-    formula <- song_count ~ 1 + Mult(Const(-1), Exp(1 + trial))
+    formula <- motif_count ~ 1 + Mult(Const(-1), Exp(1 + trial))
     gnm_poisson <- gnm(formula = formula,
                        data = data_tmp,
                        ## start = c(50, -1, -0.1),
                        family = poisson(link = "identity"),
-                       ##weights = 1/song_count_plus_1,
+                       ##weights = 1/motif_count_plus_1,
                        trace = TRUE,
                        iterMax = 5000
                    )
@@ -544,12 +544,12 @@ count_total_round_2_and_3  <- data_ind %>%
 
 
 xlab <- "Temperature"
-ylab <- "song_count"
+ylab <- "motif_count"
 
 plot_temp_data <-
     ggplot(data) + 
     aes(x = temp,
-        y = song_count) +
+        y = motif_count) +
     facet_wrap("male", scales = "free_y") +
     geom_point() +
 labs( title = paste( ylab, " vs ", xlab))
@@ -561,7 +561,7 @@ pivot_wider(data_ind, names_from = "round", values_from = "count_total_round") %
 ```
 
 
-## Formal Model Fits to `song_count`
+## Formal Model Fits to `motif_count`
 
 
 Using
@@ -590,7 +590,7 @@ data <- data_ind %>%
 
 make_plot = TRUE;
 
-glm_poisson_1 <- glm(song_count ~
+glm_poisson_1 <- glm(motif_count ~
                        (1 + male  +  (x1) + I(x1^2)),
                    data = data,
                    family = poisson(link = "log")
@@ -599,7 +599,7 @@ glm_poisson_1 <- glm(song_count ~
 print(summary(glm_poisson_1))
 
 ## Add round effect
-glm_poisson_2 <- glm(song_count ~
+glm_poisson_2 <- glm(motif_count ~
                        (1 + male + round +  (x1) + I(x1^2)),
                    data = data,
                    family = poisson(link = "log")
@@ -612,7 +612,7 @@ male_coef <-  coef(glm_poisson_2) %>% keep(str_detect(names(.), 'male'))
 hist(male_coef, breaks = 30)
 
 ## Remove male effect
-glm_poisson_3 <- glm(song_count ~
+glm_poisson_3 <- glm(motif_count ~
                        (1 + round +  (x1) + I(x1^2)),
                    data = data,
                    family = poisson(link = "log")
@@ -641,7 +641,7 @@ if(make_plot){
     page_label <- "glm with poisson error"
     mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
 ##    dev.new()
-##    ggplot(data, aes(temp, song_count))
+##    ggplot(data, aes(temp, motif_count))
 }
 
 glm_qpoisson_2 <- update(glm_poisson_2,
@@ -656,7 +656,7 @@ if(make_plot){
     page_label <- "glm with poisson error"
     mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
 ##    dev.new()
-##    ggplot(data, aes(temp, song_count))
+##    ggplot(data, aes(temp, motif_count))
 }
 
 
@@ -672,7 +672,7 @@ if(make_plot){
     page_label <- "glm with poisson error"
     mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
 ##    dev.new()
-##    ggplot(data, aes(temp, song_count))
+##    ggplot(data, aes(temp, motif_count))
 }
 
 ```
@@ -680,6 +680,6 @@ if(make_plot){
 ### Result
 
 - Overdispersion of data makes parameters non-significant
-- Don't how a `song_prop` approach will solve this issue.
+- Don't how a `motif_prop` approach will solve this issue.
   
 

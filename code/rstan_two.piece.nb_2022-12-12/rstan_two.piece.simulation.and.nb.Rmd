@@ -77,34 +77,34 @@ load(file.path("input", "data.processing_2022-11-09.Rda"),
 filter_data <- TRUE
 
 if(filter_data) {
-  males_filtered_disp <- song_stats_40C %>%
+  males_filtered_disp <- motif_stats_40C %>%
     filter(dispersion < 50) %>%
     pull(male)
 
-  males_filtered_mean <- song_stats %>%
+  males_filtered_mean <- motif_stats %>%
     filter(mean > 10) %>%
     pull(male)
 
   male_vector <- intersect(males_filtered_mean, males_filtered_disp)
 } else {
-  male_vector <- song_data %>% select(male) %>% distinct()
+  male_vector <- motif_data %>% select(male) %>% distinct()
 }
 
 
 ##males_selected <-
 
-data_ind <- song_data %>%
+data_ind <- motif_data %>%
   filter(male %in% male_vector) %>%
     arrange(male) %>%
-    select(male, song_count, temp, round, trial_round, date, counter) %>% 
+    select(male, motif_count, temp, round, trial_round, date, counter) %>% 
   ##    left_join(male_shape, by = "male") %>%
   mutate()
 
-stats_ind <- song_stats %>%
+stats_ind <- motif_stats %>%
   filter(male %in% male_vector)
 
 data_ind <- data_ind %>% filter(temp < 38) %>%
-    group_by(male) %>% mutate(y0_obs = mean(song_count), phi_ind = var(song_count)/y0_obs)
+    group_by(male) %>% mutate(y0_obs = mean(motif_count), phi_ind = var(motif_count)/y0_obs)
 
 summary(data_ind)
 
@@ -163,7 +163,7 @@ tau0 <- rnorm(n_male, 39, 2) %>% round(1)
 ## Match y0 and tau0 to males
 data_tmp <- data_tmp %>% mutate(tau0 = tau0[.data$male])
     
-data_sim <- data_tmp %>% rowwise() %>% mutate(song_count = sim_counts(temp, y0, tau0, tmax = tmax, phi = phi))
+data_sim <- data_tmp %>% rowwise() %>% mutate(motif_count = sim_counts(temp, y0, tau0, tmax = tmax, phi = phi))
 
 
 ## t_target <- c(30, 35, 38, 40, 42, 44)
@@ -183,7 +183,7 @@ data_sim <- data_tmp %>% rowwise() %>% mutate(song_count = sim_counts(temp, y0, 
 
 data <- data_sim
 
-song_count <- data %>% pull(song_count)
+motif_count <- data %>% pull(motif_count)
 temp <- data %>% pull(temp)
 N <- length(temp)
 male <- data %>% pull(male)
@@ -211,7 +211,7 @@ tp = seq(25, tmax, length.out = 100)
 model <- stan(file = "two.piece_poisson.stan",
               model_name = "Two piece poisson",
               data=list(t = temp,
-                        y = song_count,
+                        y = motif_count,
                         N = N,
                         tmax = tmax,
                         t0min = t0min,
@@ -256,7 +256,7 @@ tp = seq(25, xmax, length.out = 100)
 model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
               model_name = "Two piece poisson pooled",
               data=list(x = temp,
-                        y = song_count,
+                        y = motif_count,
                         N = N,
                         L = 1,
                         ll = rep(1,N),
@@ -292,7 +292,7 @@ tp = seq(25, xmax, length.out = 100)
 model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
               model_name = "Two piece poisson pooled",
               data=list(x = temp,
-                        y = song_count,
+                        y = motif_count,
                         N = N,
                         L = n_male,
                         ll = data_sim$male,

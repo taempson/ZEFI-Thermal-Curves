@@ -61,9 +61,9 @@ git_root <- system("git rev-parse --show-toplevel", intern = TRUE)
 data_raw = list()
 
 data_raw[[1]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
-    ## Note T237 and T230 are missing numbers in the song_count column
+    ## Note T237 and T230 are missing numbers in the motif_count column
     ## so we are filtering these observations out until they are found
-    filter(!is.na(song_count))
+    filter(!is.na(motif_count))
 
 data_raw[[2]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Repeatability-Song-Count.csv")) %>%
     mutate(round = 2) %>%
@@ -77,14 +77,14 @@ data_raw[[3]] <-read.csv(file.path(git_root, "data", "collated", "HSPi-Round-2-H
 data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     full_join(data_raw[[3]]) %>%
     discard(~all(is.na(.) | . =="")) %>% ## get rid of columns of only NA
-    mutate(trial_completed = !(is.na(song_count)) ) %>%
-    mutate(song_count = ifelse(is.na(song_count), 0, song_count)) %>%
-    mutate(song_count = song_count*1.0) %>% ## convert to a double so it's not treated as an integer
+    mutate(trial_completed = !(is.na(motif_count)) ) %>%
+    mutate(motif_count = ifelse(is.na(motif_count), 0, motif_count)) %>%
+    mutate(motif_count = motif_count*1.0) %>% ## convert to a double so it's not treated as an integer
     mutate(chamber = as.factor(chamber), male = as.factor(male)) %>%
     ## create a global variable trial_order based on individual rounds
     mutate(trial_index = as.integer(round*10+test_order)) %>%
-    mutate(song_count_plus_1 = (song_count + 1)) %>%
-    mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
+    mutate(motif_count_plus_1 = (motif_count + 1)) %>%
+    mutate(log_motif_count_plus_1 = log(motif_count + 1)) %>%
     mutate(temp_target = as.numeric(temp_target)) %>%
     mutate() ## Dummy function so we can comment out lines above it w/o any issues
 
@@ -101,8 +101,8 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
 data <- data_full #%>% filter(round ==3)
 
 data %>% group_by(temp_target) %>%
-    filter(song_count < 400) %>%
-    summarize(ave = mean(song_count), sd = sd(song_count), n = length(song_count), n_completed = sum(trial_completed))
+    filter(motif_count < 400) %>%
+    summarize(ave = mean(motif_count), sd = sd(motif_count), n = length(motif_count), n_completed = sum(trial_completed))
 
 ## Look at occurrance of males across rounds
 tmp1 <- data_full %>%
@@ -128,19 +128,19 @@ lapply(list(tmp1, tmp2, intersect(tmp1, tmp2)), length)
 
 
 xlab <- "Temperature"
-ylab <- "song_count"
+ylab <- "motif_count"
 
 plot_data_only <-
     ggplot(data_full) + 
     aes(x = temp_target,
-        y = song_count,
+        y = motif_count,
         color = as.factor(round)) +
     facet_wrap("male", scales = "free_y") +
     geom_jitter() +
     labs(x = xlab, y = ylab,
          title = "Song Count vs Temp: Data Only") 
 
-pdf(file = "song_count_vs_temp_data_only.pdf")
+pdf(file = "motif_count_vs_temp_data_only.pdf")
 
 plot_data_only
 
@@ -151,7 +151,7 @@ dev.off()
 
 - This is what I shared with Liz and Kayci
 
-### `log(song_count_plus_1)`
+### `log(motif_count_plus_1)`
 
 ```{r}
 
@@ -159,13 +159,13 @@ dev.off()
 ## Plotting based on: https://www.tjmahr.com/plotting-partial-pooling-in-mixed-effects-models/
 
 xlab <- "Temperature"
-ylab <- "log(song_count + 1)"
+ylab <- "log(motif_count + 1)"
 
 #pdf(file = "log-plus-1_vs_temp_all.pdf")
 
 plot_log_plus_1 <- ggplot(data_full) + 
     aes(x = temp_target,
-        y = log_song_count_plus_1,
+        y = log_motif_count_plus_1,
         color = as.factor(round))  +
     stat_smooth(method = "lm",
                 se = TRUE,
@@ -190,21 +190,21 @@ plot_log_plus_1 <- ggplot(data_full) +
 
 
 ## Code below used for posting to stackexchange
-data_full %>% filter(male %in% c("T258", "T259"))%>% dplyr::select(male, temp_target, song_count) %>% rename(ID = male, x = temp_target, y = song_count)  %>% dput()
+data_full %>% filter(male %in% c("T258", "T259"))%>% dplyr::select(male, temp_target, motif_count) %>% rename(ID = male, x = temp_target, y = motif_count)  %>% dput()
 
 ## Choose some males to use for starting values based on log fit
 reasonable.males = c("T229", "T237", "T258")
 
-glm_combined <- glm(song_count ~ 1 + temp_target + I(temp_target^2),
+glm_combined <- glm(motif_count ~ 1 + temp_target + I(temp_target^2),
                     family = quasipoisson(),
     data = data_full %>% filter(male %in% reasonable.males))
 
 xlab <- "Temperature"
-ylab <- "song_count"
+ylab <- "motif_count"
 
 plot_glm <- plot_data_only +
     aes(x = temp_target,
-        y = song_count,
+        y = motif_count,
         color = (round == 1)) + ## Combine round 2 and 3
     stat_smooth(method = "glm",
                 method.args = list(
@@ -229,7 +229,7 @@ p2 <- ggplot_build(plot_glm)
 ## Only replace problematic scale
 p2$layout$panel_params[[14]] <- p1$layout$panel_params[[14]]
 
-pdf(file = "song_count_vs_temp_multiple.pdf")
+pdf(file = "motif_count_vs_temp_multiple.pdf")
 
 plot_data_only
 
@@ -256,7 +256,7 @@ dev.off()
 data_r3 <- data_full %>% filter(round ==3)
 
 ```
-## LM Fits on `log(song_counts_plus_one)`
+## LM Fits on `log(motif_counts_plus_one)`
 
 - None of these models fit very well
 
@@ -274,14 +274,14 @@ data_r3 <- data_full %>% filter(round ==3)
 lmList <- list()
 
 lmList$by_male <- tmp <-
-    lme4::lmList(log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2) | male,
+    lme4::lmList(log_motif_count_plus_1 ~ 1 + temp_target + I(temp_target^2) | male,
            data = data %>% filter(round %in% c(2,3)),
            na.action = na.omit)
            
 
 summary(tmp)
 
-plot.lmList4(tmp, log_song_count_plus1 ~ fitted(.)| male)
+plot.lmList4(tmp, log_motif_count_plus1 ~ fitted(.)| male)
 
 
 ```
@@ -292,7 +292,7 @@ plot.lmList4(tmp, log_song_count_plus1 ~ fitted(.)| male)
 
 lm = list()
 
-formula <- as.formula("log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1 + temp_target + I(temp_target^2)")
 ## Note syntax below model `formula` doesn't appear in the model summary().
 ## lm$basic <- lm(formula = formula , data = data_r3)
 
@@ -304,22 +304,22 @@ lm$basic <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
 summary(tmp)
 
 ## Add trial_index effect
-formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_index+ temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1 + trial_index+ temp_target + I(temp_target^2)")
 lm$trial_index <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
 summary(tmp)
 
 ## Add male effect 
-formula <- as.formula("log_song_count_plus_1 ~ 1 + male + temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1 + male + temp_target + I(temp_target^2)")
 lm$male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
 summary(tmp) 
 
 ## Add chamber effect (fewer chambers than males)
-formula <- as.formula("log_song_count_plus_1 ~ 1+ chamber + temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1+ chamber + temp_target + I(temp_target^2)")
 lm$chamber <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
 summary(tmp)
 
 ## Add trial_index and male effects
-formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_index + male + temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1 + trial_index + male + temp_target + I(temp_target^2)")
 lm$trial_index_and_male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
 summary(tmp)
 
@@ -327,25 +327,25 @@ summary(tmp)
 ## Add male x trial order
 ## This doesn't work since we have as many coefficients as data points.
 ## Oops
-formula <- as.formula("log_song_count_plus_1 ~ 1 + male*trial_index + temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1 + male*trial_index + temp_target + I(temp_target^2)")
 lm$trial_index_by_male <- tmp <- lm(formula = eval(formula) , data = data_r3)
 summary(tmp)
 
 
 ## add slope x male interaction term
 
-lm$male_by_temp <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target*male + I(temp_target^2), data = data_r3)
+lm$male_by_temp <- tmp <- lm(formula = log_motif_count_plus_1 ~ 1 + temp_target*male + I(temp_target^2), data = data_r3)
 summary(tmp)
 
 
 ## slope x male - male intercept
 ## This suggests that the slopes are similar between males (though the SE are large)
-lm$male_by_temp <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target:male + I(temp_target^2), data = data_r3)
+lm$male_by_temp <- tmp <- lm(formula = log_motif_count_plus_1 ~ 1 + temp_target:male + I(temp_target^2), data = data_r3)
 summary(tmp)
 
 ## curvature x male - male intercept
 ## This suggests that the slopes are similar between males (though the SE are large)
-lm$male_by_temp_sq <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2):male, data = data_r3)
+lm$male_by_temp_sq <- tmp <- lm(formula = log_motif_count_plus_1 ~ 1 + temp_target + I(temp_target^2):male, data = data_r3)
 summary(tmp)
 
 
@@ -390,7 +390,7 @@ glm <- list()
 
 ## chamber and male are conflated
 ## Data is very overdispersed given poisson assumptions
-glm$poisson <- glm(song_count ~ 1 + male + trial_index + temp_target + I(temp_target^2), data = data_r3, family = poisson(link = "log"))
+glm$poisson <- glm(motif_count ~ 1 + male + trial_index + temp_target + I(temp_target^2), data = data_r3, family = poisson(link = "log"))
 
 ## This allows for over dispersion which greatly elevates the SE
 glm$qpoisson <- glm(model$glm_poisson, family = quasipoisson(link = "log"))
@@ -409,7 +409,7 @@ glmer = list()
 
 glmer$poisson <- tmp <-
     glmer(
-        song_count ~
+        motif_count ~
             1+ 1|male + temp_target + I(temp_target^2),
         data = data_r3,
         family = poisson(link = "log"),
@@ -421,14 +421,14 @@ glmer$od <- overdisp.glmer(glmer$poisson)
 
 ## I think this is a correct fit.  If I don't include the 1 + temp... w/o the |male, I don't get any effects.
 glmer$nb_1 <- glmer.nb(
-    song_count ~ 1 + temp_target + I(temp_target^2) + trial_index + ((1 + temp_target + I(temp_target^2))|male),
+    motif_count ~ 1 + temp_target + I(temp_target^2) + trial_index + ((1 + temp_target + I(temp_target^2))|male),
     data = data_r3,
     family = poisson(link = "log"),
     control = glmerControl(optCtrl = list(maxiter = 300)),
     verbose = TRUE)
 
 
-glmer$nb_2 <- update(glmer$nb_1, formula =  song_count ~ 1 + temp_target + I(temp_target^2) + ((1 + temp_target + I(temp_target^2))|male) )
+glmer$nb_2 <- update(glmer$nb_1, formula =  motif_count ~ 1 + temp_target + I(temp_target^2) + ((1 + temp_target + I(temp_target^2))|male) )
 
 mode
 ```

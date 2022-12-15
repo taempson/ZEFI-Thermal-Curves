@@ -29,7 +29,7 @@ Previous work suggests that
   - Only round where `temp_mean` and `humidity_mean` exist.
 - `count_total_round` are consistent between Rounds 1 and 3, so could use that info to classify birds, estimate variance function in response, etc.
 - One bird in `round = 3` collapsed during the trial so it was terminated.
-  We've set the `song_count` from NA to 0 and should consider making at `temp_working` column using `temp_target` in this instance and `temp_mean` in all other instances.
+  We've set the `motif_count` from NA to 0 and should consider making at `temp_working` column using `temp_target` in this instance and `temp_mean` in all other instances.
   Would need to do something similar for relative humidity, i.e. use `mean(humidity_mean)` for the `temp_target` value.
   
 ## Current Work
@@ -38,7 +38,7 @@ Previous work suggests that
 - Copied `data_full` and set  `male = "combined"` so we could look at all of the data at once.
 - Learned about using `model` argument for glm models
 - Can't fit ME models
-  - I don't understand why the ME model with `song_count` where we use a RE for the intercept doesn't have a similar effect as using song_prop.
+  - I don't understand why the ME model with `motif_count` where we use a RE for the intercept doesn't have a similar effect as using motif_prop.
     This intercept value is essentially multiplying by a constant, so we could try and specify this value using `offset(log(count_total_round))`.
     So why doesn't this work?
 
@@ -75,11 +75,11 @@ Previous work suggests that
 - Liz: Ask Kayci about `temp_mean` and `humidity_mean` data for rounds 1 and 2.
 - Look for order effects in round 1 and 2? 
   Can we use any of this data? 
-  Seems like there will be an issue if we throw out, say, first two trials, when using `song_prop`.
+  Seems like there will be an issue if we throw out, say, first two trials, when using `motif_prop`.
   Note that since total_count is consistent for a bird between rounds, this may not be an issue.
 - Begin fitting rTPC models to combined dataset.
 - We could include round = 2
-  - Would need to down weight song_count values when combining across  `count_total_round` values.
+  - Would need to down weight motif_count values when combining across  `count_total_round` values.
 
 
 #### Additional Liz
@@ -146,9 +146,9 @@ git_root <- system("git rev-parse --show-toplevel", intern = TRUE)
 data_raw = list()
 
 data_raw[[1]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
-    ## Note T237 and T230 are missing numbers in the song_count column
+    ## Note T237 and T230 are missing numbers in the motif_count column
     ## so we are filtering these observations out until they are found
-    filter(!is.na(song_count))
+    filter(!is.na(motif_count))
 
 data_raw[[2]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Repeatability-Song-Count.csv")) %>%
     mutate(round = 2) %>%
@@ -175,35 +175,35 @@ data_raw[[3]] <-read.csv(file.path(git_root, "data", "collated", "HSPi-Round-2-H
 data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     full_join(data_raw[[3]]) %>%
     discard(~all(is.na(.) | . =="")) %>% ## get rid of columns of only NA
-    mutate(trial_completed = !(is.na(song_count)) ) %>%
-    mutate(song_count = ifelse(is.na(song_count), 0, song_count)) %>%
-    mutate(song_count = song_count*1.0) %>% ## convert to a double so it's not treated as an integer
+    mutate(trial_completed = !(is.na(motif_count)) ) %>%
+    mutate(motif_count = ifelse(is.na(motif_count), 0, motif_count)) %>%
+    mutate(motif_count = motif_count*1.0) %>% ## convert to a double so it's not treated as an integer
     mutate(chamber = as.factor(chamber), male = as.factor(male)) %>%
     ## create a global variable trial_order based on individual rounds
     mutate(trial_index = as.integer(round*10+test_order)) %>%
-    mutate(song_count_plus_1 = (song_count + 1)) %>%
-    mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
+    mutate(motif_count_plus_1 = (motif_count + 1)) %>%
+    mutate(log_motif_count_plus_1 = log(motif_count + 1)) %>%
     mutate(temp_target = as.numeric(temp_target)) %>%
-    ## Add column with total song_count for a given round
+    ## Add column with total motif_count for a given round
     group_by(male, round ) %>%
-    mutate(count_total_round = sum(song_count) ) %>%
+    mutate(count_total_round = sum(motif_count) ) %>%
     ungroup() %>%
-    mutate(song_prop = song_count/count_total_round) %>%
+    mutate(motif_prop = motif_count/count_total_round) %>%
     ## assuming poisson error
     ## From glm man page
     ## > Non-‘NULL’ ‘weights’ can be used to indicate that different
     ## >  observations have different dispersions (with the values in
     ## >  ‘weights’ being inversely proportional to the dispersions);
     ## add +1 to deal with single 0
-    mutate(count_wt = 1/(song_count + 1)) %>%
-    ## need to rescale wts for song_prop data
+    mutate(count_wt = 1/(motif_count + 1)) %>%
+    ## need to rescale wts for motif_prop data
     mutate(prop_wt = count_wt * count_total_round^2) %>% 
     ## Add vpd 
     mutate(svp = SVP(t = temp_mean + 273.15, isK = TRUE), vpd = svp*(1-humidity_mean/100) ) %>%
     group_by(round) %>%
     mutate(vpd_offset = vpd - mean(vpd)) %>%
     ungroup() %>%
-    relocate(song_count, song_prop, vpd, temp_mean, humidity_mean, .after = male) %>% 
+    relocate(motif_count, motif_prop, vpd, temp_mean, humidity_mean, .after = male) %>% 
     mutate() ## Dummy function so we can comment out lines above it w/o any issues
 
 
@@ -276,12 +276,12 @@ data_comb <- data_ind %>% mutate(male = "combined")
 data <- bind_rows(data_ind, data_comb)
 
 xlab <- "Temperature"
-ylab <- "song_count"
+ylab <- "motif_count"
 
 plot_temp_data <-
     ggplot(data) + 
     aes(x = temp_mean,
-        y = song_count) +
+        y = motif_count) +
     facet_wrap("male", scales = "free_y") +
     geom_point() +
 labs( title = paste( ylab, " vs ", xlab))
@@ -295,7 +295,7 @@ xlab <- "humidity"
 plot_humidity_data <-
     ggplot(data) + 
     aes(x = humidity_mean,
-        y = song_count) +
+        y = motif_count) +
     facet_wrap("male", scales = "free_y") +
     geom_point() +
 labs( title = paste( ylab, " vs ", xlab))
@@ -308,7 +308,7 @@ xlab <- "vpd"
 plot_vpd_data <-
     ggplot(data) + 
     aes(x = vpd,
-        y = song_count) +
+        y = motif_count) +
     facet_wrap("male", scales = "free_y") +
     geom_point() +
     labs( title = paste( ylab, " vs ", xlab))
@@ -318,7 +318,7 @@ last_plot()
 ```
 
 
-## Work with mean and song_prop 
+## Work with mean and motif_prop 
 
 - This approach won't work because `temp_target` varies greatly from `temp_mean`.
 
@@ -327,35 +327,35 @@ last_plot()
 ```{r}
 
 plot_combine <- ggplot(data_ind) +
-                  aes(x = temp_mean, y = song_prop, color = male) +
+                  aes(x = temp_mean, y = motif_prop, color = male) +
                   geom_point()
 # last_plot()
 
 data_summarize <-
     data_ind %>% group_by(temp_target) %>%
-    summarize(song_mean = mean(song_prop),
-              song_sd = sd(song_prop),
-              song_n= dplyr::n(),
-              song_se = song_sd/sqrt(song_n),
-              song_ci = song_se*1.96
+    summarize(motif_mean = mean(motif_prop),
+              motif_sd = sd(motif_prop),
+              motif_n= dplyr::n(),
+              motif_se = motif_sd/sqrt(motif_n),
+              motif_ci = motif_se*1.96
               )
 
 
 plot_summarize <- ggplot(data_summarize) +
-    aes(x = temp_target, y = song_mean) +
+    aes(x = temp_target, y = motif_mean) +
     geom_point()+
-    geom_errorbar(aes(ymin=song_mean - song_ci, ymax=song_mean+song_ci), width=.2)
+    geom_errorbar(aes(ymin=motif_mean - motif_ci, ymax=motif_mean+motif_ci), width=.2)
 # last_plot()
               
 plot_combine +
-    geom_point(data = data_summarize, aes(x = temp_target, y = song_mean, colour = "Mean & CI"))+
+    geom_point(data = data_summarize, aes(x = temp_target, y = motif_mean, colour = "Mean & CI"))+
     geom_errorbar(data = data_summarize, aes(x = temp_target,
-                                             y = song_mean,
-                                             ymin=song_mean - song_ci,
-                                             ymax=song_mean+song_ci,
+                                             y = motif_mean,
+                                             ymin=motif_mean - motif_ci,
+                                             ymax=motif_mean+motif_ci,
                                              colour= "Mean & CI"), width=.2) + 
-    labs(title = "Mean(song_prop) vs. temp_target with 95% CI for mean",
-         subtitle = "Individual song_prop vs. temp_mean also plotted")
+    labs(title = "Mean(motif_prop) vs. temp_target with 95% CI for mean",
+         subtitle = "Individual motif_prop vs. temp_mean also plotted")
 
 
 ```
@@ -363,7 +363,7 @@ plot_combine +
 ### Result
 
 - Data is noisy.
-- Using `song_prop` reduces impact of male `T225` on lower temps.
+- Using `motif_prop` reduces impact of male `T225` on lower temps.
 - Note `temp_target` is not necessarily accurate.
 
 
@@ -421,7 +421,7 @@ xlab = "vpd"
 
 plot_tmp <- ggplot(data) + 
     aes(x = vpd,
-        y = song_prop) +
+        y = motif_prop) +
 #    ylim(0, 0.6) + 
     facet_wrap("male", scales = "free_y") +
     geom_point()
@@ -449,7 +449,7 @@ plot_glm_vpd_weighted <- plot_tmp +
                 se = TRUE,
                 formula = y ~ 1 + x + I(x^2), size = 1,
                 ) +
-    labs( title = TeX(paste( ylab, " vs ", xlab, ": weight ~ (count_total_round)$^2$)/(song_count + 1)") ), 
+    labs( title = TeX(paste( ylab, " vs ", xlab, ": weight ~ (count_total_round)$^2$)/(motif_count + 1)") ), 
          subtitle = "glm:y ~quasipoisson(exp[1 + x + x^2])"
          )
 last_plot()
@@ -459,7 +459,7 @@ xlab <- "vpd-$\\bar{vpd}$"
 
 plot_glm_vpd_weighted_centered <- ggplot(data) + 
     aes(x = vpd_offset,
-        y = song_prop) +
+        y = motif_prop) +
     facet_wrap("male", scales = "free_y") +
     geom_point() + 
     stat_smooth(method = "glm",
@@ -470,7 +470,7 @@ plot_glm_vpd_weighted_centered <- ggplot(data) +
                 se = TRUE,
                 formula = y ~ 1 + x + I(x^2), size = 1,
                 ) +
-    labs( title = TeX(paste( ylab, " vs ", xlab, ": weight ~ (count_total_round)$^2$/(song_count + 1)")),
+    labs( title = TeX(paste( ylab, " vs ", xlab, ": weight ~ (count_total_round)$^2$/(motif_count + 1)")),
          xlab = TeX(xlab), 
          subtitle = TeX("glm:y ~ quasipoisson($\\exp[1 + x + x^2]$)")
          )
@@ -480,10 +480,10 @@ last_plot()
 #### Result
 
 - We do see a concave down curve if we naively fit a quadratic function to the log transformed data.
-- Adding `weight = (count_total_round^2)/(song_count + 1)` greatly improves fit
+- Adding `weight = (count_total_round^2)/(motif_count + 1)` greatly improves fit
 
 
-### Formal Model Fits to `song_count`
+### Formal Model Fits to `motif_count`
 
 
 - Using midpoint of vpd
@@ -493,7 +493,7 @@ last_plot()
 
 ## Try filtering the data a bit more
 ## Goal is to get good starting values
-count_glm_poisson <- glm(song_count ~
+count_glm_poisson <- glm(motif_count ~
             1 + vpd_offset + I(vpd_offset^2), 
             data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
         family = poisson(link = "log")
@@ -501,7 +501,7 @@ count_glm_poisson <- glm(song_count ~
 summary(count_glm_poisson)
 plot(count_glm_poisson)
 
-count_glm_qpoisson <- glm(song_count ~
+count_glm_qpoisson <- glm(motif_count ~
             1 + vpd_offset + I(vpd_offset^2), 
             data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
         family = quasipoisson(link = "log")
@@ -515,7 +515,7 @@ plot(count_glm_qpoisson)
 ## Try using negative binomial
 
 count_glmer_nb <-
-    glmer.nb(song_count ~ vpd_offset + I(vpd_offset^2) + (vpd_offset|male),
+    glmer.nb(motif_count ~ vpd_offset + I(vpd_offset^2) + (vpd_offset|male),
              data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
              ## control values are used by the initial optimization
              ## using a poisson glmer model, which doesn't converge
@@ -533,7 +533,7 @@ count_glmer_nb <-
              )
 
 ## Try and fail to use `start` rgument
-tmp <- glmer(song_count ~
+tmp <- glmer(motif_count ~
             vpd_offset + I(vpd_offset^2) + (vpd_offset + I(vpd_offset^2)||male),
         data = data_ind,
         family = poisson(link = "log"),
@@ -550,11 +550,11 @@ control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="b
   > Model is nearly unidentifiable: very large eigenvalue
   > - Rescale variables?;Model is nearly unidentifiable: large eigenvalue ratio
   > - Rescale variables?
-  To me this suggests we should use `song_prop` and the glmer weights function.
+  To me this suggests we should use `motif_prop` and the glmer weights function.
   
   
 
-### Formal Model Fits to `song_prop`
+### Formal Model Fits to `motif_prop`
 
 
 #### Using GLM
@@ -565,7 +565,7 @@ control = glmerControl(optCtrl = list(maxiter = 1E4, maxfun = 2E6), optimizer="b
 
 
 ## Gamma has issue with 0 value, so add equivalent of 1 count to every observation (~ like a prior)
-glm_gamma <- glm((song_prop + 1/count_total_round) ~
+glm_gamma <- glm((motif_prop + 1/count_total_round) ~
             1 + vpd_offset + I(vpd_offset^2), 
             data = data_ind %>% filter( !(male %in% c("T231", "T260"))),,
         family = "Gamma"(link = 'log')
@@ -583,7 +583,7 @@ anova(glm_gamma, glm_gamma_weighted)
 
 ## Even filtered data doesn't behave well
 glmer_gamma_filtered <- glmer(
-    (song_prop + 1/count_total_round) ~
+    (motif_prop + 1/count_total_round) ~
             vpd_offset + I(vpd_offset^2) + (vpd_offset||male),
         data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
         family = Gamma(link = "log"),
@@ -592,7 +592,7 @@ glmer_gamma_filtered <- glmer(
 
 
 ## Wrong model since data is not discrete, gives 400+ pages of warnings
-#tmp <- glmer(song_prop ~
+#tmp <- glmer(motif_prop ~
 #            vpd_offset + I(vpd_offset^2) + (vpd_offset + I(vpd_offset^2)||male),
 #        data = data_ind,
 #        family = poisson(link = "log"),
@@ -637,10 +637,10 @@ knitr::knit_exit()
 
 ```{r}
 
-fm1<-lme(song_prop ~ exp( 1 + vpd_offset + I(vpd_offset^2)),
+fm1<-lme(motif_prop ~ exp( 1 + vpd_offset + I(vpd_offset^2)),
          data = data_ind,
          random = ~ 1|male,
-         weights = varFixed( ~ 1/prop_wt))  ## this should specify weights = var(song_prop) 
+         weights = varFixed( ~ 1/prop_wt))  ## this should specify weights = var(motif_prop) 
 
 initialize( varFixed( ~ 1/prop_wt), data_ind)
 
@@ -650,7 +650,7 @@ initialize( varFixed( ~ 1/prop_wt), data_ind)
 ## Goal is to get good starting values
 
 
-glm_gaussian <- glm(song_prop ~
+glm_gaussian <- glm(motif_prop ~
             1 + vpd_offset + I(vpd_offset^2), 
             data = data_ind,
             weights = prop_wt,
@@ -659,7 +659,7 @@ glm_gaussian <- glm(song_prop ~
 summary(glm_gaussian)
 
 ## Even filtered data doesn't behave well
-fit_glmer_initial <- glmer(song_prop ~
+fit_glmer_initial <- glmer(motif_prop ~
             vpd_offset + I(vpd_offset^2) + (vpd_offset||male),
         data = data_ind %>% filter( !(male %in% c("T231", "T260"))),
         family = gaussian(link = "log"),
@@ -669,7 +669,7 @@ fit_glmer_initial <- glmer(song_prop ~
 fit_glmer_qpoisson <- update(fig_glmer_initial, family = quasipoisson())
 
 
-tmp <- glmer(song_prop ~
+tmp <- glmer(motif_prop ~
             vpd_offset + I(vpd_offset^2) + (vpd_offset + I(vpd_offset^2)||male),
         data = data_ind,
         family = poisson(link = "log"),
@@ -691,7 +691,7 @@ glmer = list()
 
 glmer$poisson <- tmp <-
     glmer(
-        song_count ~
+        motif_count ~
             (1 + temp_mean + (temp_mean||male) + I(temp_mean^2)),
         data = data_ind,
         family = poisson(link = "log"),
@@ -714,9 +714,9 @@ glmer$od <- overdisp.glmer(glmer$poisson)
 
 ```{r}
 
-data_tmp <- data_full %>% filter(round == 2) %>% dplyr::select(male, song_count) %>% group_by(male)
+data_tmp <- data_full %>% filter(round == 2) %>% dplyr::select(male, motif_count) %>% group_by(male)
 
-tmp_summarized <- summarize(data_tmp, var(song_count), mean(song_count))
+tmp_summarized <- summarize(data_tmp, var(motif_count), mean(motif_count))
 
 ## Methods of Moments: if x ~ NB(p, p/(p + r)), var(x) = p + p^2/r, mean(x) = p
 ## Alternative parameterization
@@ -730,7 +730,7 @@ tmp_summarized <- summarize(data_tmp, var(song_count), mean(song_count))
 var_tmp = var(data_tmp)
 
 
-tmp <- glm(song_count ~ male,
+tmp <- glm(motif_count ~ male,
            data = data_tmp,
     family = quasipoisson()
     )
@@ -801,7 +801,7 @@ formulas_lm() <-
 data_r3 <- data_full %>% filter(round ==3)
 
 ```
-### LM Fits on `log(song_counts_plus_one)`
+### LM Fits on `log(motif_counts_plus_one)`
 
 - None of these models fit very well
 
@@ -819,14 +819,14 @@ data_r3 <- data_full %>% filter(round ==3)
 lmList <- list()
 
 lmList$by_male <- tmp <-
-    lme4::lmList(log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2) | male,
+    lme4::lmList(log_motif_count_plus_1 ~ 1 + temp_target + I(temp_target^2) | male,
            data = data %>% filter(round %in% c(2,3)),
            na.action = na.omit)
            
 
 summary(tmp)
 
-plot.lmList4(tmp, log_song_count_plus1 ~ fitted(.)| male)
+plot.lmList4(tmp, log_motif_count_plus1 ~ fitted(.)| male)
 
 
 ```
@@ -837,7 +837,7 @@ plot.lmList4(tmp, log_song_count_plus1 ~ fitted(.)| male)
 
 lm = list()
 
-formula <- as.formula("log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1 + temp_target + I(temp_target^2)")
 
 ## Note syntax below model `formula` doesn't appear in the model summary().
 ## lm$basic <- lm(formula = formula , data = data_r3)
@@ -850,22 +850,22 @@ lm$basic <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
 summary(tmp)
 
 ## Add trial_index effect
-formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_index+ temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1 + trial_index+ temp_target + I(temp_target^2)")
 lm$trial_index <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
 summary(tmp)
 
 ## Add male effect 
-formula <- as.formula("log_song_count_plus_1 ~ 1 + male + temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1 + male + temp_target + I(temp_target^2)")
 lm$male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
 summary(tmp) 
 
 ## Add chamber effect (fewer chambers than males)
-formula <- as.formula("log_song_count_plus_1 ~ 1+ chamber + temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1+ chamber + temp_target + I(temp_target^2)")
 lm$chamber <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3)))
 summary(tmp)
 
 ## Add trial_index and male effects
-formula <- as.formula("log_song_count_plus_1 ~ 1 + trial_index + male + temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1 + trial_index + male + temp_target + I(temp_target^2)")
 lm$trial_index_and_male <- tmp <- eval(bquote(lm(formula = .(formula) , data = data_r3) ))
 summary(tmp)
 
@@ -873,25 +873,25 @@ summary(tmp)
 ## Add male x trial order
 ## This doesn't work since we have as many coefficients as data points.
 ## Oops
-formula <- as.formula("log_song_count_plus_1 ~ 1 + male*trial_index + temp_target + I(temp_target^2)")
+formula <- as.formula("log_motif_count_plus_1 ~ 1 + male*trial_index + temp_target + I(temp_target^2)")
 lm$trial_index_by_male <- tmp <- lm(formula = eval(formula) , data = data_r3)
 summary(tmp)
 
 
 ## add slope x male interaction term
 
-lm$male_by_temp <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target*male + I(temp_target^2), data = data_r3)
+lm$male_by_temp <- tmp <- lm(formula = log_motif_count_plus_1 ~ 1 + temp_target*male + I(temp_target^2), data = data_r3)
 summary(tmp)
 
 
 ## slope x male - male intercept
 ## This suggests that the slopes are similar between males (though the SE are large)
-lm$male_by_temp <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target:male + I(temp_target^2), data = data_r3)
+lm$male_by_temp <- tmp <- lm(formula = log_motif_count_plus_1 ~ 1 + temp_target:male + I(temp_target^2), data = data_r3)
 summary(tmp)
 
 ## curvature x male - male intercept
 ## This suggests that the slopes are similar between males (though the SE are large)
-lm$male_by_temp_sq <- tmp <- lm(formula = log_song_count_plus_1 ~ 1 + temp_target + I(temp_target^2):male, data = data_r3)
+lm$male_by_temp_sq <- tmp <- lm(formula = log_motif_count_plus_1 ~ 1 + temp_target + I(temp_target^2):male, data = data_r3)
 summary(tmp)
 ```
 
@@ -903,14 +903,14 @@ glmer = list()
 
 ## I think this is a correct fit.  If I don't include the 1 + temp... w/o the |male, I don't get any effects.
 glmer$nb_1 <- glmer.nb(
-    song_count ~ 1 + temp_target + I(temp_target^2) + trial_index + ((1 + temp_target + I(temp_target^2))|male),
+    motif_count ~ 1 + temp_target + I(temp_target^2) + trial_index + ((1 + temp_target + I(temp_target^2))|male),
     data = data_r3,
     family = poisson(link = "log"),
     control = glmerControl(optCtrl = list(maxiter = 300)),
     verbose = TRUE)
 
 
-glmer$nb_2 <- update(glmer$nb_1, formula =  song_count ~ 1 + temp_target + I(temp_target^2) + ((1 + temp_target + I(temp_target^2))|male) )
+glmer$nb_2 <- update(glmer$nb_1, formula =  motif_count ~ 1 + temp_target + I(temp_target^2) + ((1 + temp_target + I(temp_target^2))|male) )
 
 mode
 ```
@@ -947,13 +947,13 @@ anova(lm$male, lm$trial_index_and_male)
 data <- data_full %>% filter(round ==3)
 
 data %>% group_by(temp_target) %>%
-    filter(song_count < 400) %>%
-    summarize(ave = mean(song_count, na.rm = TRUE), sd = sd(song_count, na.rm = TRUE)) 
+    filter(motif_count < 400) %>%
+    summarize(ave = mean(motif_count, na.rm = TRUE), sd = sd(motif_count, na.rm = TRUE)) 
 
 
 ## show the data
 ## windows()
-ggplot(data, aes(temp_target, song_count)) + 
+ggplot(data, aes(temp_target, motif_count)) + 
     geom_point() +
     geom_jitter() +
   theme_bw(base_size = 12) +
@@ -965,18 +965,18 @@ ggplot(data, aes(temp_target, song_count)) +
 mod = 'lactin2_1995'
 
 ## get starting values
-start_vals <- get_start_vals(data$temp_target, data$song_count, model_name = 'lactin2_1995')
+start_vals <- get_start_vals(data$temp_target, data$motif_count, model_name = 'lactin2_1995')
   
 ## Get limits
-low_lims <- get_lower_lims(data$temp_target,data$song_count,model_name = 'lactin2_1995')
-upper_lims <- get_upper_lims(data$temp_target, data$song_count, model_name = 'lactin2_1995')
+low_lims <- get_lower_lims(data$temp_target,data$motif_count,model_name = 'lactin2_1995')
+upper_lims <- get_upper_lims(data$temp_target, data$motif_count, model_name = 'lactin2_1995')
 
 start_vals
 low_lims
 upper_lims
   
 ## fit model
-fit <- nls_multstart(song_count~lactin2_1995(temp = temp_target, a,b,tmax,delta_t),
+fit <- nls_multstart(motif_count~lactin2_1995(temp = temp_target, a,b,tmax,delta_t),
                                   data = data,
                                   iter = 600,
                                   start_lower = start_vals-10,
@@ -996,7 +996,7 @@ preds <- broom::augment(fit, newdata = preds)
 ## plot data and model fit
 ## windows()
 ggplot(preds)+
-  geom_point(aes(temp_target,song_count), data)+
+  geom_point(aes(temp_target,motif_count), data)+
   geom_line(aes(temp, .fitted), preds, col = 'blue')+
   theme_bw()+
   labs(x='Temperature (C)',
@@ -1015,40 +1015,40 @@ ggplot(preds)+
 ```{r}
 
 d <-filter(heat_roundt2, Male =="T236")
-d_fits <- nest(d, data = c(temp_target,song_count)) %>%
-  mutate(lactin = map(data,~nls_multstart(song_count~lactin2_1995(temp = temp_target, a, b, tmax, delta_t),
+d_fits <- nest(d, data = c(temp_target,motif_count)) %>%
+  mutate(lactin = map(data,~nls_multstart(motif_count~lactin2_1995(temp = temp_target, a, b, tmax, delta_t),
                       data = .x,
                       iter = c(3,3,3,3),
-                      start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'lactin2_1995')-10,
-                      start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'lactin2_1995')+10,
-                      lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'lactin2_1995'),
-                      upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'lactin2_1995'),
+                      start_lower = get_start_vals(.x$temp_target, .x$motif_count, model_name = 'lactin2_1995')-10,
+                      start_upper = get_start_vals(.x$temp_target, .x$motif_count, model_name = 'lactin2_1995')+10,
+                      lower = get_lower_lims(.x$temp_target, .x$motif_count, model_name = 'lactin2_1995'),
+                      upper= get_upper_lims(.x$temp_target, .x$motif_count, model_name = 'lactin2_1995'),
                       supp_errors = 'Y',
                       convergence_count = FALSE)),
-weibull = map(data,~nls_multstart(song_count~weibull_1995(temp = temp_target, a, topt, b,c),
+weibull = map(data,~nls_multstart(motif_count~weibull_1995(temp = temp_target, a, topt, b,c),
                                   data = .x,
                                   iter = c(4,4,4,4),
-                                  start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'weibull_1995')-10,
-                                  start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'weibull_1995')+10,
-                                  lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'weibull_1995'),
-                                  upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'weibull_1995'),
+                                  start_lower = get_start_vals(.x$temp_target, .x$motif_count, model_name = 'weibull_1995')-10,
+                                  start_upper = get_start_vals(.x$temp_target, .x$motif_count, model_name = 'weibull_1995')+10,
+                                  lower = get_lower_lims(.x$temp_target, .x$motif_count, model_name = 'weibull_1995'),
+                                  upper= get_upper_lims(.x$temp_target, .x$motif_count, model_name = 'weibull_1995'),
                                   supp_errors = 'Y',
                                   convergence_count = FALSE)),
-modifiedgaussian = map(data, ~nls_multstart(song_count~modifiedgaussian_2006(temp = temp_target, rmax,topt, a, b),
+modifiedgaussian = map(data, ~nls_multstart(motif_count~modifiedgaussian_2006(temp = temp_target, rmax,topt, a, b),
                                             data = .x,
                                             iter = c(3,3,3,3),
-                                            start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006')-10,
-                                            start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006')+10,
-                                            lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006'),
-                                            upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'modifiedgaussian_2006'),
+                                            start_lower = get_start_vals(.x$temp_target, .x$motif_count, model_name = 'modifiedgaussian_2006')-10,
+                                            start_upper = get_start_vals(.x$temp_target, .x$motif_count, model_name = 'modifiedgaussian_2006')+10,
+                                            lower = get_lower_lims(.x$temp_target, .x$motif_count, model_name = 'modifiedgaussian_2006'),
+                                            upper= get_upper_lims(.x$temp_target, .x$motif_count, model_name = 'modifiedgaussian_2006'),
                                             supp_errors = 'Y',
                                             convergence_count = FALSE)),
-briere = map(data,nls_multstart(song_count~briere2_1999(temp = temp_target, tmin, tmax, a,b),
+briere = map(data,nls_multstart(motif_count~briere2_1999(temp = temp_target, tmin, tmax, a,b),
                                 data = .x,
                                 iter = c(4,4,4,4),
-                                start_lower = get_start_vals(.x$temp_target, .x$song_count, model_name = 'briere2_1999')-10,
-                                start_upper = get_start_vals(.x$temp_target, .x$song_count, model_name = 'briere2_1999')+10,
-                                lower = get_lower_lims(.x$temp_target, .x$song_count, model_name = 'briere2_1999'),
-                                upper= get_upper_lims(.x$temp_target, .x$song_count, model_name = 'briere2_1999'),
+                                start_lower = get_start_vals(.x$temp_target, .x$motif_count, model_name = 'briere2_1999')-10,
+                                start_upper = get_start_vals(.x$temp_target, .x$motif_count, model_name = 'briere2_1999')+10,
+                                lower = get_lower_lims(.x$temp_target, .x$motif_count, model_name = 'briere2_1999'),
+                                upper= get_upper_lims(.x$temp_target, .x$motif_count, model_name = 'briere2_1999'),
                                 supp_errors = 'Y',
                                 convergence_count = FALSE)))

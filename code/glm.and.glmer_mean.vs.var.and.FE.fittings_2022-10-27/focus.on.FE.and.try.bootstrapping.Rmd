@@ -20,24 +20,24 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E5, ou
 # Goal
 
 - Simple, but reasonable fits using GLM qpoisson with either
-  - `song_count` and `1|male`
-  - `song_count` and `offset(total_count)`
-  - `song_prop` with weights
+  - `motif_count` and `1|male`
+  - `motif_count` and `offset(total_count)`
+  - `motif_prop` with weights
 - Use `temp_ref = 45` per Liz's request
 
 ## Notes from 27 Oct 2022 meeting
 
 - TODO Me
   - Document simplest fits of 
-     - quad qpoisson models to `song_count`
-     - general quad with weights to `song_prop`
-     - KEY QUESTION: Does `song_prop` work as well as `song_count`? 
-       - If so, use all `song_prop` data with `rTPC`
+     - quad qpoisson models to `motif_count`
+     - general quad with weights to `motif_prop`
+     - KEY QUESTION: Does `motif_prop` work as well as `motif_count`? 
+       - If so, use all `motif_prop` data with `rTPC`
        - Fit lactin 2 and other models in fixed effects framework
        - Do model selection amongst
-     - What's the diff between `song_count` vs `song_prop`
-       - using `male` wiht `song_count` is more precise accommodation for `male`, but costs us 1 df/male
-       - not using `male` with `song_prop` is a less precise accommodation with no cost in terms of df.
+     - What's the diff between `motif_count` vs `motif_prop`
+       - using `male` wiht `motif_count` is more precise accommodation for `male`, but costs us 1 df/male
+       - not using `male` with `motif_prop` is a less precise accommodation with no cost in terms of df.
          It also allows us to use rTPC models (we think)
          
 ## Resources
@@ -66,7 +66,7 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E5, ou
   - Only round where `temp_mean` and `humidity_mean` exist.
 - `count_total_round` are consistent between Rounds 1 and 3, so could use that info to classify birds, estimate variance function in response, etc.
 - One bird in `round = 3` collapsed during the trial so it was terminated.
-  We've set the `song_count` from NA to 0 and should consider making at `temp_working` column using `temp_target` in this instance and `temp_mean` in all other instances.
+  We've set the `motif_count` from NA to 0 and should consider making at `temp_working` column using `temp_target` in this instance and `temp_mean` in all other instances.
   Would need to do something similar for relative humidity, i.e. use `mean(humidity_mean)` for the `temp_target` value.
   
 ## Third Fitting
@@ -75,7 +75,7 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E5, ou
 - Copied `data_full` and set  `male = "combined"` so we could look at all of the data at once.
 - Learned about using `model` argument for glm models
 - Can't fit ME models
-  - I don't understand why the ME model with `song_count` where we use a RE for the intercept doesn't have a similar effect as using song_prop.
+  - I don't understand why the ME model with `motif_count` where we use a RE for the intercept doesn't have a similar effect as using motif_prop.
     This intercept value is essentially multiplying by a constant, so we could try and specify this value using `offset(log(count_total_round))`.
     So why doesn't this work?
 
@@ -155,9 +155,9 @@ git_root <- system("git rev-parse --show-toplevel", intern = TRUE)
 data_raw = list()
 
 data_raw[[1]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
-    ## Note T237 and T230 are missing numbers in the song_count column
+    ## Note T237 and T230 are missing numbers in the motif_count column
     ## so we are filtering these observations out until they are found
-    filter(!is.na(song_count))
+    filter(!is.na(motif_count))
 
 data_raw[[2]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Repeatability-Song-Count.csv")) %>%
     mutate(round = 2) %>%
@@ -184,25 +184,25 @@ data_raw[[3]] <-read.csv(file.path(git_root, "data", "collated", "HSPi-Round-2-H
 data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     full_join(data_raw[[3]]) %>%
     discard(~all(is.na(.) | . =="")) %>% ## get rid of columns of only NA
-    mutate(trial_completed = !(is.na(song_count)) ) %>%
-    mutate(song_count = ifelse(is.na(song_count), 0, song_count)) %>%
-    mutate(song_count = song_count*1.0) %>% ## convert to a double so it's not treated as an integer
+    mutate(trial_completed = !(is.na(motif_count)) ) %>%
+    mutate(motif_count = ifelse(is.na(motif_count), 0, motif_count)) %>%
+    mutate(motif_count = motif_count*1.0) %>% ## convert to a double so it's not treated as an integer
     mutate(chamber = as.factor(chamber), male = as.factor(male)) %>%
     ## create a global variable trial_order based on individual rounds
     mutate(trial_index = as.integer(round*10+test_order)) %>%
-    mutate(song_count_plus_1 = (song_count + 1)) %>%
-    mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
+    mutate(motif_count_plus_1 = (motif_count + 1)) %>%
+    mutate(log_motif_count_plus_1 = log(motif_count + 1)) %>%
     mutate(temp_target = as.numeric(temp_target)) %>%
     ## Create generic 'temp' column which is either
     ## temp_mean, if it exists, or temp_target, if it doesn't
     mutate(temp = if_else(is.na(temp_mean),
                           temp_target,
                           temp_mean)) %>%
-    ## Add column with total song_count for a given round
+    ## Add column with total motif_count for a given round
     group_by(male, round) %>%
-    mutate(count_total_round = sum(song_count)) %>%
+    mutate(count_total_round = sum(motif_count)) %>%
     ungroup() %>%
-    mutate(song_prop = song_count/count_total_round) %>%
+    mutate(motif_prop = motif_count/count_total_round) %>%
     ## assuming poisson error
     ## From glm man page
     ## > Non-‘NULL’ ‘weights’ can be used to indicate that different
@@ -210,15 +210,15 @@ data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     ## >  ‘weights’ being inversely proportional to the dispersions);
     ## add +1 to deal with single 0
     ## Interpret dispersion as ~sd() or se() not var()
-    mutate(count_wt = sqrt(1/(song_count + 1))) %>%
-    ## need to rescale wts for song_prop data
+    mutate(count_wt = sqrt(1/(motif_count + 1))) %>%
+    ## need to rescale wts for motif_prop data
     mutate(prop_wt = count_wt * count_total_round) %>% 
     ## Add vpd 
     mutate(svp = SVP(t = temp_mean + 273.15, isK = TRUE), vpd = svp*(1-humidity_mean/100) ) %>%
     group_by(round) %>%
     mutate(vpd_offset = vpd - mean(vpd)) %>%
     ungroup() %>%
-    relocate(song_count, song_prop, vpd, temp_mean, humidity_mean, .after = male) %>% 
+    relocate(motif_count, motif_prop, vpd, temp_mean, humidity_mean, .after = male) %>% 
     mutate() ## Dummy function so we can comment out lines above it w/o any issues
 
 
@@ -247,24 +247,24 @@ data <- bind_rows(data_ind, data_comb)
 
 ```{r}
 
-song_count_round_2  <- data_ind %>%
+motif_count_round_2  <- data_ind %>%
     filter(round == 2) %>%
-    select(c(male, song_count)) %>%
+    select(c(male, motif_count)) %>%
     group_by(male) %>% 
-    mutate(mean = mean(song_count), sd = sd(song_count), var = var(song_count)) %>%
+    mutate(mean = mean(motif_count), sd = sd(motif_count), var = var(motif_count)) %>%
     ungroup() %>%
     unique()
 
 ## Bootstrap data to get SE of var and mean
-bs_data <- song_count_round_2 %>%
-select(male, song_count) %>%
+bs_data <- motif_count_round_2 %>%
+select(male, motif_count) %>%
     bootstraps(times=100, strata = male)
 
 bs_moments <- map_dfr(
   bs_data$splits,
   function(x) {
     dat <- as.data.frame(x) %>% group_by(male) %>%
-    summarize(mean = mean(song_count), var = var(song_count), sd = sd(song_count))
+    summarize(mean = mean(motif_count), var = var(motif_count), sd = sd(motif_count))
   }, .id = "sample")
 
 bs_ci <- bs_moments %>%
@@ -279,17 +279,17 @@ bs_ci <- bs_moments %>%
 
 ##Clearly we have very little confidence in our moment estimators
 
-song_count_stats <- full_join(song_count_round_2 %>% select(-song_count) %>% unique(), bs_ci, by = "male")
+motif_count_stats <- full_join(motif_count_round_2 %>% select(-motif_count) %>% unique(), bs_ci, by = "male")
 
 
-g1 <- ggplot(song_count_round_2) +
-    aes(x=song_count,
+g1 <- ggplot(motif_count_round_2) +
+    aes(x=motif_count,
         color = male,
         fill = male) + 
     geom_histogram() +
     labs(title = "")
 
-g2 <- ggplot(song_count_stats) +
+g2 <- ggplot(motif_count_stats) +
     aes(x=mean, y = sd) + 
     geom_point(aes(color = male)) +
     geom_smooth(method='lm', formula= y~x) +
@@ -297,7 +297,7 @@ g2 <- ggplot(song_count_stats) +
     geom_errorbarh(aes(xmin = mean_low, xmax = mean_high)) +
     labs(title = "Mean vs. sd for Round 2: temp_target = 40")
 
-g3 <- ggplot(song_count_stats) +
+g3 <- ggplot(motif_count_stats) +
     aes(x=mean, y = var) +
     geom_point(aes(color = male)) +
     geom_smooth(method='lm', formula= y~x) +
@@ -310,7 +310,7 @@ g3 <- ggplot(song_count_stats) +
     
 #ggcoefstats(
     
-g4 <- ggplot(song_count_stats) +
+g4 <- ggplot(motif_count_stats) +
     aes(x=mean, y = var) +
     geom_point(aes(color = male)) +
     geom_smooth(method='glm', formula= y~-1 + x+I(x^2)) +
@@ -345,12 +345,12 @@ count_total_round_2_and_3  <- data_ind %>%
 
 
 xlab <- "Temperature"
-ylab <- "song_count"
+ylab <- "motif_count"
 
 plot_temp_data <-
     ggplot(data) + 
     aes(x = temp,
-        y = song_count) +
+        y = motif_count) +
     facet_wrap("male", scales = "free_y") +
     geom_point() +
 labs( title = paste( ylab, " vs ", xlab))
@@ -362,7 +362,7 @@ pivot_wider(data_ind, names_from = "round", values_from = "count_total_round") %
 ```
 
 
-## Formal Model Fits to `song_count`
+## Formal Model Fits to `motif_count`
 
 
 Using
@@ -391,7 +391,7 @@ data <- data_ind %>%
 
 make_plot = TRUE;
 
-glm_poisson_1 <- glm(song_count ~
+glm_poisson_1 <- glm(motif_count ~
                        (1 + male  +  (x1) + I(x1^2)),
                    data = data,
                    family = poisson(link = "log")
@@ -400,7 +400,7 @@ glm_poisson_1 <- glm(song_count ~
 summary(glm_poisson_1)
 
 ## Add round effect
-glm_poisson_2 <- glm(song_count ~
+glm_poisson_2 <- glm(motif_count ~
                        (1 + male + round +  (x1) + I(x1^2)),
                    data = data,
                    family = poisson(link = "log")
@@ -413,7 +413,7 @@ male_coef <-  coef(glm_poisson_2) %>% keep(str_detect(names(.), 'male'))
 hist(male_coef, breaks = 30)
 
 ## Remove male effect
-glm_poisson_3 <- glm(song_count ~
+glm_poisson_3 <- glm(motif_count ~
                        (1 + round +  (x1) + I(x1^2)),
                    data = data,
                    family = poisson(link = "log")
@@ -442,7 +442,7 @@ if(make_plot){
     page_label <- "glm with poisson error"
     mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
 ##    dev.new()
-##    ggplot(data, aes(temp, song_count))
+##    ggplot(data, aes(temp, motif_count))
 }
 
 glm_qpoisson_2 <- update(glm_poisson_2,
@@ -457,7 +457,7 @@ if(make_plot){
     page_label <- "glm with poisson error"
     mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
 ##    dev.new()
-##    ggplot(data, aes(temp, song_count))
+##    ggplot(data, aes(temp, motif_count))
 }
 
 
@@ -473,7 +473,7 @@ if(make_plot){
     page_label <- "glm with poisson error"
     mtext(page_label, outer=TRUE,  cex=1, line=-1.1)
 ##    dev.new()
-##    ggplot(data, aes(temp, song_count))
+##    ggplot(data, aes(temp, motif_count))
 }
 
 ```
@@ -481,6 +481,6 @@ if(make_plot){
 ### Result
 
 - Overdispersion of data makes parameters non-significant
-- Don't how a `song_prop` approach will solve this issue.
+- Don't how a `motif_prop` approach will solve this issue.
   
 

@@ -1,5 +1,5 @@
 ---
-title: "Fit rTPC models to `song_prop` after filtering"
+title: "Fit rTPC models to `motif_prop` after filtering"
 author: "Michael Gilchrist"
 date: "date: 2022-10-20"
 output: pdf_document
@@ -20,7 +20,7 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E5, ou
 ```
 # Goal
 
-- Evaluate trends in song_count under a (near) constant temperature.
+- Evaluate trends in motif_count under a (near) constant temperature.
 
 # Set up
 
@@ -366,11 +366,11 @@ load(file.path("input", "data.processing_2022-11-09.Rda"),
 
 ```{r}
 
-males_filtered_disp <- song_stats_40C %>%
+males_filtered_disp <- motif_stats_40C %>%
     filter(dispersion < 50) %>%
     pull(male)
 
-males_filtered_mean <- song_stats %>%
+males_filtered_mean <- motif_stats %>%
     filter(mean > 10) %>%
     pull(male)
 
@@ -378,7 +378,7 @@ males_filtered <- intersect(males_filtered_mean, males_filtered_disp)
 
 ##males_selected <-
 
-data_ind <- song_data %>%
+data_ind <- motif_data %>%
     filter(male %in% males_filtered) %>%
     arrange(male) %>%
     ##    left_join(male_shape, by = "male") %>%
@@ -388,8 +388,8 @@ data_aug <- tibble(
     male = rep.int(
     (data_ind$male %>% unique()), 5),
     temp = 46,
-    song_count = 0,
-    song_prop = 0,
+    motif_count = 0,
+    motif_prop = 0,
     round = 0,
     weights = 10) %>%
     bind_rows(data_ind, .)
@@ -397,25 +397,25 @@ data_aug <- tibble(
 
 data_comb <- data_ind %>% mutate(male = "combined")
 
-stats_ind <- song_stats %>%
+stats_ind <- motif_stats %>%
     filter(male %in% males_filtered)
 
 ```
 
 
-## Plot song_count
+## Plot motif_count
 
 
 ```{r}
 
 g1 <- ggplot(data = data_ind) +
-    aes(x = temp, y = song_count, color = male, shape = male) +
+    aes(x = temp, y = motif_count, color = male, shape = male) +
     ## Redefine shapes. Note need to set 'shape = male' above to prevent there from
     ## begin two legends: 1 for shape and 1 for color.
     scale_shape_manual(values = rep(c(16:18), length.out = length(males_filtered))) +
     geom_point() +
     scale_color_viridis_d() +
-    labs(title = "song_count") +
+    labs(title = "motif_count") +
     theme(legend.position="none")
 
 ```
@@ -425,21 +425,21 @@ g1 <- ggplot(data = data_ind) +
 ```{r}
 
 g1 <- ggplot(data = data_ind) +
-    aes(x = temp, y = song_count, color = male, shape = male) +
+    aes(x = temp, y = motif_count, color = male, shape = male) +
     ## Redefine shapes. Note need to set 'shape = male' above to prevent there from
     ## begin two legends: 1 for shape and 1 for color.
     scale_shape_manual(values = rep(c(16:18), length.out = length(males_filtered))) +
     geom_point() +
     scale_color_viridis_d() +
-    labs(title = "song_count") +
+    labs(title = "motif_count") +
     theme(legend.position="none")
 
 g2 <- ggplot(data = data_ind) +
-    aes(x = temp, y = song_prop, color = male, shape = male) +
+    aes(x = temp, y = motif_prop, color = male, shape = male) +
     scale_shape_manual(values = rep(c(16:18), length.out = length(males_filtered))) +
     geom_point() +
     scale_color_viridis_d() +
-    labs(title = "song_prop") +
+    labs(title = "motif_prop") +
     theme(legend.position="bottom")
 
 
@@ -480,7 +480,7 @@ minFactor <- min(1/(2*maxiter), 1/1024)
 
 weights_index <- 1:1
 data_indexes <- 1:2
-data_descriptions <- c("Unaugmented", "song_count at 46C Augmented")
+data_descriptions <- c("Unaugmented", "motif_count at 46C Augmented")
 
 for(data_index in data_indexes ){
     data <- switch(data_index,
@@ -488,8 +488,8 @@ for(data_index in data_indexes ){
                    data_aug
                    )
     data_desc <- data_descriptions[[data_index]]
-    data <- data %>% rename(rate = song_prop) %>%
-        select(temp, rate, weights, song_count_plus_1) %>%
+    data <- data %>% rename(rate = motif_prop) %>%
+        select(temp, rate, weights, motif_count_plus_1) %>%
         data.frame()
 
 

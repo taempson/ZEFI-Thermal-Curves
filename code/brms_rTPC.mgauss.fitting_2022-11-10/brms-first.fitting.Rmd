@@ -39,7 +39,7 @@ According to Padfield et al. (2021)
 > However, [the rTPC] pipeline does not accommodate non-independent (related) replicates, and clustered or stratified sampling (possibly with missing values). In such situations, nonlinear mixed effects model fitting (e.g. using the nlme r package; Oddi et al., 2019) or Bayesian approaches (e.g. using the brms r package; Bürkner, 2017) would be more appropriate. Nevertheless, for fitting massive TPC datasets to multiple mathematical models, rTPC offers a simple, reliable and reproducible computational pipeline with robust methods for calculation of model uncertainty, requiring minimal statistical and computational expertise, and suitable for a wide range of applications.
 
 Thus, we can't incorporate individual or random effects.
-We could try and use all of the observations in `song_prop` to deal with the `male` term.
+We could try and use all of the observations in `motif_prop` to deal with the `male` term.
 
 
 
@@ -54,7 +54,7 @@ Yes.
 
 ## Data and Explanatory Variables
 
-- Data: Use song_count from round 3
+- Data: Use motif_count from round 3
 
 ## Future Plans
 
@@ -240,9 +240,9 @@ git_root <- system("git rev-parse --show-toplevel", intern = TRUE)
 data_raw = list()
 
 data_raw[[1]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
-    ## Note T237 and T230 are missing numbers in the song_count column
+    ## Note T237 and T230 are missing numbers in the motif_count column
     ## so we are filtering these observations out until they are found
-    filter(!is.na(song_count)) %>%
+    filter(!is.na(motif_count)) %>%
     ungroup()
 
 data_raw[[2]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Repeatability-Song-Count.csv")) %>%
@@ -270,40 +270,40 @@ data_raw[[3]] <-read.csv(file.path(git_root, "data", "collated", "HSPi-Round-2-H
 data_full <- full_join(data_raw[[1]], data_raw[[2]]) %>%
     full_join(data_raw[[3]]) %>%
     discard(~all(is.na(.) | . =="")) %>% ## get rid of columns of only NA
-    mutate(trial_completed = !(is.na(song_count)) ) %>%
-    mutate(song_count = ifelse(is.na(song_count), 0, song_count)) %>%
-    mutate(song_count = song_count*1.0) %>% ## convert to a double so it's not treated as an integer
+    mutate(trial_completed = !(is.na(motif_count)) ) %>%
+    mutate(motif_count = ifelse(is.na(motif_count), 0, motif_count)) %>%
+    mutate(motif_count = motif_count*1.0) %>% ## convert to a double so it's not treated as an integer
     mutate(chamber = as.factor(chamber), male = as.factor(male)) %>%
     ## create a global variable trial_order based on individual rounds
     mutate(trial_index = as.integer(round*10+test_order)) %>%
-    mutate(song_count_plus_1 = (song_count + 1)) %>%
-    mutate(log_song_count_plus_1 = log(song_count + 1)) %>%
+    mutate(motif_count_plus_1 = (motif_count + 1)) %>%
+    mutate(log_motif_count_plus_1 = log(motif_count + 1)) %>%
     mutate(temp_target = as.numeric(temp_target)) %>%
     ## Create generic 'temp' column which is either
     ## temp_mean, if it exists, or temp_target, if it doesn't
     mutate(temp = if_else(is.na(temp_mean),
                           temp_target,
                           temp_mean)) %>%
-    ## Add column with total song_count for a given round
+    ## Add column with total motif_count for a given round
     group_by(male, round ) %>%
-    mutate(count_total_round = sum(song_count) ) %>%
+    mutate(count_total_round = sum(motif_count) ) %>%
     ungroup() %>%
-    mutate(song_prop = song_count/count_total_round) %>%
+    mutate(motif_prop = motif_count/count_total_round) %>%
     ## assuming poisson error
     ## From glm man page
     ## > Non-‘NULL’ ‘weights’ can be used to indicate that different
     ## >  observations have different dispersions (with the values in
     ## >  ‘weights’ being inversely proportional to the dispersions);
     ## add +1 to deal with single 0
-    mutate(count_wt = 1/(song_count + 1)) %>%
-    ## need to rescale wts for song_prop data
+    mutate(count_wt = 1/(motif_count + 1)) %>%
+    ## need to rescale wts for motif_prop data
     mutate(prop_wt = count_wt * count_total_round^2) %>% 
     ## Add vpd 
     mutate(svp = SVP(t = temp_mean + 273.15, isK = TRUE), vpd = svp*(1-humidity_mean/100) ) %>%
     group_by(round) %>%
     mutate(vpd_offset = vpd - mean(vpd)) %>%
     ungroup() %>%
-    relocate(song_count, song_prop, vpd, temp_mean, humidity_mean, .after = male) %>% 
+    relocate(motif_count, motif_prop, vpd, temp_mean, humidity_mean, .after = male) %>% 
     mutate() ## Dummy function so we can comment out lines above it w/o any issues
 ```
 
@@ -363,12 +363,12 @@ data <- bind_rows(data_ind, data_comb)
 ```{r}
 
 xlab <- "Temperature"
-ylab <- "song_count"
+ylab <- "motif_count"
 
 plot_temp_data <-
     ggplot(data) + 
     aes(x = temp,
-        y = song_count) +
+        y = motif_count) +
     facet_wrap("male", scales = "free_y") +
     geom_point() +
 labs( title = paste( ylab, " vs ", xlab))
@@ -380,7 +380,7 @@ last_plot()
 
 # First Analysis
 
-## Formal Model Fits to `song_count`
+## Formal Model Fits to `motif_count`
 
 
 ### Data Set Up
@@ -413,7 +413,7 @@ fit.file <- file.path(output_dir, "mgauss_nb.Rda")
 refit.model <- FALSE
 
 nlform <-
-    bf(song_count ~ rmax*exp(-0.5*(fabs(temp - topt)/a)^b),
+    bf(motif_count ~ rmax*exp(-0.5*(fabs(temp - topt)/a)^b),
        rmax ~ male -1,
        topt ~ 1,
        a ~ 1,
@@ -516,7 +516,7 @@ tmax = 45
 b = 0
 
 nlform <-
-    bf(song_count ~  exp(a * temp) - exp(a * tmax - ((tmax - temp)/deltat)) + b,
+    bf(motif_count ~  exp(a * temp) - exp(a * tmax - ((tmax - temp)/deltat)) + b,
        deltat ~ male - 1,
        a ~ male -1,
        nl = TRUE)
