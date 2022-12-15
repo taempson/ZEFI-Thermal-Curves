@@ -188,18 +188,18 @@ git_root <- system("git rev-parse --show-toplevel", intern = TRUE)
 
 data_raw = list()
 
-data_raw[[1]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
+data_raw[[1]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Round-1-Heat-Trials.csv")) %>% mutate(round = 1) %>%
     ## Note T237 and T230 are missing numbers in the song_count column
     ## so we are filtering these observations out until they are found
     filter(!is.na(song_count))
 
-data_raw[[2]] <- read.csv(file.path(git_root, "data", "raw_data", "HSPi-Repeatability-Song-Count.csv")) %>%
+data_raw[[2]] <- read.csv(file.path(git_root, "data", "collated", "HSPi-Repeatability-Song-Count.csv")) %>%
     mutate(round = 2) %>%
     group_by(male) %>%
     mutate(test_order = rank(date)) %>%
     ungroup()
 
-data_raw[[3]] <-read.csv(file.path(git_root, "data", "raw_data", "HSPi-Round-2-Heat-Trials.csv")) %>%
+data_raw[[3]] <-read.csv(file.path(git_root, "data", "collated", "HSPi-Round-2-Heat-Trials.csv")) %>%
     mutate(round = 3) %>%
     ## Deal with missing temp_mean and humidity_mean values
     ## in round == 3
