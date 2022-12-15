@@ -279,6 +279,7 @@ model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
 ```
 
 ### Males Not Pooled
+
 ```{r}
 
 iter <- 5000
@@ -315,12 +316,20 @@ plot(model, pars = c("x0"))
 plot(model, pars = c("y0"))
 
 
-pars_est <- summary(model, pars = pars, probs = NULL)$summary %>%
-                                                    as_tibble(rownames = "par")
+pars_tmp <- summary(model, pars = pars, probs = NULL)$summary %>%
+                                                    as_tibble(rownames = "pars")
+pars_tmp <- pars_tmp %>% separate_wider_regex(cols = pars, c(par = "^[a-z]+[0-9]+", "\\[", male_index = "[0-9]+", "\\]"), too_few = "error") %>%
+    mutate(male_index = as.integer(male_index))
 
-pars_est %>% separate_wider_regex(cols = par, c(pars = "^[a-z]+", "[", male = "[0-9]+", "]"))
+## The code below also works somewhat
+## pars_tmp <- pars_tmp %>%
+##    mutate(par = str_extract(pars, "^[A-z]+[0-9]+"), male_index = str_replace(pars, ".*\\[([0-9]+)\\]$", "\\1")) %>%
 
-pars_sim <- data_sim %>% select(male, y0, tau0)
+pars_est <- pars_tmp %>% pivot_wider(names_from = par, values_from = c(mean, sd), id_cols = male_index, id_expand = TRUE)
+
+pars_sim <- data_sim %>% select(male_index = male, y0, x0 = tau0) %>% distinct()
+
+
 
 
 fit_poisson_pooled <- model
