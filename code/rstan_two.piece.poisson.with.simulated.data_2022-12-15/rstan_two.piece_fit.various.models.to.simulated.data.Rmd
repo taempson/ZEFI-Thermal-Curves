@@ -6,6 +6,7 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE, }
+
 knitr::opts_chunk$set(
   warning = TRUE, # show warnings
   message = TRUE, # show messages
@@ -104,11 +105,11 @@ stats_ind <- motif_stats %>%
   filter(male %in% male_vector)
 
 data_ind <- data_ind %>% filter(temp < 38) %>%
-    group_by(male) %>% mutate(y0_obs = mean(motif_count), phi_ind = var(motif_count)/y0_obs)
+    group_by(male) %>% mutate(y0_simple.est = mean(motif_count), phi_ind = var(motif_count)/y0_simple.est) ## phi is overdispersion parameter
 
 summary(data_ind)
 
-summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_obs), y0_sd = sd(y0_obs), phi_bar = median(phi_ind))
+summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_simple.est), y0_sd = sd(y0_simple.est), phi_bar = median(phi_ind))
 ```
 
 
@@ -136,7 +137,7 @@ sim_counts <- function(temp, y0, tau0, tmax, phi) {
 phi <- summary_stats$phi_bar ## overdispersion parameter
 tmax <- 46
 
-data_tmp <- data_ind[, c("male", "temp", "y0_obs")] %>%
+data_tmp <- data_ind[, c("male", "temp", "y0_simple.est")] %>%
     mutate(male = droplevels(male)) %>%
     mutate(male = as.integer(male))
 
@@ -154,7 +155,7 @@ if(FALSE) {
     y0_sim <- rnorm(n_male, summary_stats$y0_bar, summary_stats$y0_sd) %>% round(0)
     data_tmp <- data_tmp %>% mutate(y0 = y0_sim[.data$male])
 } else {
-    data_tmp <- data_tmp %>% mutate(y0 = y0_obs)
+    data_tmp <- data_tmp %>% mutate(y0 = y0_simple.est)
 }
 
 ## made these tau0 values up
@@ -197,6 +198,10 @@ pars_full <- c(pars, "b0", "lp__")
 
 #### Original Code: Can't be used to pool males
 
+- `t0` = threshold parameter (later `x0`)
+- `y0` = pre-threshold response rate
+
+
 ```{r}
 
 iter <- 5000
@@ -226,7 +231,7 @@ model <- stan(file = "two.piece_poisson.stan",
 
 
 ## Examine output
-title <- "Two piece"
+title <- "Two piece, pooled males"
 print(title)
 print(model, pars = pars)
 traceplot(model, pars = pars, inc_warmup = FALSE, title = title)
@@ -234,7 +239,7 @@ plot(model, pars = pars) #, ggtitle(title))
 pairs(model, pars = pars_full, title = title)
 
 fit_poisson <- model
-
+summary(fit_poisson)$summary
 #ggplot()
 ```
 
@@ -251,7 +256,7 @@ tmax <- 46
 t0max <- tmax - 0.75;
 t0min <- 25;
 ## values to use for model predictions
-tp = seq(25, xmax, length.out = 100)
+tp = seq(25, tmax, length.out = 100)
 
 model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
               model_name = "Two piece poisson pooled",
@@ -276,6 +281,23 @@ model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
               verbose = TRUE)
 
 
+## Examine output
+pars <- c("x0", "y0")
+pars_full <- c(pars, "b0", "lp__")
+
+title <- "Two piece Pooled Males"
+print(title)
+print(model, pars = pars)
+traceplot(model, pars = pars, inc_warmup = FALSE, title = title)
+plot(model, pars = pars) #, ggtitle(title)) 
+pairs(model, pars = pars_full, title = title)
+
+fit_poisson.pooled <- model
+
+
+summary(fit_poisson)$summary
+summary(fit_poisson.pooled)$summary
+
 ```
 
 #### Males Separate
@@ -287,7 +309,7 @@ tmax <- 46
 t0max <- tmax - 0.75;
 t0min <- 25;
 ## values to use for model predictions
-tp = seq(25, xmax, length.out = 100)
+tp = seq(25, tmax, length.out = 100)
 
 model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
               model_name = "Two piece poisson pooled",
@@ -313,7 +335,9 @@ model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
 
 plot(model, pars = c("x0", "y0") )
 
-fit_poisson_separate <- model
+fit_poisson.separate <- model
+
+summary(fit_poisson.separate)$summary
 
 ```
 
@@ -386,12 +410,12 @@ ggplot(data = pars_combined) +
     facet_wrap(~ par, scales = "free",
                labeller = as_labeller(c(`y0` = "Normal Motif Rate", `x0` = "Threshold Temp"))) +
     labs(x = "Simulated", y = "Estimated", title = "Fitting 2 Piece Model to Simulated Data", subtitle = "error ~ Poisson")
-              
-
 
 ```
 
-## Assume NB
+- Note CI are under estimates due to use of `poisson` model rather than `qpoisson`.
+
+## Assume QPoisson
  
 ### Males pooled
 
@@ -402,26 +426,33 @@ tmax <- 46
 t0max <- tmax - 0.75;
 t0min <- 25;
 ## values to use for model predictions
-tp = seq(25, xmax, length.out = 100)
+tp = seq(25, tmax, length.out = 100)
 
-model <- stan(file = "two.piece_qpoisson.grouped.by.male.stan",
-              model_name = "Two piece nb pooled",
+stanc(file = "two.piece_qpoisson.stan")
+     
+model <- stan(file = "two.piece_qpoisson.stan",
+              model_name = "Two piece qpoisson",
               data=list(x = temp,
                         y = motif_count,
                         N = N,
                         L = 1,
                         ll = rep(1,N),
-                        xmax = tmax,
-                        x0min = t0min,
-                        x0max = t0max,
+                        mm = rep(1,N),                        
+                        x_max = tmax,
+                        x0_min = t0min,
+                        x0_max = t0max,
+                        y_xmax =0,
+                        y0_min = 10,
+                        sd_y0_prior = 100,
+                        alpha_theta_prior = 40,
                         ##tp = tp,
                         ## max threshold value.
                         ## having it too close to xmax *sometimes* leads to sampling
                         ## near xmax, but with lower lp and very high E13) b0 values
                         y_xmax = 0,
                         sd_y_prior = 100),
-              chains = 4,
-              cores = 4,
+              chains = 1,
+              cores = 1,
               iter = iter,
               warmup = floor(iter/2),
               verbose = TRUE)
