@@ -1,5 +1,5 @@
 ---
-title: "Piecewise Regression on Simulated and Observed Data using STAN Directly"
+title: "Piecewise Regression on Simulated NB data and Observed Data using STAN Directly"
 author: "Michael Gilchrist"
 date: "date: 2022-12-12"
 output: pdf_document
@@ -19,7 +19,7 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E3, ou
 ```
 # Goal
 
-- Fit two piece Negative Binomial 
+- Fit two piece poisson, quasipoisson, and negative binomial 
 
 ## Recap
 
@@ -62,7 +62,7 @@ library(latex2exp)
 ## Load Data
 
 ```{r}
-load(file.path("input", "data.processing_2022-11-09.Rda"),
+load(file.path("input", "data.processing_2022-12-15.Rda"),
      verbose = TRUE)
 
 ```
@@ -171,10 +171,7 @@ data_sim <- data_tmp %>% rowwise() %>% mutate(motif_count = sim_counts(temp, y0,
 
 ```
 
-# Analyze Data:
-
-
-# Stan
+# Analyze Simulated Data:
 
 
 ## Set Up Data
@@ -192,7 +189,8 @@ male <- data %>% pull(male)
 pars <- c("t0", "y0")
 pars_full <- c(pars, "b0", "lp__")
 ```
-## Two Piece Model
+
+## Assume (incorrectly) Poisson Error
 
 
 ### All Males Pooled
@@ -242,7 +240,9 @@ fit_poisson <- model
 
 
 
-#### Updated Code: Males can be pooled but aren't.
+### Updated Code: 
+
+#### Males pooled
 
 ```{r}
 
@@ -278,7 +278,7 @@ model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
 
 ```
 
-### Males Not Pooled
+#### Males Separate
 
 ```{r}
 
@@ -368,10 +368,10 @@ pars_sim <- data_sim %>%
 pars <- c("y0", "x0")
 
 ## Get basic numbers
-pars_tmp <- summary(model, pars = pars, probs = NULL)
+pars_tmp <- summary(model, pars = pars, probs = c(0.025, 0.975))
 pars_tmp <- pars_tmp$summary %>%
     as_tibble(rownames = "pars") %>%
-    select(pars, mean, sd)
+    select(pars, mean, "2.5%", "97.5%", sd)
 ## Split y0[ID] and x[ID] into y0 and ID 
 pars_est <- pars_tmp %>% separate_wider_regex(cols = pars, c(par = "^[a-z]+[0-9]+", "\\[", male_index = "[0-9]+", "\\]"), too_few = "error") %>%
     mutate(male_index = as.integer(male_index)) %>%
@@ -381,9 +381,121 @@ pars_combined <- full_join(x = pars_est, y = pars_sim, by = c("male_index", "par
 
 ggplot(data = pars_combined) +
     geom_point(aes(x = sim, y = est)) +
-    geom_errorbar(aes(x = sim, ymin = est - 2 * sd, ymax = est + 2 * sd)) +
+    geom_errorbar(aes(x = sim, ymin = `2.5%`, ymax = `97.5%`)) +
     geom_abline(aes(intercept = 0, slope = 1)) +
-    facet_wrap(~ par, scales = "free")
+    facet_wrap(~ par, scales = "free",
+               labeller = as_labeller(c(`y0` = "Normal Motif Rate", `x0` = "Threshold Temp"))) +
+    labs(x = "Simulated", y = "Estimated", title = "Fitting 2 Piece Model to Simulated Data", subtitle = "error ~ Poisson")
+              
+
+
+```
+
+## Assume NB
+ 
+### Males pooled
+
+```{r}
+
+iter <- 5000
+tmax <- 46
+t0max <- tmax - 0.75;
+t0min <- 25;
+## values to use for model predictions
+tp = seq(25, xmax, length.out = 100)
+
+model <- stan(file = "two.piece_qpoisson.grouped.by.male.stan",
+              model_name = "Two piece nb pooled",
+              data=list(x = temp,
+                        y = motif_count,
+                        N = N,
+                        L = 1,
+                        ll = rep(1,N),
+                        xmax = tmax,
+                        x0min = t0min,
+                        x0max = t0max,
+                        ##tp = tp,
+                        ## max threshold value.
+                        ## having it too close to xmax *sometimes* leads to sampling
+                        ## near xmax, but with lower lp and very high E13) b0 values
+                        y_xmax = 0,
+                        sd_y_prior = 100),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2),
+              verbose = TRUE)
+
+
+```
+
+#### Males Separate
+
+```{r}
+
+iter <- 5000
+tmax <- 46
+t0max <- tmax - 0.75;
+t0min <- 25;
+## values to use for model predictions
+tp = seq(25, xmax, length.out = 100)
+
+model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
+              model_name = "Two piece poisson pooled",
+              data=list(x = temp,
+                        y = motif_count,
+                        N = N,
+                        L = n_male,
+                        ll = data_sim$male,
+                        xmax = tmax,
+                        x0min = t0min,
+                        x0max = t0max,
+                        ##tp = tp,
+                        ## max threshold value.
+                        ## having it too close to xmax *sometimes* leads to sampling
+                        ## near xmax, but with lower lp and very high E13) b0 values
+                        y_xmax = 0,
+                        sd_y_prior = 100),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2),
+              verbose = TRUE)
+
+plot(model, pars = c("x0", "y0") )
+
+fit_poisson_separate <- model
+
+```
+
+##### Plot Results
+
+
+######  Wide data
+
+```{r}
+
+pars <- c("y0", "x0")
+
+pars_tmp <- summary(model, pars = pars, probs = NULL)$summary %>%
+                                                    as_tibble(rownames = "pars")
+pars_tmp <- pars_tmp %>% separate_wider_regex(cols = pars, c(par = "^[a-z]+[0-9]+", "\\[", male_index = "[0-9]+", "\\]"), too_few = "error") %>%
+    mutate(male_index = as.integer(male_index))
+
+## The code below also works somewhat
+## pars_tmp <- pars_tmp %>%
+##    mutate(par = str_extract(pars, "^[A-z]+[0-9]+"), male_index = str_replace(pars, ".*\\[([0-9]+)\\]$", "\\1")) %>%
+
+pars_est <- pars_tmp %>% pivot_wider(names_from = par, values_from = c(mean, sd), id_cols = male_index, id_expand = TRUE)
+
+pars_sim <- data_sim %>% select(male_index = male, y0, x0 = tau0) %>% distinct()
+
+pars_combined <- full_join(pars_est, pars_sim, by = "male_index")
+
+ggplot(data = pars_combined) +
+    geom_point(aes(x = x0, y = mean_x0)) +
+    geom_errorbar(aes(x = x0, ymin = mean_x0- 2 * sd_x0, ymax = mean_x0 + 2 * sd_x0)) +
+    geom_abline(aes(intercept = 0, slope = 1))
                
 
 ggplot(data = pars_combined) +
@@ -393,6 +505,45 @@ ggplot(data = pars_combined) +
 
 
 ```
+######  Tidy data
+
+```{r}
+
+pars_sim <- data_sim %>%
+    select(male_index = male, y0, x0 = tau0) %>%
+    distinct() %>%
+#    mutate(type = "sim") %>%
+    pivot_longer(cols = c(x0, y0), values_to = "sim", names_to = "par")
+
+
+pars <- c("y0", "x0")
+
+## Get basic numbers
+pars_tmp <- summary(model, pars = pars, probs = c(0.025, 0.975))
+pars_tmp <- pars_tmp$summary %>%
+    as_tibble(rownames = "pars") %>%
+    select(pars, mean, "2.5%", "97.5%", sd)
+## Split y0[ID] and x[ID] into y0 and ID 
+pars_est <- pars_tmp %>% separate_wider_regex(cols = pars, c(par = "^[a-z]+[0-9]+", "\\[", male_index = "[0-9]+", "\\]"), too_few = "error") %>%
+    mutate(male_index = as.integer(male_index)) %>%
+    rename(est = mean)
+
+pars_combined <- full_join(x = pars_est, y = pars_sim, by = c("male_index", "par"))
+
+ggplot(data = pars_combined) +
+    geom_point(aes(x = sim, y = est)) +
+    geom_errorbar(aes(x = sim, ymin = `2.5%`, ymax = `97.5%`)) +
+    geom_abline(aes(intercept = 0, slope = 1)) +
+    facet_wrap(~ par, scales = "free",
+               labeller = as_labeller(c(`y0` = "Normal Motif Rate", `x0` = "Threshold Temp"))) +
+    labs(x = "Simulated", y = "Estimated", title = "Fitting 2 Piece Model to Simulated Data", subtitle = "error ~ Poisson")
+              
+
+
+```
+
+
+
 ### Leave One Out (LOO) analysis
 
 
