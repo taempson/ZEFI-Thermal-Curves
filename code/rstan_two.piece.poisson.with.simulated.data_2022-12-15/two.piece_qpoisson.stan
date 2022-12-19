@@ -30,28 +30,23 @@ for Var(Y) = \theta E(Y) we set phi = \mu/(\theta - 1)
  
 
  */
-
-functions {
+//functions {
   // Returns expected counts | model parameters and variable x
   // I should be able to vectorize this
-  real f_mu(real b0, real x0, real xmax, real y_xmax, real x) {
-    real val1;
-    real val2;
-
-    val1 = xmax - x;
-    val2 = xmax - x0;
-    return (y_xmax  - fmin(val1, val2) * b0); 
-  }
-
+//  real f_mu(real b0, real x0, real xmax, real y_xmax, real x) {
+//    real val1;
+//    real val2;
+//
+//    val1 = xmax - x;
+//    val2 = xmax - x0;
+//    return (y_xmax  - fmin(val1, val2) * b0); 
+//  }
   // Returns appropriate phi value for NB2 for Quasipoisson error given mu and theta
-  real f_phi(real mu, real theta) {
-    real phi = mu/(theta-1);
-
-
-    return phi; 
-  }
-}
-
+  //  real f_phi(real mu, real theta) {
+  //  real phi = mu/(theta-1);
+  //  return phi; 
+  //}
+//}
 data {
   int<lower=1> N; // # of data points
   int<lower=1> L; // Levels = # of males;
@@ -62,15 +57,15 @@ data {
   array[N] int<lower=1, upper=L> ll; // male id, one for each observation
   array[N] int<lower=1, upper=M> mm; // qpoisson parameter grouping
   // max x value and response (y) at max value
-  real[lower=1] y0_min; // min value of y0; should be based on any filtering threshold
+  real<lower=1> y0_min; // min value of y0; should be based on any filtering threshold
   real xmax; // max temp
   real<lower=0> y_xmax; // y value at xmax, generally will be 0
   // Ensure model behaves well.
   real x0_min; //min threshold value
   real<lower=x0_min+1> x0_max; //max threshold value
-  //  vector[100] tp; // points used to create predictions for plotting
   real<lower=1> sd_y0_prior;
   real<lower=0> alpha_theta_prior;
+  //vector[100] xp; // points used to create predictions for plotting
 }
 
 //transformed data {
@@ -81,13 +76,15 @@ data {
 parameters { // One set of parameters for each level (male) 
   vector<lower=y0_min>[L] y0; // mean value for y when x < x0
   vector<lower=x0_min,upper=x0_max>[L] x0; //first threshold
-  vector<lower=0,upper=1>[M] theta; //overdispersion parameter
+  vector<lower=1>[M] theta; //overdispersion parameter
 }
 
 transformed parameters {
   //  array[L] real<lower=x0_min,upper=x0_max> s0 = xmax - x0; // first threshold
   //array[L] real<lower=x0_min,upper=x0_max> a0 = - b0; // slope of decrease
-  vector[L] b0 = - (y0 - y_xmax)/(x_max - x0); // slope of decrease
+  vector[L] b0 ;
+  
+  b0 = (y_xmax-y0)./(xmax - x0); // slope of decrease
 }
 
 model {
@@ -99,36 +96,44 @@ model {
   // vector[N] mu;
   real phi;
   real mu;
+  real val1;
+  real val2;
   
   //Priors
     for (l in 1:L) {
       //x0[l] ~ uniform(30, 44);
-      y0[l] ~ normal_lpdf(150, sd_y0_prior);
+      y0[l] ~ normal(150, sd_y0_prior);
    }
   for (m in 1:M) {
-    theta[M] ~ exponential_lpdf(alpha_theta_prior)
+    theta[M] ~ exponential(alpha_theta_prior);
    }
   //Log Likelihood 
   for (n in 1:N) {
-    mu = f_mu(b0[ll[n]], x0[ll[n]], xmax, y_xmax, x[n]);
-    phi = f_phi(mu, theta[mm[n]])
-    y[n] ~ neg_binomial_2_lupmf(mu, phi)
+    val1 = xmax - x[n];
+    val2 = xmax - x0[ll[n]];
+    //mu = f_mu(b0[ll[n]], x0[ll[n]], xmax, y_xmax, x[n]);
+    mu = y_xmax  - fmin(val1, val2) * b0[ll[n]];
+    // phi = f_phi(mu, theta[mm[n]]);
+    phi =  mu/(theta[mm[n]]-1);
+    y[n] ~ neg_binomial_2(mu, phi);
   }
 }
 
 
 generated quantities {
-
   // Get LLik values for each data point
   // These are used in the LOO analysis of model fit(s)
-  vector[N] log_lik;
-  vector[num_elements(xp)] yp; //predicted values based on xp
-  
-  //yp = y_tmax + fmin(sp, s1) * a1;
-  for(n in 1:num_elements(yp)) {
-      yp[n] = y_tmax + fmin(sp[n], s1) * a1;
-  }
-  for (n in 1:N) {
-    log_lik[n] = poisson_lpmf(y[n] | lambda[n]);
-  }
+//  vector[N] log_lik;
+//  vector[num_elements(xp)] yp; //predicted values based on xp
+//  real val1, val2;
+//  
+//  //yp = y_tmax + fmin(sp, s1) * a1;
+//  for(n in 1:num_elements(yp)) {
+//     val1 = xmax - xp[n];
+//     val2 = xmax - x0[ll[n]];
+//      yp[n] = y_xmax + fmin() * a1;
+//  }
+//  for (n in 1:N) {
+//    log_lik[n] = poisson_lpmf(y[n] | lambda[n]);
+//  }
 }

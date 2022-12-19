@@ -423,12 +423,17 @@ ggplot(data = pars_combined) +
 
 iter <- 5000
 tmax <- 46
-t0max <- tmax - 0.75;
+t0max <- tmax - 1;
 t0min <- 25;
 ## values to use for model predictions
 tp = seq(25, tmax, length.out = 100)
 
-stanc(file = "two.piece_qpoisson.stan")
+stanc(file = "two.piece_qpoisson.stan",
+      verbose = TRUE,
+      model_name = "two.piece_qpoisson")
+
+cmodel <- cmdstan_model(stan_file = "two.piece_qpoisson.stan")
+
      
 model <- stan(file = "two.piece_qpoisson.stan",
               model_name = "Two piece qpoisson",
@@ -436,12 +441,13 @@ model <- stan(file = "two.piece_qpoisson.stan",
                         y = motif_count,
                         N = N,
                         L = 1,
+                        M = 1,
                         ll = rep(1,N),
                         mm = rep(1,N),                        
-                        x_max = tmax,
+                        xmax = tmax,
                         x0_min = t0min,
                         x0_max = t0max,
-                        y_xmax =0,
+                        y_xmax = 0,
                         y0_min = 10,
                         sd_y0_prior = 100,
                         alpha_theta_prior = 40,
@@ -456,6 +462,22 @@ model <- stan(file = "two.piece_qpoisson.stan",
               iter = iter,
               warmup = floor(iter/2),
               verbose = TRUE)
+
+## Examine output
+pars <- c("x0", "y0", "theta")
+pars_full <- c(pars, "b0", "lp__")
+
+title <- "Two piece Pooled Males"
+print(title)
+print(model, pars = pars)
+traceplot(model, pars = pars, inc_warmup = FALSE, title = title)
+plot(model, pars = pars) #, ggtitle(title)) 
+pairs(model, pars = pars_full, title = title)
+
+fit_qpoisson.pooled <- model
+
+
+summary(fit_poisson.pooled)$summary
 
 
 ```
