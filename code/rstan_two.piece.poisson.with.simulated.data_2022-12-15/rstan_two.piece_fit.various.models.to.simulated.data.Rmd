@@ -43,6 +43,7 @@ library(GGally)
 library(broom)
 library(tidyverse)
 library(viridisLite)
+library(cmdstanr)
 library(rstan)
 options(mc.cores = (parallel::detectCores()-2))
 rstan_options(auto_write = TRUE)
@@ -122,10 +123,10 @@ From `rnbinom` help
   >   in this parametrization.
 
 ```{r}
-sim_counts <- function(temp, y0, tau0, tmax, phi) {
+sim_counts <- function(temp, y0, x0, tmax, phi) {
 
     ## Calculate expected value given parametes
-    mu <- ifelse(temp < tau0, y0, y0 * (1-(temp-tau0)/(tmax-tau0))) 
+    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(tmax-x0))) 
     
     ## calculate size parameter based on mu and phi
     size = mu/(phi - 1)
@@ -158,13 +159,13 @@ if(FALSE) {
     data_tmp <- data_tmp %>% mutate(y0 = y0_simple.est)
 }
 
-## made these tau0 values up
+## made these x0 values up
 set.seed(2021)
-tau0 <- rnorm(n_male, 39, 2) %>% round(1)
-## Match y0 and tau0 to males
-data_tmp <- data_tmp %>% mutate(tau0 = tau0[.data$male])
+x0 <- rnorm(n_male, 39, 2) %>% round(1)
+## Match y0 and x0 to males
+data_tmp <- data_tmp %>% mutate(x0 = x0[.data$male])
     
-data_sim <- data_tmp %>% rowwise() %>% mutate(motif_count = sim_counts(temp, y0, tau0, tmax = tmax, phi = phi))
+data_sim <- data_tmp %>% rowwise() %>% mutate(motif_count = sim_counts(temp, y0, x0, tmax = tmax, phi = phi))
 
 
 ## t_target <- c(30, 35, 38, 40, 42, 44)
@@ -188,7 +189,7 @@ male <- data %>% pull(male)
 ## parameters to be printed
 
 pars <- c("t0", "y0")
-pars_full <- c(pars, "b0", "lp__")
+pars_full <- c(pars, "lp__")
 ```
 
 ## Assume (incorrectly) Poisson Error
@@ -196,7 +197,7 @@ pars_full <- c(pars, "b0", "lp__")
 
 ### All Males Pooled
 
-#### Original Code: Can't be used to pool males
+#### Original Stan Code: Can't be used to pool males
 
 - `t0` = threshold parameter (later `x0`)
 - `y0` = pre-threshold response rate
@@ -228,26 +229,24 @@ model <- stan(file = "two.piece_poisson.stan",
               cores = 4,
               iter = iter,
               warmup = floor(iter/2))
+fit_poisson <- model
 
 
 ## Examine output
 title <- "Two piece, pooled males"
 print(title)
-print(model, pars = pars)
-traceplot(model, pars = pars, inc_warmup = FALSE, title = title)
+print(model, pars = pars_full)
+traceplot(model, pars = pars, inc_warmup = FALSE)
 plot(model, pars = pars) #, ggtitle(title)) 
-pairs(model, pars = pars_full, title = title)
-
-fit_poisson <- model
+pairs(model, pars = pars_full)
 summary(fit_poisson)$summary
 #ggplot()
 ```
 
 
 
-### Updated Code: 
+#### Updated Stan Code: Can be used to assign males to separate groups
 
-#### Males pooled
 
 ```{r}
 
@@ -279,22 +278,19 @@ model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
               iter = iter,
               warmup = floor(iter/2),
               verbose = TRUE)
-
-
-## Examine output
-pars <- c("x0", "y0")
-pars_full <- c(pars, "b0", "lp__")
-
-title <- "Two piece Pooled Males"
-print(title)
-print(model, pars = pars)
-traceplot(model, pars = pars, inc_warmup = FALSE, title = title)
-plot(model, pars = pars) #, ggtitle(title)) 
-pairs(model, pars = pars_full, title = title)
-
 fit_poisson.pooled <- model
 
 
+## Examine output
+pars <- c("x0[1]", "y0[1]")
+pars_full <- c(pars, "lp__")
+
+title <- "Two piece Pooled Males"
+print(title)
+print(model, pars = pars_full)
+traceplot(model, pars = pars, inc_warmup = FALSE)
+plot(model, pars = pars) #, ggtitle(title)) 
+pairs(model, pars = pars_full)
 summary(fit_poisson)$summary
 summary(fit_poisson.pooled)$summary
 
@@ -332,10 +328,16 @@ model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
               iter = iter,
               warmup = floor(iter/2),
               verbose = TRUE)
-
-plot(model, pars = c("x0", "y0") )
-
 fit_poisson.separate <- model
+
+pars <- c("y0", "x0")
+par(mfrow=c(1,2))
+
+map(pars, ~ plot(model, pars = .))
+
+stan_hist(model, pars = pars)
+stan_hist(model, pars = pars)
+
 
 summary(fit_poisson.separate)$summary
 
@@ -361,7 +363,7 @@ pars_tmp <- pars_tmp %>% separate_wider_regex(cols = pars, c(par = "^[a-z]+[0-9]
 
 pars_est <- pars_tmp %>% pivot_wider(names_from = par, values_from = c(mean, sd), id_cols = male_index, id_expand = TRUE)
 
-pars_sim <- data_sim %>% select(male_index = male, y0, x0 = tau0) %>% distinct()
+pars_sim <- data_sim %>% select(male_index = male, y0, x0 = x0) %>% distinct()
 
 pars_combined <- full_join(pars_est, pars_sim, by = "male_index")
 
@@ -383,7 +385,7 @@ ggplot(data = pars_combined) +
 ```{r}
 
 pars_sim <- data_sim %>%
-    select(male_index = male, y0, x0 = tau0) %>%
+    select(male_index = male, y0, x0 = x0) %>%
     distinct() %>%
 #    mutate(type = "sim") %>%
     pivot_longer(cols = c(x0, y0), values_to = "sim", names_to = "par")
@@ -417,11 +419,11 @@ ggplot(data = pars_combined) +
 
 ## Assume QPoisson
  
-### Males pooled
+### Males pooled: `y0`, `x0`, and $\theta$
 
 ```{r}
 
-iter <- 5000
+iter <- 15000
 tmax <- 46
 t0max <- tmax - 1;
 t0min <- 25;
@@ -432,7 +434,8 @@ stanc(file = "two.piece_qpoisson.stan",
       verbose = TRUE,
       model_name = "two.piece_qpoisson")
 
-cmodel <- cmdstan_model(stan_file = "two.piece_qpoisson.stan")
+## For debugging
+## cmodel <- cmdstan_model(stan_file = "two.piece_qpoisson.stan")
 
      
 model <- stan(file = "two.piece_qpoisson.stan",
@@ -457,52 +460,68 @@ model <- stan(file = "two.piece_qpoisson.stan",
                         ## near xmax, but with lower lp and very high E13) b0 values
                         y_xmax = 0,
                         sd_y_prior = 100),
-              chains = 1,
-              cores = 1,
+              chains = 4,
+              cores = 4,
               iter = iter,
               warmup = floor(iter/2),
               verbose = TRUE)
+fit_qpoisson.pooled <- model
 
 ## Examine output
 pars <- c("x0", "y0", "theta")
-pars_full <- c(pars, "b0", "lp__")
+pars_full <- c(pars, "lp__")
 
 title <- "Two piece Pooled Males"
 print(title)
 print(model, pars = pars)
-traceplot(model, pars = pars, inc_warmup = FALSE, title = title)
+traceplot(model, pars = pars, inc_warmup = FALSE)
 plot(model, pars = pars) #, ggtitle(title)) 
-pairs(model, pars = pars_full, title = title)
-
-fit_qpoisson.pooled <- model
+pairs(model, pars = pars_full)
 
 
-summary(fit_poisson.pooled)$summary
+
+
+summary(fit_qpoisson.pooled)$summary
 
 
 ```
+### Males Separate
 
-#### Males Separate
+
+#### Separate: `y0`, and `x0`, Pooled  $\theta$
 
 ```{r}
 
-iter <- 5000
+iter <- 15000
 tmax <- 46
-t0max <- tmax - 0.75;
+t0max <- tmax - 1;
 t0min <- 25;
 ## values to use for model predictions
-tp = seq(25, xmax, length.out = 100)
+tp = seq(25, tmax, length.out = 100)
 
-model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
-              model_name = "Two piece poisson pooled",
+stanc(file = "two.piece_qpoisson.stan",
+      verbose = TRUE,
+      model_name = "two.piece_qpoisson")
+
+cmodel <- cmdstan_model(stan_file = "two.piece_qpoisson.stan")
+
+     
+model <- stan(file = "two.piece_qpoisson.stan",
+              model_name = "Two piece qpoisson",
               data=list(x = temp,
                         y = motif_count,
                         N = N,
                         L = n_male,
-                        ll = data_sim$male,
+                        M = 1,
+                        ll = data_sim$male, ## y0 and x0
+                        mm = rep(1, N), ## Theta
                         xmax = tmax,
-                        x0min = t0min,
-                        x0max = t0max,
+                        x0_min = t0min,
+                        x0_max = t0max,
+                        y_xmax = 0,
+                        y0_min = 10,
+                        sd_y0_prior = 100,
+                        alpha_theta_prior = 10,
                         ##tp = tp,
                         ## max threshold value.
                         ## having it too close to xmax *sometimes* leads to sampling
@@ -514,56 +533,29 @@ model <- stan(file = "two.piece_poisson.grouped.by.male.stan",
               iter = iter,
               warmup = floor(iter/2),
               verbose = TRUE)
+fit_qpoisson.separate.y0.x0 <- model
 
-plot(model, pars = c("x0", "y0") )
-
-fit_poisson_separate <- model
-
-```
-
-##### Plot Results
+## Examine output
+pars <- c("x0", "y0", "theta")
+pars_full <- c(pars, "lp__")
 
 
-######  Wide data
-
-```{r}
-
-pars <- c("y0", "x0")
-
-pars_tmp <- summary(model, pars = pars, probs = NULL)$summary %>%
-                                                    as_tibble(rownames = "pars")
-pars_tmp <- pars_tmp %>% separate_wider_regex(cols = pars, c(par = "^[a-z]+[0-9]+", "\\[", male_index = "[0-9]+", "\\]"), too_few = "error") %>%
-    mutate(male_index = as.integer(male_index))
-
-## The code below also works somewhat
-## pars_tmp <- pars_tmp %>%
-##    mutate(par = str_extract(pars, "^[A-z]+[0-9]+"), male_index = str_replace(pars, ".*\\[([0-9]+)\\]$", "\\1")) %>%
-
-pars_est <- pars_tmp %>% pivot_wider(names_from = par, values_from = c(mean, sd), id_cols = male_index, id_expand = TRUE)
-
-pars_sim <- data_sim %>% select(male_index = male, y0, x0 = tau0) %>% distinct()
-
-pars_combined <- full_join(pars_est, pars_sim, by = "male_index")
-
-ggplot(data = pars_combined) +
-    geom_point(aes(x = x0, y = mean_x0)) +
-    geom_errorbar(aes(x = x0, ymin = mean_x0- 2 * sd_x0, ymax = mean_x0 + 2 * sd_x0)) +
-    geom_abline(aes(intercept = 0, slope = 1))
-               
-
-ggplot(data = pars_combined) +
-    geom_point(aes(x = y0, y = mean_y0)) +
-    geom_errorbar(aes(x = y0, ymin = mean_y0- 2 * sd_y0, ymax = mean_y0 + 2 * sd_y0)) +
-    geom_abline(aes(intercept = 0, slope = 1))
+print(model, pars = pars)
+traceplot(model, pars = pars, inc_warmup = FALSE)
+plot(model, pars = pars) #, ggtitle(title)) 
+#pairs(model, pars = pars_full)
+stan_hist(model, pars = pars)
+summary(fit_qpoisson.separate.y0.x0)$summary
 
 
 ```
-######  Tidy data
+
+#### Plot Results
 
 ```{r}
 
 pars_sim <- data_sim %>%
-    select(male_index = male, y0, x0 = tau0) %>%
+    select(male_index = male, y0, x0 = x0) %>%
     distinct() %>%
 #    mutate(type = "sim") %>%
     pivot_longer(cols = c(x0, y0), values_to = "sim", names_to = "par")
@@ -589,7 +581,7 @@ ggplot(data = pars_combined) +
     geom_abline(aes(intercept = 0, slope = 1)) +
     facet_wrap(~ par, scales = "free",
                labeller = as_labeller(c(`y0` = "Normal Motif Rate", `x0` = "Threshold Temp"))) +
-    labs(x = "Simulated", y = "Estimated", title = "Fitting 2 Piece Model to Simulated Data", subtitle = "error ~ Poisson")
+    labs(x = "Simulated", y = "Estimated", title = "Fitting 2 Piece Model to Simulated Data", subtitle = "error ~ QPoisson")
               
 
 
@@ -597,29 +589,8 @@ ggplot(data = pars_combined) +
 
 
 
-### Leave One Out (LOO) analysis
 
 
-```{r}
-## Code from:
-# Extract pointwise log-likelihood
-# using merge_chains=FALSE returns an array, which is easier to 
-# use with relative_eff()
-for(fit in c("fit_1", "fit_p")) {
-  print(paste0("Model Fit: ", fit))  
-  log_lik_1 <- extract_log_lik(eval(parse(text = fit)), merge_chains = FALSE)
-# as of loo v2.0.0 we can optionally provide relative effective sample sizes
-# when calling loo, which allows for better estimates of the PSIS effective
-# sample sizes and Monte Carlo error
-r_eff <- relative_eff(exp(log_lik_1), cores = 2) 
+#### Separate: `y0`, `x0`, and  $\theta$
 
-# preferably use more than 2 cores (as many cores as possible)
-# will use value of 'mc.cores' option if cores is not specified
-loo_1 <- loo(log_lik_1, r_eff = r_eff, cores = 2)
-  print(loo_1)
-}
-
-```
-- Don't really know how to interpret these results.
-
-
+- didn't run given noise in previous one with separate `y0` and `x0`
