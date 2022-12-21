@@ -1,7 +1,7 @@
 ---
-title: "Piecewise Regression on Simulated qpoisson data using STAN Directly"
+title: "Piecewise Regression QPoisson Error on Real Data using STAN Directly"
 author: "Michael Gilchrist"
-date: "date: 2022-12-12"
+date: "date: 2022-12-20"
 output: pdf_document
 ---
 
@@ -20,7 +20,7 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=1E3, ou
 ```
 # Goal
 
-- Fit two piece poisson, quasipoisson, and negative binomial 
+- Fit two piece quasipoisson to data
 
 ## Recap
 
