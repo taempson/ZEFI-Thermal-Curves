@@ -1,7 +1,7 @@
 ---
 title: "Piecewise Regression QPoisson Error on Real Data using STAN Directly"
 author: "Michael Gilchrist"
-date: "date: 2022-12-20"
+date: "date: 2022-12-22"
 output: pdf_document
 ---
 
@@ -178,14 +178,13 @@ model <- stan(file = "two.piece_qpoisson.stan",
                         ## max threshold value.
                         ## having it too close to xmax *sometimes* leads to sampling
                         ## near xmax, but with lower lp and very high E13) b0 values
-                        y_xmax = 0,
-                        sd_y_prior = 100),
+                        y_xmax = 0),
               chains = 4,
               cores = 4,
               iter = iter,
               warmup = floor(iter/2),
               verbose = TRUE)
-fit_qpoisson.pooled <- model
+fit_qpoisson_pooled.x0_pooled_y0_pooled_theta <- model
 
 ## Examine output
 pars <- c("x0", "y0", "theta")
@@ -200,18 +199,15 @@ plot(model, pars = pars, point_est = "mean") #, ggtitle(title))
 pairs(model, pars = pars_full)
 stan_hist(model)
 
-summary(fit_qpoisson.pooled, probs = c(0.025, 0.5, 0.975))$summary
+summary(model, probs = c(0.025, 0.5, 0.975))$summary
 
 
 ```
-### Males Separate
-
-
-#### Separate: `y0`, and `x0`, Pooled  $\theta$
+### Separate: `y0`, and `x0`, Pooled  $\theta$
 
 ```{r}
 
-iter <- 80000
+iter <- 30000
 tmax <- 46
 t0max <- tmax - 1;
 t0min <- 25;
@@ -233,23 +229,20 @@ model <- stan(file = "two.piece_qpoisson.stan",
                         x0_max = t0max,
                         y_xmax = 0,
                         y0_min = 10,
-                        sd_y0_prior = 100,
+                        sd_y0_prior = 1000,
                         alpha_theta_prior = 10,
                         ##tp = tp,
                         ## max threshold value.
                         ## having it too close to xmax *sometimes* leads to sampling
                         ## near xmax, but with lower lp and very high E13) b0 values
-                        y_xmax = 0,
-                        sd_y_prior = 100),
+                        y_xmax = 0),
               chains = 4,
               cores = 4,
               iter = iter,
-              warmup = floor(iter*3/4),
-              thin = 4,
+              warmup = floor(iter/2),
+              thin = 2,
               verbose = TRUE)
-fit_qpoisson.separate.y0.x0 <- model
-
-model <- fit_qpoisson.separate.y0.x0
+fit_qpoisson_separate.x0_separate.y0_pooled.theta <- model
 
 ## Examine output
 pars <- c("x0", "y0", "theta")
@@ -258,14 +251,19 @@ pars_full <- c(pars, "lp__")
 
 print(model, pars = pars)
 #traceplot(model, pars = pars, inc_warmup = FALSE)
-plot(model, pars = pars) #, ggtitle(title)) 
+#plot(model, pars = pars) #, ggtitle(title)) 
+
+stan_hist(model, pars = "x0")
 
 ## Plot sampling for each male
 tmp_plot <- list()
 for(i in 1:n_male) {
-    tmp_pars = c(paste0("x0[", i, "]"), paste0("y0[", i, "]"), "lp__")
+    tmp_pars <-  c(paste0("x0[", i, "]"), paste0("y0[", i, "]"), "lp__")
     tmp_plot[[as.character(i)]] <- pairs(model, pars = tmp_pars)
 }
+gt <- arrangeGrob(grobs = tmp_plot)
+as_ggplot(gt)
+
 #gt <- arrangeGrob(grobs = tmp_plot)
 #as_ggplot(gt)
 
@@ -291,8 +289,353 @@ stan_hist(model, pars = pars)
 
 
 ```
+- Histograms of `x0[]` suggest following groupings
+  1. `c(2, 4, 6, 8, 11)`
+  2. `c(1, 3, 5, 7, 10)`
+  3. `9` is ambiguous.
 
-
-#### Separate: `y0`, `x0`, and  $\theta$
+### Separate: `y0`, `x0`, and  $\theta$
 
 - didn't run given noise in previous one with separate `y0` and `x0`
+
+
+### Separate: `y0`, Shared `x0`, and  $\theta$
+
+```{r}
+
+iter <- 15000
+tmax <- 46
+t0max <- tmax - 1;
+t0min <- 25;
+## values to use for model predictions
+tp = seq(25, tmax, length.out = 100)
+
+
+## For debugging
+ cmodel <- cmdstan_model(stan_file = "two.piece_qpoisson_2.0.stan")
+
+stan_model(file="two.piece_qpoisson_2.0.stan")
+
+model <- stan(file = "two.piece_qpoisson_2.0.stan",
+              model_name = "Two piece qpoisson",
+              data=list(x = temp,
+                        y = motif_count,
+                        N = N,
+                        X = 1,
+                        Y = n_male,
+                        NB = 1,
+                        xx = rep(1,N),
+                        yy = data$male,
+                        nbb = rep(1,N),
+                        xmax = tmax,
+                        x0_min = t0min,
+                        x0_max = t0max,
+                        y_xmax = 0,
+                        y0_min = 10,
+                        sd_y0_prior = 1000,
+                        alpha_theta_prior = 40,
+                        ##tp = tp,
+                        ## max threshold value.
+                        ## having it too close to xmax *sometimes* leads to sampling
+                        ## near xmax, but with lower lp and very high E13) b0 values
+                        y_xmax = 0),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2),
+              verbose = TRUE)
+fit_qpoisson_pooled.x0_separate.y0_pooled.theta <- model
+
+## Examine output
+pars <- c("x0", "y0", "theta")
+pars_full <- c(pars, "lp__")
+
+
+print(model, pars = pars)
+#traceplot(model, pars = pars, inc_warmup = FALSE)
+#plot(model, pars = pars) #, ggtitle(title)) 
+
+## Plot sampling for each male
+tmp_plot <- list()
+for(i in 1:n_male) {
+    tmp_pars <-  c(paste0("x0[", 1, "]"), paste0("y0[", i, "]"), "lp__")
+    tmp_plot[[as.character(i)]] <- pairs(model, pars = tmp_pars)
+}
+gt <- arrangeGrob(grobs = tmp_plot)
+as_ggplot(gt)
+
+
+## Plot parameter estimate summaries
+tmp_plot <- list()
+for(par in pars) {
+    tmp_plot[[par]] <- stan_plot(model, pars = par)
+}
+gt <- arrangeGrob(grobs = tmp_plot)
+as_ggplot(gt)
+
+```
+- `y0[7]` should probably be removed from dataset
+- Possible groupings for `y0[i]`
+  1. $i = 1, 5, 6, (7), 10, 11$
+  2. $i = 2, 3, 4, 9$
+  3. $i = 8$ could possibly be in either; 2. seems most likely.
+  
+### Two groups `y0`,  Shared `x0` and Shared $\theta$
+
+```{r}
+
+iter <- 15000
+tmax <- 46
+t0max <- tmax - 1;
+t0min <- 25;
+## values to use for model predictions
+tp = seq(25, tmax, length.out = 100)
+
+
+## For debugging
+#cmodel <- cmdstan_model(stan_file = "two.piece_qpoisson_2.0.stan")
+#stan_model(file="two.piece_qpoisson_2.0.stan")
+
+y0_group <- list()
+y0_group[[1]] <- c(1, 5, 6, 7, 10, 11)
+y0_group[[2]] <- c(2, 3, 4, 8, 9)
+
+y0_grouping <- map_int(data$male, ~ if_else(. %in% y0_group[[1]], 1, 2))
+                     
+model <- stan(file = "two.piece_qpoisson_2.0.stan",
+              model_name = "Two piece qpoisson",
+              data=list(x = temp,
+                        y = motif_count,
+                        N = N,
+                        X = 1,
+                        Y = 2,
+                        NB = 1,
+                        xx = rep(1,N),
+                        yy = y0_grouping,
+                        nbb = rep(1,N),
+                        xmax = tmax,
+                        x0_min = t0min,
+                        x0_max = t0max,
+                        y_xmax = 0,
+                        y0_min = 10,
+                        sd_y0_prior = 1000,
+                        alpha_theta_prior = 40,
+                        ##tp = tp,
+                        ## max threshold value.
+                        ## having it too close to xmax *sometimes* leads to sampling
+                        ## near xmax, but with lower lp and very high E13) b0 values
+                        y_xmax = 0),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2),
+              verbose = TRUE)
+fit_qpoisson_pooled.x0_grouped.y0_pooled.theta <- model
+
+## Examine output
+pars <- c("x0", "y0", "theta")
+pars_full <- c(pars, "lp__")
+
+
+print(model, pars = pars)
+#traceplot(model, pars = pars, inc_warmup = FALSE)
+plot(model, pars = pars_full) #, ggtitle(title)) 
+
+pairs(model, pars = pars_full)
+
+## Plot sampling for each male
+tmp_plot <- list()
+## Plot sampling for each male
+
+for(i in 1:2) {
+    tmp_pars <-  c(paste0("x0[", y0_group[[i]], "]"),
+                   paste0("y0[", i, "]"),
+                   "lp__")
+    tmp_plot[[as.character(i)]] <- pairs(model, pars = tmp_pars)
+}
+gt <- arrangeGrob(grobs = tmp_plot)
+as_ggplot(gt)
+
+
+## Plot parameter estimate summaries
+tmp_plot <- list()
+for(par in pars) {
+    tmp_plot[[par]] <- stan_plot(model, pars = par)
+}
+gt <- arrangeGrob(grobs = tmp_plot)
+as_ggplot(gt)
+
+```
+
+
+### Separate `y0`,  Grouped `x0` and Shared $\theta$
+
+```{r}
+
+iter <- 15000
+tmax <- 46
+t0max <- tmax - 1;
+t0min <- 25;
+## values to use for model predictions
+tp = seq(25, tmax, length.out = 100)
+
+
+## For debugging
+#cmodel <- cmdstan_model(stan_file = "two.piece_qpoisson_2.0.stan")
+#stan_model(file="two.piece_qpoisson_2.0.stan")
+
+x0_group <- list()
+x0_group[[1]] <- c(2, 4, 6, 8, 11, 9)
+x0_group[[2]] <- c(1, 3, 5, 7, 10)
+
+x0_grouping <- map_int(data$male, ~ if_else(. %in% x0_group[[1]], 1, 2))
+                     
+model <- stan(file = "two.piece_qpoisson_2.0.stan",
+              model_name = "Two piece qpoisson",
+              data=list(x = temp,
+                        y = motif_count,
+                        N = N,
+                        X = 2,
+                        Y = n_male,
+                        NB = 1,
+                        xx = x0_grouping,
+                        yy = data$male,
+                        nbb = rep(1,N),
+                        xmax = tmax,
+                        x0_min = t0min,
+                        x0_max = t0max,
+                        y_xmax = 0,
+                        y0_min = 10,
+                        sd_y0_prior = 1000,
+                        alpha_theta_prior = 40,
+                        ##tp = tp,
+                        ## max threshold value.
+                        ## having it too close to xmax *sometimes* leads to sampling
+                        ## near xmax, but with lower lp and very high E13) b0 values
+                        y_xmax = 0),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2),
+              verbose = TRUE)
+fit_qpoisson_grouped.x0_separate.y0_pooled.theta <- model
+#model <- fit_qpoisson.grouped.y0.and.pooled.x0.theta
+
+## Examine output
+pars <- c("x0", "y0", "theta")
+pars_full <- c(pars, "lp__")
+
+print(model, pars = pars)
+#traceplot(model, pars = pars, inc_warmup = FALSE)
+#plot(model, pars = pars) #, ggtitle(title))
+
+## Plot sampling for each male
+tmp_plot <- list()
+for(i in 1:2) {
+    tmp_pars <-  c(paste0("x0[", i, "]"), paste0("y0[", x0_group[[i]], "]"),  "lp__")
+    tmp_plot[[as.character(i)]] <- pairs(model, pars = tmp_pars)
+}
+
+gt <- arrangeGrob(grobs = tmp_plot)
+as_ggplot(gt)
+
+
+## Plot parameter estimate summaries
+tmp_plot <- list()
+for(par in pars) {
+    tmp_plot[[par]] <- stan_plot(model, pars = par)
+}
+gt <- arrangeGrob(grobs = tmp_plot)
+as_ggplot(gt)
+
+```
+
+- 
+
+### Grouped `y0`,  Grouped `x0` and Shared $\theta$
+
+```{r}
+
+iter <- 15000
+tmax <- 46
+t0max <- tmax - 1;
+t0min <- 25;
+## values to use for model predictions
+tp = seq(25, tmax, length.out = 100)
+
+
+## For debugging
+#cmodel <- cmdstan_model(stan_file = "two.piece_qpoisson_2.0.stan")
+#stan_model(file="two.piece_qpoisson_2.0.stan")
+
+x0_group <- list()
+x0_group[[1]] <- c(2, 4, 6, 8, 11, 9)
+x0_group[[2]] <- c(1, 3, 5, 7, 10)
+x0_grouping <- map_int(data$male, ~ if_else(. %in% x0_group[[1]], 1, 2))
+
+y0_group <- list()
+y0_group[[1]] <- c(1, 5, 6, 7, 10, 11)
+y0_group[[2]] <- c(2, 3, 4, 8, 9)
+y0_grouping <- map_int(data$male, ~ if_else(. %in% y0_group[[1]], 1, 2))
+
+model <- stan(file = "two.piece_qpoisson_2.0.stan",
+              model_name = "Two piece qpoisson",
+              data=list(x = temp,
+                        y = motif_count,
+                        N = N,
+                        X = length(x0_group),
+                        Y = length(y0_group),
+                        NB = 1,
+                        xx = x0_grouping,
+                        yy = y0_grouping,
+                        nbb = rep(1,N),
+                        xmax = tmax,
+                        x0_min = t0min,
+                        x0_max = t0max,
+                        y_xmax = 0,
+                        y0_min = 10,
+                        sd_y0_prior = 1000,
+                        alpha_theta_prior = 40,
+                        ##tp = tp,
+                        ## max threshold value.
+                        ## having it too close to xmax *sometimes* leads to sampling
+                        ## near xmax, but with lower lp and very high E13) b0 values
+                        y_xmax = 0),
+              chains = 4,
+              cores = 4,
+              iter = iter,
+              warmup = floor(iter/2),
+              verbose = TRUE)
+fit_qpoisson_grouped.x0_grouped.y0_pooled.theta <- model
+#model <- fit_qpoisson.grouped.y0.and.pooled.x0.theta
+
+## Examine output
+pars <- c("x0", "y0", "theta")
+pars_full <- c(pars, "lp__")
+
+print(model, pars = pars)
+#traceplot(model, pars = pars, inc_warmup = FALSE)
+#plot(model, pars = pars) #, ggtitle(title))
+
+pairs(model, pars = pars_full)
+
+## Plot parameter estimate summaries
+tmp_plot <- list()
+for(par in pars) {
+    tmp_plot[[par]] <- stan_plot(model, pars = par)
+}
+gt <- arrangeGrob(grobs = tmp_plot)
+as_ggplot(gt)
+
+```
+- Results suggest clustering of `x0[]` is justified 
+
+## Model Comparison via LOO
+
+- TODO!
+
+```{r}
+
+ls("fit_qpoisson*")
+
+``

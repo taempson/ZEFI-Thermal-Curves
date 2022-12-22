@@ -27,36 +27,23 @@ Y ~ NB2(\mu, \phi)
 E(Y) = \mu; Var(Y) = \mu + \mu^2/\phi
 
 for Var(Y) = \theta E(Y) we set phi = \mu/(\theta - 1)
- 
+*/ 
 
- */
-//functions {
-  // Returns expected counts | model parameters and variable x
-  // I should be able to vectorize this
-//  real f_mu(real b0, real x0, real xmax, real y_xmax, real x) {
-//    real val1;
-//    real val2;
-//
-//    val1 = xmax - x;
-//    val2 = xmax - x0;
-//    return (y_xmax  - fmin(val1, val2) * b0); 
-//  }
-  // Returns appropriate phi value for NB2 for Quasipoisson error given mu and theta
-  //  real f_phi(real mu, real theta) {
-  //  real phi = mu/(theta-1);
-  //  return phi; 
-  //}
-//}
 data {
+  // Model structure
   int<lower=1> N; // # of data points
-  int<lower=1> L; // Levels = # of males;
-  int<lower=1, upper=L> M; // Levels for NB parameter p
-  array[N] int<lower=0> y; //song_count
+  int<lower=1> X; // Levels for x0
+  int<lower=1> Y; // Levels for y0
+  int<lower=1> NB; // Levels for NB parameter p/theta
+  array[N] int<lower=1, upper=X> xx; // x0 grouping
+  array[N] int<lower=1, upper=Y> yy; // y0 parameter grouping
+  array[N] int<lower=1, upper=NB> nbb; // qpoisson parameter grouping
+  // Data
+  array[N] int<lower=0> y; //song_motif
   vector[N] x; // predictor: temp values at each observation
-  // This, along with male, is the predictor
-  array[N] int<lower=1, upper=L> ll; // male id, one for each observation
-  array[N] int<lower=1, upper=M> mm; // qpoisson parameter grouping
-  // max x value and response (y) at max value
+  // This, along with male, is the predictor  // max x value and response (y) at max value
+  //
+  // Boundaries and priors
   real<lower=1> y0_min; // min value of y0; should be based on any filtering threshold
   real xmax; // max temp
   real<lower=0> y_xmax; // y value at xmax, generally will be 0
@@ -68,23 +55,13 @@ data {
   //vector[100] xp; // points used to create predictions for plotting
 }
 
-//transformed data {
-//  array[N] row_vector[D] s  = xmax - x;
-//  //vector[100] sp = xmax - tp;
-//}
-
 parameters { // One set of parameters for each level (male) 
-  vector<lower=y0_min>[L] y0; // mean value for y when x < x0
-  vector<lower=x0_min,upper=x0_max>[L] x0; //first threshold
-  vector<lower=1>[M] theta; //overdispersion parameter
+  vector<lower=y0_min>[Y] y0; // mean value for y when x < x0; group indicated by yy
+  vector<lower=x0_min,upper=x0_max>[X] x0; //first threshold; group indicated by xx
+  vector<lower=1>[NB] theta; //overdispersion parameter; group indicated by nbb
 }
 
 transformed parameters {
-  //  array[L] real<lower=x0_min,upper=x0_max> s0 = xmax - x0; // first threshold
-  //array[L] real<lower=x0_min,upper=x0_max> a0 = - b0; // slope of decrease
-  vector[L] b0 ;
-  
-  b0 = (y_xmax-y0)./(xmax - x0); // slope of decrease
 }
 
 model {
@@ -94,27 +71,30 @@ model {
   // vector formulation
   // vector[N] phi;
   // vector[N] mu;
+  real b0;
   real phi;
   real mu;
   real val1;
   real val2;
+
   
   //Priors
-    for (l in 1:L) {
+    for (i in 1:Y) {
       //x0[l] ~ uniform(30, 44);
-      y0[l] ~ normal(150, sd_y0_prior);
+      y0[i] ~ normal(150, sd_y0_prior);
    }
-  for (m in 1:M) {
-    theta[m] ~ exponential(alpha_theta_prior);
+  for (i in 1:NB) {
+    theta[i] ~ exponential(alpha_theta_prior);
    }
   //Log Likelihood 
   for (n in 1:N) {
     val1 = xmax - x[n];
-    val2 = xmax - x0[ll[n]];
-    //mu = f_mu(b0[ll[n]], x0[ll[n]], xmax, y_xmax, x[n]);
-    mu = y_xmax  - fmin(val1, val2) * b0[ll[n]];
-    // phi = f_phi(mu, theta[mm[n]]);
-    phi =  mu/(theta[mm[n]]-1);
+    val2 = xmax - x0[xx[n]];
+    b0 = (y_xmax-y0[yy[n]])./(xmax - x0[xx[n]]);
+    //mu = f_mu(b0[xx[n]], x0[xx[n]], xmax, y_xmax, x[n]);
+    mu = y_xmax  - fmin(val1, val2) * b0;
+    // phi = f_phi(mu, theta[nbb[n]]);
+    phi =  mu/(theta[nbb[n]]-1);
     y[n] ~ neg_binomial_2(mu, phi);
   }
 }
@@ -123,17 +103,30 @@ model {
 generated quantities {
   // Get LLik values for each data point
   // These are used in the LOO analysis of model fit(s)
-//  vector[N] log_lik;
+  vector[N] log_lik;
+  real b0;
+  real phi;
+  real mu;
+  real val1;
+  real val2;
 //  vector[num_elements(xp)] yp; //predicted values based on xp
 //  real val1, val2;
 //  
 //  //yp = y_tmax + fmin(sp, s1) * a1;
 //  for(n in 1:num_elements(yp)) {
 //     val1 = xmax - xp[n];
-//     val2 = xmax - x0[ll[n]];
+//     val2 = xmax - x0[xx[n]];
 //      yp[n] = y_xmax + fmin() * a1;
 //  }
-//  for (n in 1:N) {
-//    log_lik[n] = poisson_lpmf(y[n] | lambda[n]);
-//  }
+  for (n in 1:N) {
+    val1 = xmax - x[n];
+    val2 = xmax - x0[xx[n]];
+    b0 = (y_xmax-y0[yy[n]])./(xmax - x0[xx[n]]);
+    //mu = f_mu(b0[xx[n]], x0[xx[n]], xmax, y_xmax, x[n]);
+    mu = y_xmax  - fmin(val1, val2) * b0;
+    // phi = f_phi(mu, theta[nbb[n]]);
+    phi =  mu/(theta[nbb[n]]-1);
+    log_lik[n] = neg_binomial_2_lpmf(y[n] | mu, phi);
+  }
 }
+
