@@ -154,9 +154,10 @@ tp = seq(25, tmax, length.out = 100)
 
 
 ## For debugging
-## cmodel <- cmdstan_model(stan_file = "two.piece_qpoisson.stan")
+cmodel <- cmdstan_model(stan_file = "two.piece_qpoisson.stan")
 
-     
+stan_model(file="two.piece_qpoisson.stan")
+
 model <- stan(file = "two.piece_qpoisson.stan",
               model_name = "Two piece qpoisson",
               data=list(x = temp,
