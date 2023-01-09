@@ -151,11 +151,12 @@ n_cores <- 4
 n_chains <- n_cores
 
 ##y0_grouping <- map_int(data$male, ~ if_else(. %in% y0_group[[1]], 1, 2))
-
+model <- "qpoi"
+stan_file <- "two.piece_qpoisson_2.0.stan"
 ## For debugging
-## cmodel <- cmdstan_model(stan_file = "two.piece_qpoisson_2.0.stan")
+## cmodel <- cmdstan_model(stan_file = stan_file)
 
-stan_model(file="two.piece_qpoisson_2.0.stan",
+stan_model(file = stan_file,
            verbose = TRUE)
 
 
@@ -164,7 +165,8 @@ stan_model(file="two.piece_qpoisson_2.0.stan",
 flags <- c("separate", "grouping_1", "pooled")
 flags_x <- flags
 flags_y <- flags
-fit_tbl <- crossing(x0 = flags_x, y0 = flags_y,
+fit_tbl <- crossing(model = model,
+                    x0 = flags_x, y0 = flags_y,
                     desc = "NA_character",
                     y0_group_list = list(NA),
                     x0_group_list = list(NA),
@@ -179,7 +181,7 @@ fit_tbl <- crossing(x0 = flags_x, y0 = flags_y,
 for(x_flag in flags_x) {
     for(y_flag in flags_y) {
 
-        desc <- paste0("x0 = ", x_flag, ", y0 = ", y_flag)
+        desc <- paste0(model, ": ", x_flag, ", ", y_flag)
         curr_row <- which(fit_tbl$x0 == x_flag & fit_tbl$y0 == y_flag)
 
         fit_tbl[ curr_row, ]$desc <- desc
@@ -231,7 +233,7 @@ for(x_flag in flags_x) {
         x0_index <- sapply(as.character(data$male), function(x) str_which(x0_group, x))
         y0_index <- sapply(as.character(data$male), function(x) str_which(y0_group, x))
 
-        fit <- stan(file = "two.piece_qpoisson_2.0.stan",
+        fit <- stan(file = stan_file,
                       model_name = desc,
                       data=list(x = temp,
                                 y = motif_count,
@@ -270,104 +272,7 @@ for(x_flag in flags_x) {
 qpoisson_fit_tbl <- fit_tbl
 
 ```
-
-### LOO Analysis
-
-```{r}
-
-fit_tbl <- qpoisson_fit_tbl
-for(curr_row in 1:length(fit_tbl$fit)) {
-
-  desc <- fit_tbl[[curr_row, "desc"]]
-  fit <- fit_tbl[[curr_row, "fit"]][[1]]
-  print(paste0("Model ", curr_row, ": ", desc))
-
-  # loo analysis based on: http://mc-stan.org/loo/articles/loo2-with-rstan.html
-  #
-  # Extract pointwise log-likelihood
-  # using merge_chains=FALSE returns an array, which is easier to 
-  # use with relative_eff()
-  llik <- extract_log_lik(fit, merge_chains = FALSE)
-  fit_tbl[[curr_row, "llik"]] <- list(llik)
-
-  # as of loo v2.0.0 we can optionally provide relative effective sample sizes
-  # when calling loo, which allows for better estimates of the PSIS effective
-  # sample sizes and Monte Carlo error
-  r_eff <- relative_eff(exp(llik), cores = n_cores)
-  fit_tbl[[curr_row, "r_eff"]] <- list(r_eff)
-  
-  # preferably use more than 2 cores (as many cores as possible)
-  # will use value of 'mc.cores' option if cores is not specified
-  loo <- loo(llik, r_eff = r_eff,
-             cores = n_cores,
-             save_psis = TRUE,
-             moment_match = TRUE) 
-  fit_tbl[[curr_row, "loo"]] <- list(loo)
-  print(loo)
-
-}
-
-
-comp <- loo_compare(fit_tbl$loo) #, simplify = TRUE)
-
-comp %>% rownames() %>% sub(pattern = "model", x= ., "") %>% as.integer() 
-
-print(comp)
-print(fit_tbl$desc, width = 10)
-
-```
-Overall,
-
-- `loo` suggests the model is misspecified since `p_loo` $>>$ the number of actual model parameters (based on LOO FAQ document).
-- Some data points are problematic given their $\hat{k}$ diagnostics.
-
-Note, also
-
-- Reducing 
-  - `sd_y0_prior` from  1000 to 200 
-  - `alpha_theta_prior` from 40 to 10
-  Results in
-  - Improved `p_loo` values, but still much greater than the number of parameters.
-  - Smaller elpd_diff values and swapping of model 4 and 7's ranking from 1, 7, 4 to 1, 4, 7.
-
-### Plot Results
-
-```{r}
-
-for(curr_row in 1:length(fit_tbl$fit)) {
-
-    desc <- fit_tbl[[curr_row, "desc"]]
-    fit <- fit_tbl[[curr_row, "fit"]]
-
-    x0_group_list <- fit_tbl[[curr_row, "x0_group_list"]][[1]]
-    y0_group_list <- fit_tbl[[curr_row, "y0_group_list"]][[1]]
-
-    
-}
-
-    
-    pars <- c("x0", "y0", "theta")
-    pars_full <- c(pars, "lp__")
-
-    print(desc)
-    print(fit, pars = pars)
-                                        #traceplot(model, pars = pars, inc_warmup = FALSE)
-                                        #plot(model, pars = pars) #, ggtitle(title))
-
-        pairs(model, pars = pars_full)
-
-        ## Plot parameter estimate summaries
-        tmp_plot <- list()
-        for(par in pars) {
-            tmp_plot[[par]] <- stan_plot(model, pars = par)
-        }
-        gt <- arrangeGrob(grobs = tmp_plot)
-        as_ggplot(gt)
-
-    }
-}
-```
-
+- Models fit without any warnings.
 
 ## Negative Binomial
  
@@ -383,12 +288,12 @@ n_cores <- 4
 n_chains <- n_cores
 
 ##y0_grouping <- map_int(data$male, ~ if_else(. %in% y0_group[[1]], 1, 2))
-
+model <- "nb"
+stan_file <- "two.piece_nb_1.0.stan"
 ## For debugging
+cmodel <- cmdstan_model(stan_file = stan_file)
 
-cmodel <- cmdstan_model(stan_file = "two.piece_nb_1.0.stan")
-
-stan_model(file="two.piece_nb_1.0.stan",
+stan_model(file = stan_file,
            verbose = TRUE)
 
 
@@ -397,7 +302,8 @@ stan_model(file="two.piece_nb_1.0.stan",
 flags <- c("separate", "grouping_1", "pooled")
 flags_x <- flags
 flags_y <- flags
-fit_tbl <- crossing(x0 = flags_x, y0 = flags_y,
+fit_tbl <- crossing(model = model,
+                    x0 = flags_x, y0 = flags_y,
                     desc = "NA_character",
                     y0_group_list = list(NA),
                     x0_group_list = list(NA),
@@ -412,7 +318,7 @@ fit_tbl <- crossing(x0 = flags_x, y0 = flags_y,
 for(x_flag in flags_x) {
     for(y_flag in flags_y) {
 
-        desc <- paste0("x0 = ", x_flag, ", y0 = ", y_flag)
+        desc <- paste0(model, ": ", x_flag, ", ", y_flag)
         curr_row <- which(fit_tbl$x0 == x_flag & fit_tbl$y0 == y_flag)
 
         fit_tbl[ curr_row, ]$desc <- desc
@@ -464,7 +370,7 @@ for(x_flag in flags_x) {
         x0_index <- sapply(as.character(data$male), function(x) str_which(x0_group, x))
         y0_index <- sapply(as.character(data$male), function(x) str_which(y0_group, x))
 
-        fit <- stan(file = "two.piece_qpoisson_2.0.stan",
+        fit <- stan(file = stan_file,
                       model_name = desc,
                       data=list(x = temp,
                                 y = motif_count,
@@ -492,21 +398,26 @@ for(x_flag in flags_x) {
                     chains = n_chains,                    
                     iter = iter,
                     warmup = floor(iter/2),
-                    verbose = TRUE)
+                    verbose = FALSE)
         
         fit_tbl[ curr_row, ]$fit <- list(fit)
         
     }
 }
 
+nb_fit_tbl <- fit_tbl
 
 ## save(file = "fit_tbl.Rda", fit_tbl)
 
 ```  
 
-### LOO Analysis
+# Model Comparison
+
+## LOO Analysis
 
 ```{r}
+
+fit_tbl <- bind_rows(qpoisson_fit_tbl, nb_fit_tbl, .id = NULL)
 
 for(curr_row in 1:length(fit_tbl$fit)) {
 
@@ -540,11 +451,52 @@ for(curr_row in 1:length(fit_tbl$fit)) {
 }
 
 
-comp <- loo_compare(fit_tbl$loo) #, simplify = TRUE)
-
-comp %>% rownames() %>% sub(pattern = "model", x= ., "") %>% as.integer() 
+comp <- loo_compare(fit_tbl$loo)
+index <- comp %>% rownames() %>% sub(pattern = "model", x= ., "") %>% as.integer() 
+desc <-fit_tbl$desc[index]
+rownames(comp) <- desc
+    
+#loo_tbl<- bind_cols( desc = desc, index = index, comp) %>% tibble() %>% arrange(index)
 
 print(comp)
-print(fit_tbl$desc, width = 10)
 
 ```
+## Plot Results
+
+```{r}
+
+for(curr_row in 1:length(fit_tbl$fit)) {
+
+    desc <- fit_tbl[[curr_row, "desc"]]
+    fit <- fit_tbl[[curr_row, "fit"]]
+
+    x0_group_list <- fit_tbl[[curr_row, "x0_group_list"]][[1]]
+    y0_group_list <- fit_tbl[[curr_row, "y0_group_list"]][[1]]
+
+    
+}
+
+    
+    pars <- c("x0", "y0", "theta")
+    pars_full <- c(pars, "lp__")
+
+    print(desc)
+    print(fit, pars = pars)
+                                        #traceplot(model, pars = pars, inc_warmup = FALSE)
+                                        #plot(model, pars = pars) #, ggtitle(title))
+
+        pairs(model, pars = pars_full)
+
+        ## Plot parameter estimate summaries
+        tmp_plot <- list()
+        for(par in pars) {
+            tmp_plot[[par]] <- stan_plot(model, pars = par)
+        }
+        gt <- arrangeGrob(grobs = tmp_plot)
+        as_ggplot(gt)
+
+    }
+}
+```
+
+
