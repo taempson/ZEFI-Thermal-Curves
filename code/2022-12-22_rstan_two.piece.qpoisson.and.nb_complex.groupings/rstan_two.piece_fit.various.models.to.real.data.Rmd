@@ -8,8 +8,8 @@ output: pdf_document
 ```{r setup, include=FALSE, }
 
 knitr::opts_chunk$set(
-  warning = TRUE, # show warnings
-  message = TRUE, # show messages
+  warning = FALSE, # show warnings
+  message = FALSE, # show messages
   error = TRUE, # do not interrupt generation in case of errors,
   echo = TRUE  # show R code
 )
@@ -291,7 +291,7 @@ n_chains <- n_cores
 model <- "nb"
 stan_file <- "two.piece_nb_1.0.stan"
 ## For debugging
-cmodel <- cmdstan_model(stan_file = stan_file)
+##cmodel <- cmdstan_model(stan_file = stan_file)
 
 stan_model(file = stan_file,
            verbose = TRUE)
