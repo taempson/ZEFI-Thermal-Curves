@@ -120,8 +120,8 @@ data_ind <- data_ind %>% filter(temp < 38) %>%
 
 summary(data_ind)
 
-## for calculation of 'size_bar' see note in `Set Up Simulate Data`
-summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_simple.est), y0_sd = sd(y0_simple.est), phi_bar = median(phi_ind), size_bar = y0_bar^2/(y0_sd^2 - y0_bar))
+## for calculation of 'theta_bar' (size in `rnbinom`) see note in `Set Up Simulate Data`
+summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_simple.est), y0_sd = sd(y0_simple.est), phi_bar = median(phi_ind), theta_bar = y0_bar^2/(y0_sd^2 - y0_bar))
 
 n_male <- length(unique(data_ind$male))
 
@@ -154,39 +154,38 @@ From `rnbinom` help
   >   in this parametrization.
 
 So above we can estimate `size = mu^2/(var - mu)`.
-We do this above in summary_stats `size_bar = y0_bar^2/(y0_sd^2 - y0_bar)`
+We do this above in summary_stats `theta_bar = y0_bar^2/(y0_sd^2 - y0_bar)`
 
 
 ```{r}
-sim_nb_counts <- function(temp, y0, x0, tmax, size) {
+sim_nb_counts <- function(temp, y0, x0, tmax, theta) {
       ## Calculate expected value given parametes
     mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(tmax-x0))) 
   #print(paste("size: ", size, "count: ", count))
-  rnbinom(1, size = size, mu = mu)
+  rnbinom(1, size = theta, mu = mu)
     }
 
-}
 
 sim_qpoisson_counts <- function(temp, y0, x0, tmax, phi) {
 
     ## Calculate expected value given parametes
     mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(tmax-x0))) 
     
-    ## calculate size parameter based on mu and phi
-    size = mu/(phi - 1)
+    ## calculate theta parameter based on mu and phi
+    theta = mu/(phi - 1)
     #print(paste("size: ", size, "count: ", count))
-    rnbinom(1, size = size, mu = mu)
+    rnbinom(1, size = theta, mu = mu)
     }
 
 
 phi <- summary_stats$phi_bar ## overdispersion parameter
-size <- summary_stats$size
+theta <- summary_stats$theta_bar ## size parameter
 
 tmax <- 46
 
-data_tmp <- data_ind[, c("male", "temp", "y0_simple.est")] %>%
-    mutate(male = droplevels(male)) %>%
-    mutate(male = as.integer(male))
+data_tmp <- data_ind[, c("male", "index", "temp", "y0_simple.est")] ##%>%
+##    mutate(male = droplevels(male)) %>%
+##    mutate(male = as.integer(male))
 
 
 male_tmp <- data_tmp$male %>% unique()
@@ -210,11 +209,11 @@ if(FALSE) {
 set.seed(2021)
 x0 <- rnorm(n_male, 39, 2) %>% round(1)
 ## Match y0 and x0 to males
-data_tmp <- data_tmp %>% mutate(x0 = x0[.data$male])
+data_tmp <- data_tmp %>% mutate(x0 = x0[.data$index])
     
 data_sim_qpoisson <- data_tmp %>% rowwise() %>% mutate(motif_count = sim_qpoisson_counts(temp, y0, x0, tmax = tmax, phi = phi))
 
-data_sim_nb <- data_tmp %>% rowwise() %>% mutate(motif_count = sim_nb_counts(temp, y0, x0, tmax = tmax, size = size))
+data_sim_nb <- data_tmp %>% rowwise() %>% mutate(motif_count = sim_nb_counts(temp, y0, x0, tmax = tmax, theta = theta))
 
 
 ## t_target <- c(30, 35, 38, 40, 42, 44)
