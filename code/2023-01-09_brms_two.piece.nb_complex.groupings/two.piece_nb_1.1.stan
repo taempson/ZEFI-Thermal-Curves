@@ -52,6 +52,7 @@ data {
   real<lower=1> sd_y0_prior;
   real<lower=0> alpha_theta_prior;
   real<lower=0> alpha_phi_prior;
+  real<lower=0> beta_phi_prior;
   //vector[100] xp; // points used to create predictions for plotting
 }
 
@@ -95,7 +96,7 @@ model {
    //if(qpoisson_flag) {
    //   theta[i] ~ exponential(alpha_theta_prior);
    //   } else {
-      phi[i] ~ exponential(alpha_phi_prior);
+    phi[i] ~ gamma(alpha_phi_prior, beta_phi_prior);
    //   }
   }
   
