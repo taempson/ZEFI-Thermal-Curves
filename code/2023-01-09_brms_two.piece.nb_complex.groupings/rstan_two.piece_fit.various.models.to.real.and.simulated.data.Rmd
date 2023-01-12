@@ -1,5 +1,5 @@
 ---
-title: "Piecewise Regression with NB Error on Real Data using BRMS"
+title: "Piecewise Regression with NB Error on Real and simulated Data using rstan and BRMS"
 author: "Michael Gilchrist"
 date: "date: 2023-01-09"
 output: pdf_document
@@ -128,22 +128,8 @@ n_male <- length(unique(data_ind$male))
 ```
 
 
-## Set Up Real Data
 
-```{r}
-
-data <- data_ind
-motif_count <- data %>% pull(motif_count)
-temp <- data %>% pull(temp)
-N <- length(temp)
-index <- data %>% pull(index) ## male identifier
-## parameters to be printed
-
-pars <- c("t0", "y0")
-pars_full <- c(pars, "lp__")
-```
-
-## Set Up Simulate Data
+## Create Simulated Dataset
 
 - Simulation based on code from "code/2022-12-15_rstan_two.piece.qpoisson.with.simulated.data/rstan_twopiece_fit.various.models.to.simulated.data.Rmd"
 
@@ -158,12 +144,50 @@ We do this above in summary_stats `theta_bar = y0_bar^2/(y0_sd^2 - y0_bar)`
 
 
 ```{r}
+
+sim_parms <- function(flag = "uniform_1", n_male = 10, mean_global = 100, sd = 10, min = 10) {
+
+    mean_low <- mean_global - 3 * sd
+    mean_high <- mean_global + 3 * sd
+    n_low <- floor(n_male/2)
+    n_high <- n_male - n_low
+    
+    switch(flag,
+           uniform_1 = {
+               tibble( parm = rep(mean_global, times = n_male), grp = 1L)},
+           
+           uniform_2 = {
+               tibble( parm = c(rep(mean_low, times = n_low),
+                              rep(mean_high, times = n_high)),
+                      
+                      grp =  c(rep(1L, times = n_low), 
+                               rep(2L, times = n_high))
+                      )}, 
+           groups_1 = { ## note syntax differs from model usage (this would 'be pooled')
+               ## Should update model usage
+               tibble(parm = rnorm(n_male, mean_global, sd),
+                      grp = 1L
+                      )},
+           groups_2 = {
+               tibble(parm = c(rnorm(n_low, mean_low, sd),
+                               rnorm(n_high, mean_high, sd)),
+                      grp =  c(rep(1L, times = n_low),
+                               rep(2L, times = n_high))
+                      )}
+           ) %>%
+        mutate(parm = round(parm, 0)) %>%
+        mutate(parm = pmax(10, parm)) %>%
+        mutate(parm = as.integer(parm)) %>%
+        slice_sample(n = n_male, replace = FALSE) %>%
+        mutate(id = row_number())
+}
+
 sim_nb_counts <- function(temp, y0, x0, tmax, theta) {
-      ## Calculate expected value given parametes
+    ## Calculate expected value given parametes
     mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(tmax-x0))) 
-  #print(paste("size: ", size, "count: ", count))
-  rnbinom(1, size = theta, mu = mu)
-    }
+                                        #print(paste("size: ", size, "count: ", count))
+    rnbinom(1, size = theta, mu = mu)
+}
 
 
 sim_qpoisson_counts <- function(temp, y0, x0, tmax, phi) {
@@ -180,7 +204,8 @@ sim_qpoisson_counts <- function(temp, y0, x0, tmax, phi) {
 
 phi <- summary_stats$phi_bar ## overdispersion parameter
 theta <- summary_stats$theta_bar ## size parameter
-
+y0_bar <- summary_stats$y0_bar
+y0_sd <- summary_stats$y0_sd
 tmax <- 46
 
 data_tmp <- data_ind[, c("male", "index", "temp", "y0_simple.est")] ##%>%
@@ -196,11 +221,20 @@ n_male
 ## Generate 'true' parameters
 ## If TRUE, replace estimated y_0 with simulated values,
 ## else use estimates from observed data 
-if(FALSE) {
+y_flag <- "groups_2"
+x_flag <- "groups_1"
+
+if(TRUE) {
+
     set.seed(2022)
-    y0_sim <- rnorm(n_male, summary_stats$y0_bar, summary_stats$y0_sd) %>% round(0)
+
+
+    y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd)
+    x0_sim <- sim_x0_or_y0(flag = x_flag, n_male = n_male, mean = 39, sd = 2)
+
+    
     data_tmp <- data_tmp %>% mutate(y0 = y0_sim[.data$male])
-} else {
+                     } else {
     data_tmp <- data_tmp %>% mutate(y0 = y0_simple.est)
 }
 
@@ -245,8 +279,25 @@ tp = seq(25, tmax, length.out = 100)
 n_cores <- 4
 n_chains <- n_cores
 ```
+## Indicate Dataset to Use: Real vs Simulated
 
-## Reference: Negative Binomial via `rstan`
+```{r}
+
+data <- switch(3,
+               data_ind,
+               data_sim_qpoisson,
+               data_sim_nb)
+
+motif_count <- data %>% pull(motif_count)
+temp <- data %>% pull(temp)
+N <- length(temp)
+index <- data %>% pull(index) ## male identifier
+## parameters to be printed
+
+```
+
+
+## Fitting Routines
  
 ```{r}
 
@@ -401,11 +452,11 @@ for(model in models) {
                          ## same as default, but defining here to document syntax
                          prior(gamma(0.01, 0.01), class = "Intercept", dpar = "shape", lb = 0) +
                          prior(uniform(25, 45.5), lb = 25, ub = 45.5, nlpar = "x0") + 
-                         prior(uniform(0.1, 4), lb = 0.1, ub = 4, class = "sd", group = "xx", nlpar = "x0") + 
-                         prior(uniform(0.1, 200), lb = 0.1, ub = 200, class = "sd", group = "yy", nlpar = "y0") +
-                         prior(constant(46), nlpar = "xmax")
+                         prior(uniform(0.1, 10), lb = 0.1, ub = 4, class = "sd", group = "xx", nlpar = "x0") + 
+                         prior(uniform(0.1, 200), lb = 0.1, ub = 200, class = "sd", group = "yy", nlpar = "y0") #+
+        #                 prior(constant(46), nlpar = "xmax")
                        ## Have to hard code xmax = 46 and y0_xmax = 0
-                       nlform <- bf(y ~  0 - (xmax - fmax(x0, x)) * (0 - y0)/(xmax - x0),
+                       nlform <- bf(y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
                                     shape ~ 1,
                                     x0 ~ 1 + (1|xx),#|index),
                                     y0 ~ 1 + (1|yy),#|index),
@@ -507,7 +558,13 @@ print(comp)
 ```
 ## Plot Results
 
+- Incomplete; doesn't work.
+
 ```{r}
+
+pars <- c("t0", "y0")
+pars_full <- c(pars, "lp__")
+
 
 for(curr_row in 1:length(fit_tbl$fit)) {
 
