@@ -1,0 +1,104 @@
+---
+title: "Compare target and observed temperatures."
+author: "Michael Gilchrist"
+date: "date: 2023-01-13"
+output: pdf_document
+---
+
+```{r setup, include=FALSE, }
+
+knitr::opts_chunk$set(
+  warning = FALSE, # show warnings
+  message = FALSE, # show messages
+  error = TRUE, # do not interrupt generation in case of errors,
+  echo = TRUE  # show R code
+)
+
+
+if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=2E2, output = TRUE)
+
+```
+# Goal
+
+- Evaluate variance in `temp_mean` vs. `temp_target`
+
+# Set up
+
+## Install libraries
+
+```{r, message = FALSE}
+
+# install packages user might not have by replacing FALSE with TRUE
+
+## load libraries
+library(stats)
+library(ggplot2)
+library(ggpubr)
+library(ggpmisc)  
+library(grid)
+library(gridExtra)
+library(GGally)
+library(broom)
+library(tidyverse)
+library(viridisLite)
+
+```
+
+## Load Data
+
+```{r}
+load(file.path("input", "data.processing_2022-12-15.Rda"),
+     verbose = TRUE)
+
+
+motif_data
+```
+# Process Data
+## Create Working Dataset
+
+```{r}
+
+data <- motif_data %>% select(temp_target, temp_mean, chamber, date)
+data %>% ggplot() +
+    aes(x = temp_target, y = temp_mean, color = chamber) +
+    geom_point(size = 2)
+
+
+temp_var_by_temp <- data %>%
+    group_by(temp_target) %>%
+    summarize(var = var(temp_mean, na.rm = TRUE),
+              se_var = var * sqrt(2/n()))
+
+plt <- ggplot(temp_var_by_temp) +
+    aes(x = temp_target,
+        y = var,
+        ymin = var - se_var,
+        ymax = var + se_var) +
+    geom_point() +
+    geom_errorbar() +
+    stat_smooth(data = ~ .x %>% filter( temp_target > 27),
+                method = "lm",
+                aes(weight = (se_var)^2)
+                )
+
+plt
+
+plt + stat_poly_eq(data = ~ .x %>% filter( temp_target > 27),
+                   formula = y ~ x,
+            aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), 
+            parse = TRUE)
+
+temp_var_by_temp_chamber <- data %>%  group_by(temp_target, chamber) %>% summarize(var = var(temp_mean, na.rm = TRUE))
+
+ggplot(temp_var_by_temp_chamber) +
+    aes(temp_target, var, color = chamber) +
+    geom_point()
+
+
+ggplot(data, aes(x = temp_mean, fill = as.factor(temp_target))) +                       # Draw overlaying histogram
+    geom_histogram(position = "identity",  alpha = 0.5, bins = 20)
+
+#ggplot(data, aes(x = temp_mean, fill = as.factor(chamber))) +                       # Draw overlaying histogram
+#    geom_histogram(position = "identity",  alpha = 0.5, bins = 20)
+
+```
