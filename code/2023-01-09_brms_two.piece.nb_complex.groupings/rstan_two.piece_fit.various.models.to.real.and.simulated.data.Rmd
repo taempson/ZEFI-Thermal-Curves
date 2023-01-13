@@ -106,7 +106,7 @@ data_ind <- motif_data %>%
     mutate(index = as.integer(male)) %>%
     mutate(male = as.character(male)) %>% 
     arrange(index) %>%
-    select(male, index, motif_count, temp, round, trial_round, date, counter) %>% 
+    select(male, index, motif_count, temp_target, temp, round, trial_round, date, counter) %>% 
   ##    left_join(index_shape, by = "index") %>%
   mutate()
 
@@ -140,8 +140,9 @@ From `rnbinom` help
   >   in this parametrization.
 
 So above we can estimate `size = mu^2/(var - mu)`.
-We do this above in summary_stats `theta_bar = y0_bar^2/(y0_sd^2 - y0_bar)`
+We do this above in summary_stats `theta_bar = y0_bar^2/(y0_sd^2 - y0_bar)`.
 
+### Functions Used
 
 ```{r}
 
@@ -175,12 +176,25 @@ sim_parms <- function(flag = "uniform_1", n_male = 10, mean_global = 100, sd = 1
                                rep(2L, times = n_high))
                       )}
            ) %>%
-        mutate(parm = round(parm, 0)) %>%
-        mutate(parm = pmax(10, parm)) %>%
-        mutate(parm = as.integer(parm)) %>%
+        mutate(parm = round(parm, 1)) %>%
+        mutate(parm = pmax(min, parm)) %>%
+        #mutate(parm = as.integer(parm)) %>%
         slice_sample(n = n_male, replace = FALSE) %>%
         mutate(id = row_number())
 }
+
+var_temp_mean <- function(temp_target) {
+    ## Returns expected variance in temp_mean given temp_target
+    ## numbers from analysis in `code/2023-01-13_temp_target.vs.var/compare.temp_target.vs.var.Rmd`
+    var = max(0.891, -5.16 + 0.167 * temp_target)
+
+    return(var)
+}
+
+sd_temp_mean <- function(temp_target) {
+    sqrt(var_temp_mean(temp_target))
+    }
+
 
 sim_nb_counts <- function(temp, y0, x0, tmax, theta) {
     ## Calculate expected value given parametes
@@ -202,55 +216,52 @@ sim_qpoisson_counts <- function(temp, y0, x0, tmax, phi) {
     }
 
 
+```
+
+### Generate Parameter Tibble
+
+```{r}
 phi <- summary_stats$phi_bar ## overdispersion parameter
 theta <- summary_stats$theta_bar ## size parameter
 y0_bar <- summary_stats$y0_bar
 y0_sd <- summary_stats$y0_sd
 tmax <- 46
-
-data_tmp <- data_ind[, c("male", "index", "temp", "y0_simple.est")] ##%>%
-##    mutate(male = droplevels(male)) %>%
-##    mutate(male = as.integer(male))
-
-
-male_tmp <- data_tmp$male %>% unique()
-n_male <- male_tmp  %>% length()
-n_male
+n_male <- 12
 
 
 ## Generate 'true' parameters
 ## If TRUE, replace estimated y_0 with simulated values,
 ## else use estimates from observed data 
 y_flag <- "groups_2"
-x_flag <- "groups_1"
+x_flag <- "groups_2"
 
 if(TRUE) {
 
     set.seed(2022)
 
 
-    y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd)
-    x0_sim <- sim_x0_or_y0(flag = x_flag, n_male = n_male, mean = 39, sd = 2)
+    y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd) %>%
+        rename(y0 = parm, yy = grp)
+    x0_sim <- sim_parms(flag = x_flag, n_male = n_male, mean = 39, sd = 2)  %>%
+        rename(x0 = parm, xx = grp)
 
+    x0_y0_sim <- full_join(x0_sim, y0_sim, by = "id") %>%
+        relocate(id) ## move id to first column
+
+
+    data_parms <- crossing(x0_y0_sim, temp_target = c(30, 38, 40, 42, 44), rep = 1:3 )
+
+    data_parms <- data_parms %>%
+        rowwise() %>%
+        mutate(temp_sd = sd_temp_mean(temp_target),
+               temp_mean = min(rnorm(1, mean = temp_target, sd = temp_sd), 45.9)) %>% 
+        select(-temp_sd)
+
+    summary(data_parms)
     
-    data_tmp <- data_tmp %>% mutate(y0 = y0_sim[.data$male])
-                     } else {
-    data_tmp <- data_tmp %>% mutate(y0 = y0_simple.est)
-}
-
-## made these x0 values up
-## Should use estimates from 
-set.seed(2021)
-x0 <- rnorm(n_male, 39, 2) %>% round(1)
-## Match y0 and x0 to males
-data_tmp <- data_tmp %>% mutate(x0 = x0[.data$index])
-    
-data_sim_qpoisson <- data_tmp %>% rowwise() %>% mutate(motif_count = sim_qpoisson_counts(temp, y0, x0, tmax = tmax, phi = phi))
-
-data_sim_nb <- data_tmp %>% rowwise() %>% mutate(motif_count = sim_nb_counts(temp, y0, x0, tmax = tmax, theta = theta))
-
-
-## t_target <- c(30, 35, 38, 40, 42, 44)
+    data_sim <- data_parms %>% mutate(
+                                   motif_count_qpoisson = sim_qpoisson_counts(temp_mean, y0, x0, tmax, phi),
+                                   motif_count_nb = sim_nb_counts(temp_mean, y0, x0, tmax, theta))
 
 
 ```
@@ -283,7 +294,7 @@ n_chains <- n_cores
 
 ```{r}
 
-data <- switch(3,
+data <- switch(1,
                data_ind,
                data_sim_qpoisson,
                data_sim_nb)
