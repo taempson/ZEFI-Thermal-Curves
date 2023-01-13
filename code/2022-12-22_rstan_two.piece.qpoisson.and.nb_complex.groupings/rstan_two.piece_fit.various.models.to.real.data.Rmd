@@ -261,6 +261,8 @@ for(x_flag in flags_x) {
                     iter = iter,
                     warmup = floor(iter/2),
                     verbose = TRUE)
+
+        print(fit)
         
         fit_tbl[ curr_row, ]$fit <- list(fit)
         
