@@ -9,7 +9,7 @@ output: pdf_document
 
 knitr::opts_chunk$set(
   warning = FALSE, # show warnings
-  message = FALSE, # show messages
+  message = TRUE, # show messages
   error = TRUE, # do not interrupt generation in case of errors,
   echo = TRUE  # show R code
 )
@@ -61,7 +61,8 @@ motif_data
 data <- motif_data %>% select(temp_target, temp_mean, chamber, date)
 data %>% ggplot() +
     aes(x = temp_target, y = temp_mean, color = chamber) +
-    geom_point(size = 2)
+    geom_point(size = 2) +
+    stat_smooth(method = "lm", se = FALSE)
 
 
 temp_var_by_temp <- data %>%
@@ -69,19 +70,20 @@ temp_var_by_temp <- data %>%
     summarize(var = var(temp_mean, na.rm = TRUE),
               se_var = var * sqrt(2/n()))
 
+print(temp_var_by_temp)
+
+
 plt <- ggplot(temp_var_by_temp) +
     aes(x = temp_target,
         y = var,
         ymin = var - se_var,
         ymax = var + se_var) +
-    geom_point() +
+    geom_point( size = 2) +
     geom_errorbar() +
     stat_smooth(data = ~ .x %>% filter( temp_target > 27),
                 method = "lm",
                 aes(weight = (se_var)^2)
                 )
-
-plt
 
 plt + stat_poly_eq(data = ~ .x %>% filter( temp_target > 27),
                    formula = y ~ x,
