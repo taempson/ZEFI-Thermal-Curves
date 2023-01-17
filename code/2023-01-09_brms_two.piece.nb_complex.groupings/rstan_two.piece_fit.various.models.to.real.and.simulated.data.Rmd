@@ -24,12 +24,13 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=2E2, ou
 
 ## Recap
 
-While `brms` can build and runt he models, there are serious issues
+While `brms` can build and run the models, there are serious issues
 
 - We get negative `mu` parameters for the NB.
 - We get lots of `NaN` in the output
 - I am unsure if I'm actually fitting the model as I intend.
   For example, when using two groups for "x0", I don't get two estimates of "x0"
+- I have failed to use male as a fundamental grouping beyond the `separate` setting.
 
 # Set up
 
@@ -146,26 +147,29 @@ We do this above in summary_stats `theta_bar = y0_bar^2/(y0_sd^2 - y0_bar)`.
 
 ```{r}
 
-sim_parms <- function(flag = "uniform_1", n_male = 10, mean_global = 100, sd = 10, min = 10) {
+sim_parms <- function(flag = "uniform_1", n_male = 10, mean_global = 100, sd = 10, n_sd = 2, min = 10, max = 600) {
 
-    mean_low <- mean_global - 3 * sd
-    mean_high <- mean_global + 3 * sd
+    mean_low <- mean_global - n_sd * sd
+    mean_high <- mean_global + n_sd * sd
     n_low <- floor(n_male/2)
     n_high <- n_male - n_low
     
     switch(flag,
+           ## Parameter values are uniform across males within a category (high vs. low)
            uniform_1 = {
-               tibble( parm = rep(mean_global, times = n_male), grp = 1L)},
+               tibble(parm = rep(mean_global, times = n_male), grp = 1L)},
            
            uniform_2 = {
-               tibble( parm = c(rep(mean_low, times = n_low),
+               tibble(parm = c(rep(mean_low, times = n_low),
                               rep(mean_high, times = n_high)),
                       
                       grp =  c(rep(1L, times = n_low), 
                                rep(2L, times = n_high))
-                      )}, 
-           groups_1 = { ## note syntax differs from model usage (this would 'be pooled')
-               ## Should update model usage
+                      )},
+           ## Parameter values vary between males, but pulled from distribution common to each category (high vs. low)
+           ## Note syntax differs from model usage (this would 'be pooled')
+           ## Should update model usage
+           groups_1 = {
                tibble(parm = rnorm(n_male, mean_global, sd),
                       grp = 1L
                       )},
@@ -177,7 +181,8 @@ sim_parms <- function(flag = "uniform_1", n_male = 10, mean_global = 100, sd = 1
                       )}
            ) %>%
         mutate(parm = round(parm, 1)) %>%
-        mutate(parm = pmax(min, parm)) %>%
+        mutate(parm = pmax(min, parm)) %>% ## ensure parm is not below `min`
+        mutate(parm = pmin(max, parm)) %>% ## ensure parm is not below `max`
         #mutate(parm = as.integer(parm)) %>%
         slice_sample(n = n_male, replace = FALSE) %>%
         mutate(id = row_number())
@@ -220,6 +225,8 @@ sim_qpoisson_counts <- function(temp, y0, x0, tmax, phi) {
 
 ### Generate Parameter Tibble
 
+- Parameter values in this tibble will be used to create simulated data.
+
 ```{r}
 phi <- summary_stats$phi_bar ## overdispersion parameter
 theta <- summary_stats$theta_bar ## size parameter
@@ -232,37 +239,57 @@ n_male <- 12
 ## Generate 'true' parameters
 ## If TRUE, replace estimated y_0 with simulated values,
 ## else use estimates from observed data 
-y_flag <- "groups_2"
-x_flag <- "groups_2"
+y_flags <- c("uniform_1", "uniform_2", "groups_1", "groups_2")
+x_flags <- y_flags
 
-if(TRUE) {
+data_sim <- tibble()
 
-    set.seed(2022)
+replicates <- c(2, 8, 32)
+temp_target <- c(30, 38, 40, 42, 44)
 
+for(x_flag in x_flags) {
+    for(y_flag in y_flags) {
+        for(n_reps in replicates) {
 
-    y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd) %>%
-        rename(y0 = parm, yy = grp)
-    x0_sim <- sim_parms(flag = x_flag, n_male = n_male, mean = 39, sd = 2)  %>%
-        rename(x0 = parm, xx = grp)
-
-    x0_y0_sim <- full_join(x0_sim, y0_sim, by = "id") %>%
-        relocate(id) ## move id to first column
+            set.seed(2022)
 
 
-    data_parms <- crossing(x0_y0_sim, temp_target = c(30, 38, 40, 42, 44), rep = 1:3 )
+            y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd) %>%
+                rename(y0 = parm, yy = grp)
+            x0_sim <- sim_parms(flag = x_flag, n_male = n_male, mean = 39, sd = 1, min = 35, max = 45.9)  %>%
+                rename(x0 = parm, xx = grp)
 
-    data_parms <- data_parms %>%
-        rowwise() %>%
-        mutate(temp_sd = sd_temp_mean(temp_target),
-               temp_mean = min(rnorm(1, mean = temp_target, sd = temp_sd), 45.9)) %>% 
-        select(-temp_sd)
+            x0_y0_sim <- full_join(x0_sim, y0_sim, by = "id") %>%
+                relocate(id) ## move id to first column
 
-    summary(data_parms)
-    
-    data_sim <- data_parms %>% mutate(
-                                   motif_count_qpoisson = sim_qpoisson_counts(temp_mean, y0, x0, tmax, phi),
-                                   motif_count_nb = sim_nb_counts(temp_mean, y0, x0, tmax, theta))
 
+            ## Create relevant subset data matrix
+            data_parms <- crossing(x0_y0_sim,
+                                   temp_target = temp_target,
+                                   n_reps = n_reps,
+                                   rep = 1:n_reps,
+                                   x_flag = x_flag,
+                                   y_flag = y_flag)
+
+            data_parms <- data_parms %>%
+                rowwise() %>%
+                mutate(temp_sd = sd_temp_mean(temp_target),
+                       temp_mean = min(rnorm(1, mean = temp_target, sd = temp_sd), 45.9)) %>% 
+                select(-temp_sd)
+
+            summary(data_parms)
+            
+            data_tmp <- data_parms %>% mutate(
+                                           motif_count_qpoisson = sim_qpoisson_counts(temp_mean, y0, x0, tmax, phi),
+                                           motif_count_nb = sim_nb_counts(temp_mean, y0, x0, tmax, theta))
+            if(nrow(data_sim) == 0) {
+                data_sim <- data_tmp
+            } else {
+               data_sim <- bind_rows(data_sim, data_tmp)
+            }
+        }
+    }
+}
 
 ```
 
