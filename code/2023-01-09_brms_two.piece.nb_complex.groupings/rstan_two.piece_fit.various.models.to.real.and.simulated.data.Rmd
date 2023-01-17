@@ -185,7 +185,7 @@ sim_parms <- function(flag = "uniform_1", n_male = 10, mean_global = 100, sd = 1
         mutate(parm = pmin(max, parm)) %>% ## ensure parm is not below `max`
         #mutate(parm = as.integer(parm)) %>%
         slice_sample(n = n_male, replace = FALSE) %>%
-        mutate(id = row_number())
+        mutate(index = row_number())
 }
 
 var_temp_mean <- function(temp_target) {
@@ -247,49 +247,60 @@ data_sim <- tibble()
 replicates <- c(2, 8, 32)
 temp_target <- c(30, 38, 40, 42, 44)
 
-for(x_flag in x_flags) {
-    for(y_flag in y_flags) {
-        for(n_reps in replicates) {
+set.seed(2022)
 
-            set.seed(2022)
+for(sampling_dist in c("qpoisson", "nb")) {
+    for(x_flag in x_flags) {
+        for(y_flag in y_flags) {
+            for(n_reps in replicates) {
+
+                y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd) %>%
+                    rename(y0 = parm, yy = grp)
+                x0_sim <- sim_parms(flag = x_flag, n_male = n_male, mean = 39, sd = 1, min = 35, max = 45.9)  %>%
+                    rename(x0 = parm, xx = grp)
+
+                x0_y0_sim <- full_join(x0_sim, y0_sim, by = "index") %>%
+                    relocate(index) ## move index to first column
 
 
-            y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd) %>%
-                rename(y0 = parm, yy = grp)
-            x0_sim <- sim_parms(flag = x_flag, n_male = n_male, mean = 39, sd = 1, min = 35, max = 45.9)  %>%
-                rename(x0 = parm, xx = grp)
+                ## Create relevant subset data matrix
+                data_parms <- crossing(sampling_dist = sampling_dist,
+                                       x0_y0_sim,
+                                       temp_target = temp_target,
+                                       n_reps = n_reps,
+                                       rep = 1:n_reps,
+                                       x_flag = x_flag,
+                                       y_flag = y_flag)
 
-            x0_y0_sim <- full_join(x0_sim, y0_sim, by = "id") %>%
-                relocate(id) ## move id to first column
+                data_parms <- data_parms %>%
+                    rowwise() %>%
+                    mutate(temp_sd = sd_temp_mean(temp_target),
+                           temp_mean = min(rnorm(1, mean = temp_target, sd = temp_sd), 45.9)) %>% 
+                    select(-temp_sd)
 
-
-            ## Create relevant subset data matrix
-            data_parms <- crossing(x0_y0_sim,
-                                   temp_target = temp_target,
-                                   n_reps = n_reps,
-                                   rep = 1:n_reps,
-                                   x_flag = x_flag,
-                                   y_flag = y_flag)
-
-            data_parms <- data_parms %>%
-                rowwise() %>%
-                mutate(temp_sd = sd_temp_mean(temp_target),
-                       temp_mean = min(rnorm(1, mean = temp_target, sd = temp_sd), 45.9)) %>% 
-                select(-temp_sd)
-
-            summary(data_parms)
-            
-            data_tmp <- data_parms %>% mutate(
-                                           motif_count_qpoisson = sim_qpoisson_counts(temp_mean, y0, x0, tmax, phi),
-                                           motif_count_nb = sim_nb_counts(temp_mean, y0, x0, tmax, theta))
-            if(nrow(data_sim) == 0) {
-                data_sim <- data_tmp
-            } else {
-               data_sim <- bind_rows(data_sim, data_tmp)
+                summary(data_parms)
+                
+                data_tmp <- switch(sampling_dist,
+                                   qpoisson = {
+                                       data_parms %>%
+                                           mutate(motif_count= sim_qpoisson_counts(temp_mean, y0, x0, tmax, phi))},
+                                   nb = {
+                                       data_parms %>%
+                                           mutate(motif_count = sim_nb_counts(temp_mean, y0, x0, tmax, theta))
+                                   }
+                                   )
+                
+                if(nrow(data_sim) == 0) {
+                    data_sim <- data_tmp
+                } else {
+                    data_sim <- bind_rows(data_sim, data_tmp)
+                }
             }
         }
     }
 }
+
+
 
 ```
 
@@ -321,10 +332,23 @@ n_chains <- n_cores
 
 ```{r}
 
-data <- switch(1,
-               data_ind,
-               data_sim_qpoisson,
-               data_sim_nb)
+data_type <- "sim"
+x_f <- "uniform_1"
+y_f <- "uniform_1"
+sampling_d <- "nb"
+n_r <- 32
+
+data <- switch(data_type,
+               real = data_ind,
+               sim = {
+                   data_sim %>% filter(x_flag == x_f,
+                                       y_flag == y_f,
+                                       sampling_dist == sampling_d,
+                                       n_reps == n_r) %>%
+                       rename(temp = temp_mean)
+               }
+               )
+                                       
 
 motif_count <- data %>% pull(motif_count)
 temp <- data %>% pull(temp)
