@@ -1,7 +1,7 @@
 ---
-title: "Piecewise Regression with NB Error on Real and simulated Data using rstan and BRMS"
+title: "Piecewise Regression with NB Error on Simulated Data using BRMS"
 author: "Michael Gilchrist"
-date: "date: 2023-01-09"
+date: "date: 2023-01-"
 output: pdf_document
 ---
 
@@ -201,18 +201,18 @@ sd_temp_mean <- function(temp_target) {
     }
 
 
-sim_nb_counts <- function(temp, y0, x0, tmax, theta) {
+sim_nb_counts <- function(temp, y0, x0, xmax, theta) {
     ## Calculate expected value given parametes
-    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(tmax-x0))) 
+    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(xmax-x0))) 
                                         #print(paste("size: ", size, "count: ", count))
     rnbinom(1, size = theta, mu = mu)
 }
 
 
-sim_qpoisson_counts <- function(temp, y0, x0, tmax, phi) {
+sim_qpoisson_counts <- function(temp, y0, x0, xmax, phi) {
 
     ## Calculate expected value given parametes
-    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(tmax-x0))) 
+    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(xmax-x0))) 
     
     ## calculate theta parameter based on mu and phi
     theta = mu/(phi - 1)
@@ -232,7 +232,7 @@ phi <- summary_stats$phi_bar ## overdispersion parameter
 theta <- summary_stats$theta_bar ## size parameter
 y0_bar <- summary_stats$y0_bar
 y0_sd <- summary_stats$y0_sd
-tmax <- 46
+xmax <- 46
 n_male <- 12
 
 
@@ -283,10 +283,10 @@ for(sampling_dist in c("qpoisson", "nb")) {
                 data_tmp <- switch(sampling_dist,
                                    qpoisson = {
                                        data_parms %>%
-                                           mutate(motif_count= sim_qpoisson_counts(temp_mean, y0, x0, tmax, phi))},
+                                           mutate(motif_count= sim_qpoisson_counts(temp_mean, y0, x0, xmax, phi))},
                                    nb = {
                                        data_parms %>%
-                                           mutate(motif_count = sim_nb_counts(temp_mean, y0, x0, tmax, theta))
+                                           mutate(motif_count = sim_nb_counts(temp_mean, y0, x0, xmax, theta))
                                    }
                                    )
                 
@@ -311,9 +311,9 @@ for(sampling_dist in c("qpoisson", "nb")) {
 ```{r}
 
 iter <- 1000
-tmax <- 46
-t0max <- tmax - 0.5;
-t0min <- 20;
+xmax <- 46
+x0max <- xmax - 0.5;
+x0min <- 20;
 
 y_xmax <- 0
 y0_min <- 10
@@ -324,7 +324,7 @@ beta_phi_prior <- 0.01 ## gamma dist rate parameter for nb. brms default is 0.01
 
 
 ## values to use for model predictions
-tp = seq(25, tmax, length.out = 100)
+tp = seq(25, xmax, length.out = 100)
 n_cores <- 4
 n_chains <- n_cores
 ```
@@ -349,6 +349,11 @@ data <- data_sim %>% filter(x_flag == x_f,
 ```
 ### Fit Model
 
+
+#### `x0` and `y0` Parameter Structure: Individual
+
+Working with `groups_1` data, but try to estimate each individual's `x0` and `y0`
+
 ```{r}
 
 ## These aren't currently used
@@ -360,35 +365,20 @@ flags_y <- flags
 
 N <- length(data)
 
-## parameters to be printed
+
+## Priors
 
 my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 1) +
-    ## same as default, but defining here to document syntax
-##    prior(gamma(0.01, 0.01), class = "Intercept", dpar = "shape", lb = 0) +
     prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
 
-if(length(unique(data$xx)) > 1) {
-    my_priors <- my_priors +
-        prior(uniform(0.1, 10), lb = 0.1, ub = 4, class = "sd", group = "xx", nlpar = "x0")
-    x_form <- formula(x0 ~ 1 + (1|xx|male))
-} else {
-    ## x_form <- formula(x0 ~ (1|male))  ## use for "groups_Z"
-    x_form <- formula(x0 ~ -1 + male) ## use for "individual"
-}
+## Parameter Structure
+## x_form <- formula(x0 ~ (1|male))  ## use for "groups_Z"
+x_form <- formula(x0 ~ -1 + male) ## use for "individual"
 
-if(length(unique(data$yy)) > 1) {
-    my_priors <- my_priors + 
-        prior(uniform(0.1, 200), lb = 0.1, ub = 200, class = "sd", group = "yy", nlpar = "y0")
-    y_form <- formula(y0 ~ 1 + (1|yy|male))
-} else {
-    ## y_form <- formula(y0 ~ (1|male)) ## use for "groups_Z"
-    y_form <- formula(y0 ~ -1 + male) ## use for "individual"
-}
+## y_form <- formula(y0 ~ (1|male)) ## use for "groups_Z"
+y_form <- formula(y0 ~ -1 + male) ## use for "individual"
 
-
-
-nlform <- bf(y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
- #            shape ~ 1,
+nlform <- bf(y ~  0 - (xmax - fmax(x0, x)) * (0 - y0)/(46 - x0),
              x_form,
              y_form,
              nl = TRUE)
@@ -569,9 +559,9 @@ for(model in models) {
                                         yy = y0_index,
                                         ## male_index = index,
                                         nbb = rep(1,N),
-                                        xmax = tmax,
-                                        x0_min = t0min,
-                                        x0_max = t0max,
+                                        xmax = xmax,
+                                        x0_min = x0min,
+                                        x0_max = x0max,
                                         y_xmax = y_xmax,
                                         y0_min = y0_min,
                                         sd_y0_prior = sd_y0_prior,
@@ -651,336 +641,3 @@ for(model in models) {
 nb_fit_tbl <- fit_tbl
 
 ```
-
-
-
-
-
-
-
-
-
-
-
-## Real Data
-
-```{r}
-data <- data_ind
-motif_count <- data %>% pull(motif_count)
-temp <- data %>% pull(temp)
-N <- length(temp)
-index <- data %>% pull(index) ## male identifier
-
-```
-
-
-### Fit Model
-
-Need to update
-
-- Replace using male id's with an index
-- Change flag definitions
-
-
-```{r}
-
-##y0_grouping <- map_int(data$male, ~ if_else(. %in% y0_group[[1]], 1, 2))
-models <- c("rstan", "brms")
-
-## Define groups
-
-flags <- c("separate", "grouping_1", "pooled")
-
-#flags <- c("pooled")
-#flags <- c("grouping_1", "pooled")
-models <- c("brms")
-flags_x <- flags
-flags_y <- flags
-fit_tbl <- crossing(model = models,
-                    x0 = flags_x, y0 = flags_y,
-                    desc = "NA_character",
-                    y0_group_list = list(NA),
-                    x0_group_list = list(NA),
-                    fit = list(NA),
-                    llik = list(NA),
-                    r_eff = list(NA),
-                    loo = list(NA)
-                    )
-
-
-stan_file <- "two.piece_nb_1.1.stan"
-model_name <- "two.piece.rstan"
-## For debugging
-##cmodel <- cmdstan_model(stan_file = stan_file)
-
-## To avoid it being continually recompiled
-if(! exists("rstan_model")) {
-    rstan_model <-stan_model(file = stan_file,
-                             verbose = FALSE,
-                             model_name = model_name
-                             )
-}
-
-for(model in models) {
-    for(x_flag in flags_x) {
-        for(y_flag in flags_y) {
-            
-            desc <- paste0(model, ": ", x_flag, ", ", y_flag)
-            curr_row <- which(fit_tbl$model == model &
-                              fit_tbl$x0 == x_flag &
-                              fit_tbl$y0 == y_flag)
-            
-            fit_tbl[ curr_row, ]$desc <- desc
-            print(desc)
-            
-            x0_group_list <- list()
-            y0_group_list <- list()
-            
-            switch(x_flag,
-                   separate = {
-                       x0_group_list <- data$male %>% unique() %>% as.list()
-                   },
-                   grouping_1 = {
-                       ## set up groupings based on 2022-12-20 analysis
-                       ## Using male ID's instead index to make code more robust
-                       x0_group_list[[1]] <- c("T235", "T237", "T244", "T247", "T257", "T260")
-                       x0_group_list[[2]] <- c("T234", "T236", "T243", "T246", "T258")
-                   },
-                   pooled = {
-                       x0_group_list[[1]] <- data$male
-                   }
-                   )
-
-
-            switch(y_flag,
-                   separate = {
-                       y0_group_list <- data$male %>% unique() %>% as.list()
-                   },
-                   grouping_1 = {
-                       ## set up groupings based on 2022-12-20 analysis
-                       ## Using male ID's instead index to make code more robust
-                       y0_group_list[[1]] <- c("T234", "T243", "T244", "T246", "T258", "T260") 
-                       y0_group_list[[2]] <- c("T235", "T236", "T237", "T247", "T257")
-                   },
-                   pooled = {
-                       y0_group_list[[1]] <- data$male
-                   }
-                   )
-
-            fit_tbl[ curr_row, ]$x0_group_list[[1]] <- x0_group_list
-
-            fit_tbl[ curr_row, ]$y0_group_list[[1]] <- y0_group_list    
-
-            ## Convert lists to a vector of concatenated strings
-            ## This will simplify mapping male to an x0/y0 index 
-            x0_group <-lapply(x0_group_list, paste, collapse = " ") %>% unlist()
-            y0_group <-lapply(y0_group_list, paste, collapse = " ") %>% unlist()
-
-            x0_index <- sapply(as.character(data$male), function(x) str_which(x0_group, x))
-            y0_index <- sapply(as.character(data$male), function(x) str_which(y0_group, x))
-
-            switch(model,
-                   rstan = {
-                     
-                       data_list <-list(x = temp,
-                                        y = motif_count,
-                                        N = N,
-                                        X = length(x0_group),
-                                        Y = length(y0_group),
-                                        NB = 1,
-                                        xx = x0_index,
-                                        yy = y0_index,
-                                        ## male_index = index,
-                                        nbb = rep(1,N),
-                                        xmax = tmax,
-                                        x0_min = t0min,
-                                        x0_max = t0max,
-                                        y_xmax = y_xmax,
-                                        y0_min = y0_min,
-                                        sd_y0_prior = sd_y0_prior,
-                                        alpha_theta_prior = alpha_theta_prior,
-                                        alpha_phi_prior = alpha_phi_prior,
-                                                beta_phi_prior = beta_phi_prior
-                                        ##tp = tp,
-                                        ## max threshold value.
-                                        ## having it too close to xmax *sometimes* leads to sampling
-                                        ## near xmax, but with lower lp and very high E13) b0 values
-                                        )
-                       
-                       fit <- stan(file = stan_file,
-                                   model_name = model_name,
-                                   data = data_list,
-                                   cores = n_cores,
-                                   chains = n_chains,
-                                   iter = iter,
-                                   warmup = floor(iter/2),
-                                   verbose = FALSE)
-                       
-                   },
-                   brms = {
-
-                       ## Can't use normal R function within stan
-                       ## Need to define functions in stan language
-                       ## in a character string that's passed to brms
-                       
-                       df <- data.frame(
-                           x = temp,
-                           y = motif_count,                   
-                           xx = x0_index,
-                           yy = y0_index,
-                           id = index
-                       )
-
-                       my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 0.1) +
-                         ## same as default, but defining here to document syntax
-                         prior(gamma(0.01, 0.01), class = "Intercept", dpar = "shape", lb = 0) +
-                         prior(uniform(25, 45.5), lb = 25, ub = 45.5, nlpar = "x0") + 
-                         prior(uniform(0.1, 10), lb = 0.1, ub = 4, class = "sd", group = "xx", nlpar = "x0") + 
-                         prior(uniform(0.1, 200), lb = 0.1, ub = 200, class = "sd", group = "yy", nlpar = "y0") #+
-        #                 prior(constant(46), nlpar = "xmax")
-                       ## Have to hard code xmax = 46 and y0_xmax = 0
-                       nlform <- bf(y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
-                                    shape ~ 1,
-                                    x0 ~ 1 + (1|xx),#|index),
-                                    y0 ~ 1 + (1|yy),#|index),
-                                    nl = TRUE)
-                       
-                       fit <- brm(nlform,
-                                  data = df,
-                                  ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
-                                  ## link_shape corresponds to `phi` of `stan`'s
-                                  ## Negbinomial_2
-                                  ## Defining `phi = mu/theta` creates a quasipoisson
-                                  ## distribution with overdispersion parameter (1 +theta)
-                                  family = negbinomial(link = "identity", link_shape = "identity"),
-                                  prior = my_priors,
-                                  iter = iter,
-                                  control = list(adapt_delta = 0.975),
-                                  save_model = "brms_two.piece.stan")
-                       ## Avoid having brms recompile model by defining
-                       ## model in global environment
-                       #if(!exists("stanfit"))
-                       stanfit <- fit$fit
-
-                   }
-                 )
-            print(fit)
-            fit_tbl[ curr_row, ]$fit <- list(fit)
-            
-        }
-    }
-}
-
-nb_fit_tbl <- fit_tbl
-
-## save(file = "fit_tbl.Rda", fit_tbl)
-
-```  
-
-# Model Comparison
-
-Below doesn't work for a number of reasons
-
-- Need to use log_lik() with `brmsfit` objects
-- Mostly `NaN` in the `brmsfit` fits `log_lik()` output.
-
-## LOO Analysis
-
-```{r}
-
-## define fmax() as used in stan
-## This is necessary for using loo()
-fmax <- function(x, y) max(x,y)
-
-fit_tbl <- nb_fit_tbl
-
-for(curr_row in 1:length(fit_tbl$fit)) {
-
-  desc <- fit_tbl[[curr_row, "desc"]]
-  fit <- fit_tbl[[curr_row, "fit"]][[1]]
-  
-  if(class(fit) == "brmsfit") fit <- fit$fit
-  
-  print(paste0("Model ", curr_row, ": ", desc))
-
-  # loo analysis based on: http://mc-stan.org/loo/articles/loo2-with-rstan.html
-  #
-  # Extract pointwise log-likelihood
-  # using merge_chains=FALSE returns an array, which is easier to 
-  # use with relative_eff()
-  llik <- extract_log_lik(fit, parameter_name = "target", merge_chains = FALSE)
-  fit_tbl[[curr_row, "llik"]] <- list(llik)
-
-  # as of loo v2.0.0 we can optionally provide relative effective sample sizes
-  # when calling loo, which allows for better estimates of the PSIS effective
-  # sample sizes and Monte Carlo error
-  r_eff <- relative_eff(exp(llik), cores = n_cores)
-  fit_tbl[[curr_row, "r_eff"]] <- list(r_eff)
-  
-  # preferably use more than 2 cores (as many cores as possible)
-  # will use value of 'mc.cores' option if cores is not specified
-  loo <- loo(llik, r_eff = r_eff,
-             cores = n_cores,
-             save_psis = TRUE,
-             moment_match = TRUE) 
-  fit_tbl[[curr_row, "loo"]] <- list(loo)
-  print(loo)
-
-}
-
-
-comp <- loo_compare(fit_tbl$loo)
-index <- comp %>% rownames() %>% sub(pattern = "model", x= ., "") %>% as.integer() 
-desc <-fit_tbl$desc[index]
-rownames(comp) <- desc
-    
-#loo_tbl<- bind_cols( desc = desc, index = index, comp) %>% tibble() %>% arrange(index)
-
-print(comp)
-
-```
-## Plot Results
-
-- Incomplete; doesn't work.
-
-```{r}
-
-pars <- c("t0", "y0")
-pars_full <- c(pars, "lp__")
-
-
-for(curr_row in 1:length(fit_tbl$fit)) {
-
-    desc <- fit_tbl[[curr_row, "desc"]]
-    fit <- fit_tbl[[curr_row, "fit"]]
-
-    x0_group_list <- fit_tbl[[curr_row, "x0_group_list"]][[1]]
-    y0_group_list <- fit_tbl[[curr_row, "y0_group_list"]][[1]]
-
-    
-}
-
-    
-    pars <- c("x0", "y0", "theta")
-    pars_full <- c(pars, "lp__")
-
-    print(desc)
-    print(fit, pars = pars)
-                                        #traceplot(model, pars = pars, inc_warmup = FALSE)
-                                        #plot(model, pars = pars) #, ggtitle(title))
-
-        pairs(model, pars = pars_full)
-
-        ## Plot parameter estimate summaries
-        tmp_plot <- list()
-        for(par in pars) {
-            tmp_plot[[par]] <- stan_plot(model, pars = par)
-        }
-        gt <- arrangeGrob(grobs = tmp_plot)
-        as_ggplot(gt)
-
-    }
-}
-```
-
-
