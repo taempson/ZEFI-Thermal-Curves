@@ -4,3 +4,7 @@
 .Ruserdata
 *-2x1.pdf
 tmp*.pdf
+*.rds
+*.html
+*.aux
+\#*
