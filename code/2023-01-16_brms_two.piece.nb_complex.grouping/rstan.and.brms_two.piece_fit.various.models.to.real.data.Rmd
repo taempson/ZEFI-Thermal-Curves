@@ -1,5 +1,5 @@
 ---
-title: "Piecewise Regression with NB Error on Real and simulated Data using rstan and BRMS"
+title: "Piecewise Regression with NB Error on Real Data using rstan and BRMS"
 author: "Michael Gilchrist"
 date: "date: 2023-01-09"
 output: pdf_document
@@ -8,19 +8,22 @@ output: pdf_document
 ```{r setup, include=FALSE, }
 
 knitr::opts_chunk$set(
-  warning = FALSE, # show warnings
+  warning = TRUE, # show warnings
   message = FALSE, # show messages
   error = TRUE, # do not interrupt generation in case of errors,
   echo = TRUE  # show R code
 )
 
 
-if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=2E2, output = TRUE)
+options("warn" = 1) ## print warnings when they occur
+
+if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=5E1, output = TRUE)
 
 ```
 # Goal
 
-- Fit two piece nb to data using brms
+- Fit two piece nb to data using brms and rstan
+- Not confident in fittings, moving to work with simulated data.
 
 ## Recap
 
@@ -129,143 +132,6 @@ n_male <- length(unique(data_ind$male))
 
 
 
-## Create Simulated Dataset
-
-- Simulation based on code from "code/2022-12-15_rstan_two.piece.qpoisson.with.simulated.data/rstan_twopiece_fit.various.models.to.simulated.data.Rmd"
-
-From `rnbinom` help
-  >  An alternative parametrization (often used in ecology) is by the
-  >   _mean_ ‘mu’ (see above), and ‘size’, the _dispersion parameter_,
-  >   where ‘prob’ = ‘size/(size+mu)’.  The variance is ‘mu + mu^2/size’
-  >   in this parametrization.
-
-So above we can estimate `size = mu^2/(var - mu)`.
-We do this above in summary_stats `theta_bar = y0_bar^2/(y0_sd^2 - y0_bar)`.
-
-### Functions Used
-
-```{r}
-
-sim_parms <- function(flag = "uniform_1", n_male = 10, mean_global = 100, sd = 10, min = 10) {
-
-    mean_low <- mean_global - 3 * sd
-    mean_high <- mean_global + 3 * sd
-    n_low <- floor(n_male/2)
-    n_high <- n_male - n_low
-    
-    switch(flag,
-           uniform_1 = {
-               tibble( parm = rep(mean_global, times = n_male), grp = 1L)},
-           
-           uniform_2 = {
-               tibble( parm = c(rep(mean_low, times = n_low),
-                              rep(mean_high, times = n_high)),
-                      
-                      grp =  c(rep(1L, times = n_low), 
-                               rep(2L, times = n_high))
-                      )}, 
-           groups_1 = { ## note syntax differs from model usage (this would 'be pooled')
-               ## Should update model usage
-               tibble(parm = rnorm(n_male, mean_global, sd),
-                      grp = 1L
-                      )},
-           groups_2 = {
-               tibble(parm = c(rnorm(n_low, mean_low, sd),
-                               rnorm(n_high, mean_high, sd)),
-                      grp =  c(rep(1L, times = n_low),
-                               rep(2L, times = n_high))
-                      )}
-           ) %>%
-        mutate(parm = round(parm, 1)) %>%
-        mutate(parm = pmax(min, parm)) %>%
-        #mutate(parm = as.integer(parm)) %>%
-        slice_sample(n = n_male, replace = FALSE) %>%
-        mutate(id = row_number())
-}
-
-var_temp_mean <- function(temp_target) {
-    ## Returns expected variance in temp_mean given temp_target
-    ## numbers from analysis in `code/2023-01-13_temp_target.vs.var/compare.temp_target.vs.var.Rmd`
-    var = max(0.891, -5.16 + 0.167 * temp_target)
-
-    return(var)
-}
-
-sd_temp_mean <- function(temp_target) {
-    sqrt(var_temp_mean(temp_target))
-    }
-
-
-sim_nb_counts <- function(temp, y0, x0, tmax, theta) {
-    ## Calculate expected value given parametes
-    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(tmax-x0))) 
-                                        #print(paste("size: ", size, "count: ", count))
-    rnbinom(1, size = theta, mu = mu)
-}
-
-
-sim_qpoisson_counts <- function(temp, y0, x0, tmax, phi) {
-
-    ## Calculate expected value given parametes
-    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(tmax-x0))) 
-    
-    ## calculate theta parameter based on mu and phi
-    theta = mu/(phi - 1)
-    #print(paste("size: ", size, "count: ", count))
-    rnbinom(1, size = theta, mu = mu)
-    }
-
-
-```
-
-### Generate Parameter Tibble
-
-```{r}
-phi <- summary_stats$phi_bar ## overdispersion parameter
-theta <- summary_stats$theta_bar ## size parameter
-y0_bar <- summary_stats$y0_bar
-y0_sd <- summary_stats$y0_sd
-tmax <- 46
-n_male <- 12
-
-
-## Generate 'true' parameters
-## If TRUE, replace estimated y_0 with simulated values,
-## else use estimates from observed data 
-y_flag <- "groups_2"
-x_flag <- "groups_2"
-
-if(TRUE) {
-
-    set.seed(2022)
-
-
-    y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd) %>%
-        rename(y0 = parm, yy = grp)
-    x0_sim <- sim_parms(flag = x_flag, n_male = n_male, mean = 39, sd = 2)  %>%
-        rename(x0 = parm, xx = grp)
-
-    x0_y0_sim <- full_join(x0_sim, y0_sim, by = "id") %>%
-        relocate(id) ## move id to first column
-
-
-    data_parms <- crossing(x0_y0_sim, temp_target = c(30, 38, 40, 42, 44), rep = 1:3 )
-
-    data_parms <- data_parms %>%
-        rowwise() %>%
-        mutate(temp_sd = sd_temp_mean(temp_target),
-               temp_mean = min(rnorm(1, mean = temp_target, sd = temp_sd), 45.9)) %>% 
-        select(-temp_sd)
-
-    summary(data_parms)
-    
-    data_sim <- data_parms %>% mutate(
-                                   motif_count_qpoisson = sim_qpoisson_counts(temp_mean, y0, x0, tmax, phi),
-                                   motif_count_nb = sim_nb_counts(temp_mean, y0, x0, tmax, theta))
-
-
-```
-
 
 # Fit Models
 ## Common Parameters
@@ -294,10 +160,7 @@ n_chains <- n_cores
 
 ```{r}
 
-data <- switch(1,
-               data_ind,
-               data_sim_qpoisson,
-               data_sim_nb)
+data <- data_ind
 
 motif_count <- data %>% pull(motif_count)
 temp <- data %>% pull(temp)
@@ -314,14 +177,14 @@ index <- data %>% pull(index) ## male identifier
 
 ##y0_grouping <- map_int(data$male, ~ if_else(. %in% y0_group[[1]], 1, 2))
 models <- c("rstan", "brms")
-
+models <- c("brms")
 ## Define groups
-
-flags <- c("separate", "grouping_1", "pooled")
-
+flags <- c("grouping_1", "pooled")
 #flags <- c("pooled")
 #flags <- c("grouping_1", "pooled")
-models <- c("brms")
+
+
+
 flags_x <- flags
 flags_y <- flags
 fit_tbl <- crossing(model = models,
@@ -407,6 +270,11 @@ for(model in models) {
             x0_index <- sapply(as.character(data$male), function(x) str_which(x0_group, x))
             y0_index <- sapply(as.character(data$male), function(x) str_which(y0_group, x))
 
+            if(FALSE) {
+                print(x0_index)
+                print(y0_index)
+            }
+
             switch(model,
                    rstan = {
                      
@@ -459,18 +327,29 @@ for(model in models) {
                            id = index
                        )
 
-                       my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 0.1) +
-                         ## same as default, but defining here to document syntax
-                         prior(gamma(0.01, 0.01), class = "Intercept", dpar = "shape", lb = 0) +
-                         prior(uniform(25, 45.5), lb = 25, ub = 45.5, nlpar = "x0") + 
-                         prior(uniform(0.1, 10), lb = 0.1, ub = 4, class = "sd", group = "xx", nlpar = "x0") + 
-                         prior(uniform(0.1, 200), lb = 0.1, ub = 200, class = "sd", group = "yy", nlpar = "y0") #+
+                       my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 1) +
+                           ## Alternatively, to avoid negative initial values (but many divergent
+                           ##  transitions), try 
+                           ## prior(lognormal(log(150), log(200)), nlpar = "y0", lb = log(10)) +
+                           ## same as default, but defining here to document syntax
+                           prior(gamma(0.01, 0.01), class = "Intercept", dpar = "shape", lb = 0) +
+                           prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0") +
+                           prior(exponential(6), class = "sd", nlpar = "x0")
+                           ##prior(uniform(0.1, 10), class = "sd", nlpar = "x0", lb = 0.1, ub = 10)
+                       ## Following gives unreasonably large sd for x0_intercept
+                       ## prior(uniform(0.1, 10), lb = 0.1, ub = 4, class = "sd", group = "xx", nlpar = "x0") +
+                       
+#                         prior(uniform(0.1, 200), lb = 0.1, ub = 200, class = "sd", group = "yy", nlpar = "y0") #+
         #                 prior(constant(46), nlpar = "xmax")
                        ## Have to hard code xmax = 46 and y0_xmax = 0
-                       nlform <- bf(y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
+                       nlform <- bf(y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
                                     shape ~ 1,
-                                    x0 ~ 1 + (1|xx),#|index),
-                                    y0 ~ 1 + (1|yy),#|index),
+                                    ## I don't think x0 and y0 are correct
+                                    ## had 1 + xx, then 1 + (1|xx|id)
+                                    ## Might need to use 1|id for pooled
+                                    ## x0 ~ 0 + (xx|id) for groupings
+                                    x0 ~ 1 + (xx|id), 
+                                    y0 ~ 1 + (yy|id),
                                     nl = TRUE)
                        
                        fit <- brm(nlform,
@@ -483,7 +362,17 @@ for(model in models) {
                                   family = negbinomial(link = "identity", link_shape = "identity"),
                                   prior = my_priors,
                                   iter = iter,
-                                  control = list(adapt_delta = 0.975),
+                                        #init = 1,
+                                  silent = 1, # 1 = default
+                                  refresh = 0, # 0 = suppress rstan's sampling progress
+                                  ##  From rstanarm
+                                  ## > The step size used by the numerical integrator is a function
+                                  ## > of adapt_delta in that increasing adapt_delta will result in
+                                  ## > a smaller step size and fewer divergences. Increasing
+                                  ## > adapt_delta will typically result in a slower sampler, but it
+                                  ## > will always lead to a more robust sampler.
+                                  ## I get divergent transition warnings even at 0.9999
+                                  control = list(adapt_delta = 0.999999), # was 0.975
                                   save_model = "brms_two.piece.stan")
                        ## Avoid having brms recompile model by defining
                        ## model in global environment
@@ -501,9 +390,11 @@ for(model in models) {
 
 nb_fit_tbl <- fit_tbl
 
-## save(file = "fit_tbl.Rda", fit_tbl)
+save(file = "fit_tbl.Rda", fit_tbl)
 
-```  
+```
+
+
 
 # Model Comparison
 
@@ -511,6 +402,14 @@ Below doesn't work for a number of reasons
 
 - Need to use log_lik() with `brmsfit` objects
 - Mostly `NaN` in the `brmsfit` fits `log_lik()` output.
+- Believe I need to use `brms` function `add_criterion`.
+  e.g., `fit <- add_criterion(fit, c("loo", "waic"))`
+
+```{r}
+
+knitr::knit_exit()
+
+```
 
 ## LOO Analysis
 
