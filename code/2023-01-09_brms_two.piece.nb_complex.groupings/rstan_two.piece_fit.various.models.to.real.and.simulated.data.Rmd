@@ -1,0 +1,603 @@
+---
+title: "Piecewise Regression with NB Error on Real and simulated Data using rstan and BRMS"
+author: "Michael Gilchrist"
+date: "date: 2023-01-09"
+output: pdf_document
+---
+
+```{r setup, include=FALSE, }
+
+knitr::opts_chunk$set(
+  warning = FALSE, # show warnings
+  message = FALSE, # show messages
+  error = TRUE, # do not interrupt generation in case of errors,
+  echo = TRUE  # show R code
+)
+
+
+if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=2E2, output = TRUE)
+
+```
+# Goal
+
+- Fit two piece nb to data using brms
+
+## Recap
+
+While `brms` can build and runt he models, there are serious issues
+
+- We get negative `mu` parameters for the NB.
+- We get lots of `NaN` in the output
+- I am unsure if I'm actually fitting the model as I intend.
+  For example, when using two groups for "x0", I don't get two estimates of "x0"
+
+# Set up
+
+## Install libraries
+
+```{r, message = FALSE}
+
+# install packages user might not have by replacing FALSE with TRUE
+
+## load libraries
+library(stats)
+library(MASS) # provides negative binomial fitting:  glm.nb
+library(ggplot2)
+library(ggpubr)
+library(grid)
+library(gridExtra)
+library(GGally)
+library(broom)
+library(tidyverse)
+library(viridisLite)
+library(cmdstanr)
+library(rstan)
+options(mc.cores = (parallel::detectCores()-2))
+rstan_options(auto_write = TRUE)
+library(brms)
+library(loo)
+library(shinystan)
+
+
+## options(ggplot2.continuous.colour="viridis",
+##        ggplot2.discrete.colour="viridis",
+##        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
+##        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
+
+library(reshape2)
+library(lme4)
+library(latex2exp)
+
+```
+
+## Load Data
+
+```{r}
+load(file.path("input", "data.processing_2022-12-15.Rda"),
+     verbose = TRUE)
+
+
+motif_data
+```
+# Process Data
+## Create Working Dataset
+
+```{r}
+
+filter_data <- TRUE
+
+if(filter_data) {
+  males_filtered_disp <- motif_stats_40C %>%
+    filter(dispersion < 50) %>%
+    pull(male)
+
+  males_filtered_mean <- motif_stats %>%
+    filter(mean > 10) %>% # changing from 10 to 40 removes previous male 7 (T258)
+    pull(male)
+
+  male_vector <- intersect(males_filtered_mean, males_filtered_disp)
+} else {
+  male_vector <- motif_data %>% select(male) %>% distinct()
+}
+
+data_ind <- motif_data %>%
+    filter(male %in% male_vector) %>%
+    mutate(male = droplevels(male)) %>%
+    mutate(index = as.integer(male)) %>%
+    mutate(male = as.character(male)) %>% 
+    arrange(index) %>%
+    select(male, index, motif_count, temp, round, trial_round, date, counter) %>% 
+  ##    left_join(index_shape, by = "index") %>%
+  mutate()
+
+stats_ind <- motif_stats %>%
+    filter(male %in% male_vector) 
+
+
+data_ind <- data_ind %>% filter(temp < 38) %>%
+    group_by(male) %>% mutate(y0_simple.est = mean(motif_count), phi_ind = var(motif_count)/y0_simple.est) %>% ## phi is overdispersion parameter
+    ungroup()
+
+summary(data_ind)
+
+## for calculation of 'theta_bar' (size in `rnbinom`) see note in `Set Up Simulate Data`
+summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_simple.est), y0_sd = sd(y0_simple.est), phi_bar = median(phi_ind), theta_bar = y0_bar^2/(y0_sd^2 - y0_bar))
+
+n_male <- length(unique(data_ind$male))
+
+```
+
+
+
+## Create Simulated Dataset
+
+- Simulation based on code from "code/2022-12-15_rstan_two.piece.qpoisson.with.simulated.data/rstan_twopiece_fit.various.models.to.simulated.data.Rmd"
+
+From `rnbinom` help
+  >  An alternative parametrization (often used in ecology) is by the
+  >   _mean_ ‘mu’ (see above), and ‘size’, the _dispersion parameter_,
+  >   where ‘prob’ = ‘size/(size+mu)’.  The variance is ‘mu + mu^2/size’
+  >   in this parametrization.
+
+So above we can estimate `size = mu^2/(var - mu)`.
+We do this above in summary_stats `theta_bar = y0_bar^2/(y0_sd^2 - y0_bar)`
+
+
+```{r}
+
+sim_parms <- function(flag = "uniform_1", n_male = 10, mean_global = 100, sd = 10, min = 10) {
+
+    mean_low <- mean_global - 3 * sd
+    mean_high <- mean_global + 3 * sd
+    n_low <- floor(n_male/2)
+    n_high <- n_male - n_low
+    
+    switch(flag,
+           uniform_1 = {
+               tibble( parm = rep(mean_global, times = n_male), grp = 1L)},
+           
+           uniform_2 = {
+               tibble( parm = c(rep(mean_low, times = n_low),
+                              rep(mean_high, times = n_high)),
+                      
+                      grp =  c(rep(1L, times = n_low), 
+                               rep(2L, times = n_high))
+                      )}, 
+           groups_1 = { ## note syntax differs from model usage (this would 'be pooled')
+               ## Should update model usage
+               tibble(parm = rnorm(n_male, mean_global, sd),
+                      grp = 1L
+                      )},
+           groups_2 = {
+               tibble(parm = c(rnorm(n_low, mean_low, sd),
+                               rnorm(n_high, mean_high, sd)),
+                      grp =  c(rep(1L, times = n_low),
+                               rep(2L, times = n_high))
+                      )}
+           ) %>%
+        mutate(parm = round(parm, 0)) %>%
+        mutate(parm = pmax(10, parm)) %>%
+        mutate(parm = as.integer(parm)) %>%
+        slice_sample(n = n_male, replace = FALSE) %>%
+        mutate(id = row_number())
+}
+
+sim_nb_counts <- function(temp, y0, x0, tmax, theta) {
+    ## Calculate expected value given parametes
+    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(tmax-x0))) 
+                                        #print(paste("size: ", size, "count: ", count))
+    rnbinom(1, size = theta, mu = mu)
+}
+
+
+sim_qpoisson_counts <- function(temp, y0, x0, tmax, phi) {
+
+    ## Calculate expected value given parametes
+    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(tmax-x0))) 
+    
+    ## calculate theta parameter based on mu and phi
+    theta = mu/(phi - 1)
+    #print(paste("size: ", size, "count: ", count))
+    rnbinom(1, size = theta, mu = mu)
+    }
+
+
+phi <- summary_stats$phi_bar ## overdispersion parameter
+theta <- summary_stats$theta_bar ## size parameter
+y0_bar <- summary_stats$y0_bar
+y0_sd <- summary_stats$y0_sd
+tmax <- 46
+
+data_tmp <- data_ind[, c("male", "index", "temp", "y0_simple.est")] ##%>%
+##    mutate(male = droplevels(male)) %>%
+##    mutate(male = as.integer(male))
+
+
+male_tmp <- data_tmp$male %>% unique()
+n_male <- male_tmp  %>% length()
+n_male
+
+
+## Generate 'true' parameters
+## If TRUE, replace estimated y_0 with simulated values,
+## else use estimates from observed data 
+y_flag <- "groups_2"
+x_flag <- "groups_1"
+
+if(TRUE) {
+
+    set.seed(2022)
+
+
+    y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd)
+    x0_sim <- sim_x0_or_y0(flag = x_flag, n_male = n_male, mean = 39, sd = 2)
+
+    
+    data_tmp <- data_tmp %>% mutate(y0 = y0_sim[.data$male])
+                     } else {
+    data_tmp <- data_tmp %>% mutate(y0 = y0_simple.est)
+}
+
+## made these x0 values up
+## Should use estimates from 
+set.seed(2021)
+x0 <- rnorm(n_male, 39, 2) %>% round(1)
+## Match y0 and x0 to males
+data_tmp <- data_tmp %>% mutate(x0 = x0[.data$index])
+    
+data_sim_qpoisson <- data_tmp %>% rowwise() %>% mutate(motif_count = sim_qpoisson_counts(temp, y0, x0, tmax = tmax, phi = phi))
+
+data_sim_nb <- data_tmp %>% rowwise() %>% mutate(motif_count = sim_nb_counts(temp, y0, x0, tmax = tmax, theta = theta))
+
+
+## t_target <- c(30, 35, 38, 40, 42, 44)
+
+
+```
+
+
+# Fit Models
+## Common Parameters
+ 
+```{r}
+
+iter <- 4000
+tmax <- 46
+t0max <- tmax - 0.5;
+t0min <- 20;
+
+y_xmax <- 0
+y0_min <- 10
+sd_y0_prior <- 200
+alpha_theta_prior <- 10 ## exponential dist scale parameter for overdispersion theta in quasipoisson
+alpha_phi_prior <- 0.01 ## gamma dist shape parameter for nb. brms default is 0.01
+beta_phi_prior <- 0.01 ## gamma dist rate parameter for nb. brms default is 0.01
+
+
+## values to use for model predictions
+tp = seq(25, tmax, length.out = 100)
+n_cores <- 4
+n_chains <- n_cores
+```
+## Indicate Dataset to Use: Real vs Simulated
+
+```{r}
+
+data <- switch(3,
+               data_ind,
+               data_sim_qpoisson,
+               data_sim_nb)
+
+motif_count <- data %>% pull(motif_count)
+temp <- data %>% pull(temp)
+N <- length(temp)
+index <- data %>% pull(index) ## male identifier
+## parameters to be printed
+
+```
+
+
+## Fitting Routines
+ 
+```{r}
+
+##y0_grouping <- map_int(data$male, ~ if_else(. %in% y0_group[[1]], 1, 2))
+models <- c("rstan", "brms")
+
+## Define groups
+
+flags <- c("separate", "grouping_1", "pooled")
+
+#flags <- c("pooled")
+#flags <- c("grouping_1", "pooled")
+models <- c("brms")
+flags_x <- flags
+flags_y <- flags
+fit_tbl <- crossing(model = models,
+                    x0 = flags_x, y0 = flags_y,
+                    desc = "NA_character",
+                    y0_group_list = list(NA),
+                    x0_group_list = list(NA),
+                    fit = list(NA),
+                    llik = list(NA),
+                    r_eff = list(NA),
+                    loo = list(NA)
+                    )
+
+
+stan_file <- "two.piece_nb_1.1.stan"
+model_name <- "two.piece.rstan"
+## For debugging
+##cmodel <- cmdstan_model(stan_file = stan_file)
+
+## To avoid it being continually recompiled
+if(! exists("rstan_model")) {
+    rstan_model <-stan_model(file = stan_file,
+                             verbose = FALSE,
+                             model_name = model_name
+                             )
+}
+
+for(model in models) {
+    for(x_flag in flags_x) {
+        for(y_flag in flags_y) {
+            
+            desc <- paste0(model, ": ", x_flag, ", ", y_flag)
+            curr_row <- which(fit_tbl$model == model &
+                              fit_tbl$x0 == x_flag &
+                              fit_tbl$y0 == y_flag)
+            
+            fit_tbl[ curr_row, ]$desc <- desc
+            print(desc)
+            
+            x0_group_list <- list()
+            y0_group_list <- list()
+            
+            switch(x_flag,
+                   separate = {
+                       x0_group_list <- data$male %>% unique() %>% as.list()
+                   },
+                   grouping_1 = {
+                       ## set up groupings based on 2022-12-20 analysis
+                       ## Using male ID's instead index to make code more robust
+                       x0_group_list[[1]] <- c("T235", "T237", "T244", "T247", "T257", "T260")
+                       x0_group_list[[2]] <- c("T234", "T236", "T243", "T246", "T258")
+                   },
+                   pooled = {
+                       x0_group_list[[1]] <- data$male
+                   }
+                   )
+
+
+            switch(y_flag,
+                   separate = {
+                       y0_group_list <- data$male %>% unique() %>% as.list()
+                   },
+                   grouping_1 = {
+                       ## set up groupings based on 2022-12-20 analysis
+                       ## Using male ID's instead index to make code more robust
+                       y0_group_list[[1]] <- c("T234", "T243", "T244", "T246", "T258", "T260") 
+                       y0_group_list[[2]] <- c("T235", "T236", "T237", "T247", "T257")
+                   },
+                   pooled = {
+                       y0_group_list[[1]] <- data$male
+                   }
+                   )
+
+            fit_tbl[ curr_row, ]$x0_group_list[[1]] <- x0_group_list
+
+            fit_tbl[ curr_row, ]$y0_group_list[[1]] <- y0_group_list    
+
+            ## Convert lists to a vector of concatenated strings
+            ## This will simplify mapping male to an x0/y0 index 
+            x0_group <-lapply(x0_group_list, paste, collapse = " ") %>% unlist()
+            y0_group <-lapply(y0_group_list, paste, collapse = " ") %>% unlist()
+
+            x0_index <- sapply(as.character(data$male), function(x) str_which(x0_group, x))
+            y0_index <- sapply(as.character(data$male), function(x) str_which(y0_group, x))
+
+            switch(model,
+                   rstan = {
+                     
+                       data_list <-list(x = temp,
+                                        y = motif_count,
+                                        N = N,
+                                        X = length(x0_group),
+                                        Y = length(y0_group),
+                                        NB = 1,
+                                        xx = x0_index,
+                                        yy = y0_index,
+                                        ## male_index = index,
+                                        nbb = rep(1,N),
+                                        xmax = tmax,
+                                        x0_min = t0min,
+                                        x0_max = t0max,
+                                        y_xmax = y_xmax,
+                                        y0_min = y0_min,
+                                        sd_y0_prior = sd_y0_prior,
+                                        alpha_theta_prior = alpha_theta_prior,
+                                        alpha_phi_prior = alpha_phi_prior,
+                                                beta_phi_prior = beta_phi_prior
+                                        ##tp = tp,
+                                        ## max threshold value.
+                                        ## having it too close to xmax *sometimes* leads to sampling
+                                        ## near xmax, but with lower lp and very high E13) b0 values
+                                        )
+                       
+                       fit <- stan(file = stan_file,
+                                   model_name = model_name,
+                                   data = data_list,
+                                   cores = n_cores,
+                                   chains = n_chains,
+                                   iter = iter,
+                                   warmup = floor(iter/2),
+                                   verbose = FALSE)
+                       
+                   },
+                   brms = {
+
+                       ## Can't use normal R function within stan
+                       ## Need to define functions in stan language
+                       ## in a character string that's passed to brms
+                       
+                       df <- data.frame(
+                           x = temp,
+                           y = motif_count,                   
+                           xx = x0_index,
+                           yy = y0_index,
+                           id = index
+                       )
+
+                       my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 0.1) +
+                         ## same as default, but defining here to document syntax
+                         prior(gamma(0.01, 0.01), class = "Intercept", dpar = "shape", lb = 0) +
+                         prior(uniform(25, 45.5), lb = 25, ub = 45.5, nlpar = "x0") + 
+                         prior(uniform(0.1, 10), lb = 0.1, ub = 4, class = "sd", group = "xx", nlpar = "x0") + 
+                         prior(uniform(0.1, 200), lb = 0.1, ub = 200, class = "sd", group = "yy", nlpar = "y0") #+
+        #                 prior(constant(46), nlpar = "xmax")
+                       ## Have to hard code xmax = 46 and y0_xmax = 0
+                       nlform <- bf(y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
+                                    shape ~ 1,
+                                    x0 ~ 1 + (1|xx),#|index),
+                                    y0 ~ 1 + (1|yy),#|index),
+                                    nl = TRUE)
+                       
+                       fit <- brm(nlform,
+                                  data = df,
+                                  ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
+                                  ## link_shape corresponds to `phi` of `stan`'s
+                                  ## Negbinomial_2
+                                  ## Defining `phi = mu/theta` creates a quasipoisson
+                                  ## distribution with overdispersion parameter (1 +theta)
+                                  family = negbinomial(link = "identity", link_shape = "identity"),
+                                  prior = my_priors,
+                                  iter = iter,
+                                  control = list(adapt_delta = 0.975),
+                                  save_model = "brms_two.piece.stan")
+                       ## Avoid having brms recompile model by defining
+                       ## model in global environment
+                       #if(!exists("stanfit"))
+                       stanfit <- fit$fit
+
+                   }
+                 )
+            print(fit)
+            fit_tbl[ curr_row, ]$fit <- list(fit)
+            
+        }
+    }
+}
+
+nb_fit_tbl <- fit_tbl
+
+## save(file = "fit_tbl.Rda", fit_tbl)
+
+```  
+
+# Model Comparison
+
+Below doesn't work for a number of reasons
+
+- Need to use log_lik() with `brmsfit` objects
+- Mostly `NaN` in the `brmsfit` fits `log_lik()` output.
+
+## LOO Analysis
+
+```{r}
+
+## define fmax() as used in stan
+## This is necessary for using loo()
+fmax <- function(x, y) max(x,y)
+
+fit_tbl <- nb_fit_tbl
+
+for(curr_row in 1:length(fit_tbl$fit)) {
+
+  desc <- fit_tbl[[curr_row, "desc"]]
+  fit <- fit_tbl[[curr_row, "fit"]][[1]]
+  
+  if(class(fit) == "brmsfit") fit <- fit$fit
+  
+  print(paste0("Model ", curr_row, ": ", desc))
+
+  # loo analysis based on: http://mc-stan.org/loo/articles/loo2-with-rstan.html
+  #
+  # Extract pointwise log-likelihood
+  # using merge_chains=FALSE returns an array, which is easier to 
+  # use with relative_eff()
+  llik <- extract_log_lik(fit, parameter_name = "target", merge_chains = FALSE)
+  fit_tbl[[curr_row, "llik"]] <- list(llik)
+
+  # as of loo v2.0.0 we can optionally provide relative effective sample sizes
+  # when calling loo, which allows for better estimates of the PSIS effective
+  # sample sizes and Monte Carlo error
+  r_eff <- relative_eff(exp(llik), cores = n_cores)
+  fit_tbl[[curr_row, "r_eff"]] <- list(r_eff)
+  
+  # preferably use more than 2 cores (as many cores as possible)
+  # will use value of 'mc.cores' option if cores is not specified
+  loo <- loo(llik, r_eff = r_eff,
+             cores = n_cores,
+             save_psis = TRUE,
+             moment_match = TRUE) 
+  fit_tbl[[curr_row, "loo"]] <- list(loo)
+  print(loo)
+
+}
+
+
+comp <- loo_compare(fit_tbl$loo)
+index <- comp %>% rownames() %>% sub(pattern = "model", x= ., "") %>% as.integer() 
+desc <-fit_tbl$desc[index]
+rownames(comp) <- desc
+    
+#loo_tbl<- bind_cols( desc = desc, index = index, comp) %>% tibble() %>% arrange(index)
+
+print(comp)
+
+```
+## Plot Results
+
+- Incomplete; doesn't work.
+
+```{r}
+
+pars <- c("t0", "y0")
+pars_full <- c(pars, "lp__")
+
+
+for(curr_row in 1:length(fit_tbl$fit)) {
+
+    desc <- fit_tbl[[curr_row, "desc"]]
+    fit <- fit_tbl[[curr_row, "fit"]]
+
+    x0_group_list <- fit_tbl[[curr_row, "x0_group_list"]][[1]]
+    y0_group_list <- fit_tbl[[curr_row, "y0_group_list"]][[1]]
+
+    
+}
+
+    
+    pars <- c("x0", "y0", "theta")
+    pars_full <- c(pars, "lp__")
+
+    print(desc)
+    print(fit, pars = pars)
+                                        #traceplot(model, pars = pars, inc_warmup = FALSE)
+                                        #plot(model, pars = pars) #, ggtitle(title))
+
+        pairs(model, pars = pars_full)
+
+        ## Plot parameter estimate summaries
+        tmp_plot <- list()
+        for(par in pars) {
+            tmp_plot[[par]] <- stan_plot(model, pars = par)
+        }
+        gt <- arrangeGrob(grobs = tmp_plot)
+        as_ggplot(gt)
+
+    }
+}
+```
+
+
