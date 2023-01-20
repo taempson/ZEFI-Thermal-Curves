@@ -1,9 +1,5 @@
 ---
-<<<<<<<< HEAD:code/2023-01-12_brms_generate.and.fit.realistic.simulated.data/brms_two.piece_create.and.fit.simulated.data.Rmd
 title: "Piecewise Regression with NB Error on Simulated Data using BRMS"
-========
-title: "Piecewise Regression with NB Error on Real Data using rstan and BRMS"
->>>>>>>> restore.real.data.fit:code/2023-01-16_brms_two.piece.nb_complex.grouping/rstan.and.brms_two.piece_fit.various.models.to.real.data.Rmd
 author: "Michael Gilchrist"
 date: "date: 2023-01-"
 output: pdf_document
@@ -312,9 +308,6 @@ for(sampling_dist in c("qpoisson", "nb")) {
 
 ```
 
-========
->>>>>>>> restore.real.data.fit:code/2023-01-16_brms_two.piece.nb_complex.grouping/rstan.and.brms_two.piece_fit.various.models.to.real.data.Rmd
-
 # Fit Models
 ## Common Parameters
  
@@ -343,14 +336,10 @@ n_chains <- n_cores
 ### Filter Data
 ```{r}
 
-<<<<<<<< HEAD:code/2023-01-12_brms_generate.and.fit.realistic.simulated.data/brms_two.piece_create.and.fit.simulated.data.Rmd
 x_f <- "groups_1"
 y_f <- "groups_1"
 sampling_d <- "nb"
 n_r <- 32
-========
-data <- data_ind
->>>>>>>> restore.real.data.fit:code/2023-01-16_brms_two.piece.nb_complex.grouping/rstan.and.brms_two.piece_fit.various.models.to.real.data.Rmd
 
 data <- data_sim %>% filter(x_flag == x_f,
                             y_flag == y_f,
@@ -370,22 +359,9 @@ Working with `groups_1` data, but try to estimate each individual's `x0` and `y0
 
 ```{r}
 
-<<<<<<<< HEAD:code/2023-01-12_brms_generate.and.fit.realistic.simulated.data/brms_two.piece_create.and.fit.simulated.data.Rmd
 ## These aren't currently used
 flags <- c("groups_1")
 models <- c("brms")
-========
-##y0_grouping <- map_int(data$male, ~ if_else(. %in% y0_group[[1]], 1, 2))
-models <- c("rstan", "brms")
-models <- c("brms")
-## Define groups
-flags <- c("grouping_1", "pooled")
-#flags <- c("pooled")
-#flags <- c("grouping_1", "pooled")
-
-
-
->>>>>>>> restore.real.data.fit:code/2023-01-16_brms_two.piece.nb_complex.grouping/rstan.and.brms_two.piece_fit.various.models.to.real.data.Rmd
 flags_x <- flags
 flags_y <- flags
 ## Stop
@@ -693,82 +669,4 @@ for(model in models) {
 
 nb_fit_tbl <- fit_tbl
 
-<<<<<<<< HEAD:code/2023-01-12_brms_generate.and.fit.realistic.simulated.data/brms_two.piece_create.and.fit.simulated.data.Rmd
-========
-save(file = "fit_tbl.Rda", fit_tbl)
-
-```
-
-
-
-# Model Comparison
-
-Below doesn't work for a number of reasons
-
-- Need to use log_lik() with `brmsfit` objects
-- Mostly `NaN` in the `brmsfit` fits `log_lik()` output.
-- Believe I need to use `brms` function `add_criterion`.
-  e.g., `fit <- add_criterion(fit, c("loo", "waic"))`
-
-```{r}
-
-knitr::knit_exit()
-
-```
-
-## LOO Analysis
-
-```{r}
-
-## define fmax() as used in stan
-## This is necessary for using loo()
-fmax <- function(x, y) max(x,y)
-
-fit_tbl <- nb_fit_tbl
-
-for(curr_row in 1:length(fit_tbl$fit)) {
-
-  desc <- fit_tbl[[curr_row, "desc"]]
-  fit <- fit_tbl[[curr_row, "fit"]][[1]]
-  
-  if(class(fit) == "brmsfit") fit <- fit$fit
-  
-  print(paste0("Model ", curr_row, ": ", desc))
-
-  # loo analysis based on: http://mc-stan.org/loo/articles/loo2-with-rstan.html
-  #
-  # Extract pointwise log-likelihood
-  # using merge_chains=FALSE returns an array, which is easier to 
-  # use with relative_eff()
-  llik <- extract_log_lik(fit, parameter_name = "target", merge_chains = FALSE)
-  fit_tbl[[curr_row, "llik"]] <- list(llik)
-
-  # as of loo v2.0.0 we can optionally provide relative effective sample sizes
-  # when calling loo, which allows for better estimates of the PSIS effective
-  # sample sizes and Monte Carlo error
-  r_eff <- relative_eff(exp(llik), cores = n_cores)
-  fit_tbl[[curr_row, "r_eff"]] <- list(r_eff)
-  
-  # preferably use more than 2 cores (as many cores as possible)
-  # will use value of 'mc.cores' option if cores is not specified
-  loo <- loo(llik, r_eff = r_eff,
-             cores = n_cores,
-             save_psis = TRUE,
-             moment_match = TRUE) 
-  fit_tbl[[curr_row, "loo"]] <- list(loo)
-  print(loo)
-
-}
-
-
-comp <- loo_compare(fit_tbl$loo)
-index <- comp %>% rownames() %>% sub(pattern = "model", x= ., "") %>% as.integer() 
-desc <-fit_tbl$desc[index]
-rownames(comp) <- desc
-    
-#loo_tbl<- bind_cols( desc = desc, index = index, comp) %>% tibble() %>% arrange(index)
-
-print(comp)
-
->>>>>>>> restore.real.data.fit:code/2023-01-16_brms_two.piece.nb_complex.grouping/rstan.and.brms_two.piece_fit.various.models.to.real.data.Rmd
 ```

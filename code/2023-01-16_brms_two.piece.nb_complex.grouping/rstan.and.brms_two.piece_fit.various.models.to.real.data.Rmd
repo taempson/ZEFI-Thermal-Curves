@@ -1,9 +1,5 @@
 ---
-<<<<<<<< HEAD:code/2023-01-12_brms_generate.and.fit.realistic.simulated.data/brms_two.piece_create.and.fit.simulated.data.Rmd
-title: "Piecewise Regression with NB Error on Simulated Data using BRMS"
-========
 title: "Piecewise Regression with NB Error on Real Data using rstan and BRMS"
->>>>>>>> restore.real.data.fit:code/2023-01-16_brms_two.piece.nb_complex.grouping/rstan.and.brms_two.piece_fit.various.models.to.real.data.Rmd
 author: "Michael Gilchrist"
 date: "date: 2023-01-"
 output: pdf_document
@@ -136,185 +132,6 @@ n_male <- length(unique(data_ind$male))
 ```
 
 
-
-<<<<<<<< HEAD:code/2023-01-12_brms_generate.and.fit.realistic.simulated.data/brms_two.piece_create.and.fit.simulated.data.Rmd
-## Create Simulated Dataset
-
-- Simulation based on code from "code/2022-12-15_rstan_two.piece.qpoisson.with.simulated.data/rstan_twopiece_fit.various.models.to.simulated.data.Rmd"
-
-From `rnbinom` help
-  >  An alternative parametrization (often used in ecology) is by the
-  >   _mean_ ‘mu’ (see above), and ‘size’, the _dispersion parameter_,
-  >   where ‘prob’ = ‘size/(size+mu)’.  The variance is ‘mu + mu^2/size’
-  >   in this parametrization.
-
-So above we can estimate `size = mu^2/(var - mu)`.
-We do this above in summary_stats `theta_bar = y0_bar^2/(y0_sd^2 - y0_bar)`.
-
-### Functions Used
-
-```{r}
-
-sim_parms <- function(flag = "uniform_1", n_male = 10, mean_global = 100, sd = 10, n_sd = 2, min = 10, max = 600) {
-
-    mean_low <- mean_global - n_sd * sd
-    mean_high <- mean_global + n_sd * sd
-    n_low <- floor(n_male/2)
-    n_high <- n_male - n_low
-    
-    switch(flag,
-           ## Parameter values are uniform across males within a category (high vs. low)
-           uniform_1 = {
-               tibble(parm = rep(mean_global, times = n_male), grp = 1L)},
-           
-           uniform_2 = {
-               tibble(parm = c(rep(mean_low, times = n_low),
-                              rep(mean_high, times = n_high)),
-                      
-                      grp =  c(rep(1L, times = n_low), 
-                               rep(2L, times = n_high))
-                      )},
-           ## Parameter values vary between males, but pulled from distribution common to each category (high vs. low)
-           ## Note syntax differs from model usage (this would 'be pooled')
-           ## Should update model usage
-           groups_1 = {
-               tibble(parm = rnorm(n_male, mean_global, sd),
-                      grp = 1L
-                      )},
-           groups_2 = {
-               tibble(parm = c(rnorm(n_low, mean_low, sd),
-                               rnorm(n_high, mean_high, sd)),
-                      grp =  c(rep(1L, times = n_low),
-                               rep(2L, times = n_high))
-                      )}
-           ) %>%
-        mutate(parm = round(parm, 1)) %>%
-        mutate(parm = pmax(min, parm)) %>% ## ensure parm is not below `min`
-        mutate(parm = pmin(max, parm)) %>% ## ensure parm is not below `max`
-        #mutate(parm = as.integer(parm)) %>%
-        slice_sample(n = n_male, replace = FALSE) %>%
-        mutate(index = row_number())
-}
-
-var_temp_mean <- function(temp_target) {
-    ## Returns expected variance in temp_mean given temp_target
-    ## numbers from analysis in `code/2023-01-13_temp_target.vs.var/compare.temp_target.vs.var.Rmd`
-    var = max(0.891, -5.16 + 0.167 * temp_target)
-
-    return(var)
-}
-
-sd_temp_mean <- function(temp_target) {
-    sqrt(var_temp_mean(temp_target))
-    }
-
-
-sim_nb_counts <- function(temp, y0, x0, xmax, theta) {
-    ## Calculate expected value given parametes
-    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(xmax-x0))) 
-                                        #print(paste("size: ", size, "count: ", count))
-    rnbinom(1, size = theta, mu = mu)
-}
-
-
-sim_qpoisson_counts <- function(temp, y0, x0, xmax, phi) {
-
-    ## Calculate expected value given parametes
-    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(xmax-x0))) 
-    
-    ## calculate theta parameter based on mu and phi
-    theta = mu/(phi - 1)
-    #print(paste("size: ", size, "count: ", count))
-    rnbinom(1, size = theta, mu = mu)
-    }
-
-
-```
-
-### Generate Parameter Tibble
-
-- Parameter values in this tibble will be used to create simulated data.
-
-```{r}
-phi <- summary_stats$phi_bar ## overdispersion parameter
-theta <- summary_stats$theta_bar ## size parameter
-y0_bar <- summary_stats$y0_bar
-y0_sd <- summary_stats$y0_sd
-xmax <- 46
-n_male <- 12
-
-
-## Generate 'true' parameters
-## If TRUE, replace estimated y_0 with simulated values,
-## else use estimates from observed data 
-y_flags <- c("uniform_1", "uniform_2", "groups_1", "groups_2")
-x_flags <- y_flags
-
-data_sim <- tibble()
-
-replicates <- c(2, 8, 32)
-temp_target <- c(30, 38, 40, 42, 44)
-
-set.seed(2022)
-
-for(sampling_dist in c("qpoisson", "nb")) {
-    for(x_flag in x_flags) {
-        for(y_flag in y_flags) {
-            for(n_reps in replicates) {
-
-                y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd) %>%
-                    rename(y0 = parm, yy = grp)
-                x0_sim <- sim_parms(flag = x_flag, n_male = n_male, mean = 39, sd = 1, min = 35, max = 45.9)  %>%
-                    rename(x0 = parm, xx = grp)
-
-                x0_y0_sim <- full_join(x0_sim, y0_sim, by = "index") %>%
-                    relocate(index) ## move index to first column
-
-
-                ## Create relevant subset data matrix
-                data_parms <- crossing(sampling_dist = sampling_dist,
-                                       x0_y0_sim,
-                                       temp_target = temp_target,
-                                       n_reps = n_reps,
-                                       rep = 1:n_reps,
-                                       x_flag = x_flag,
-                                       y_flag = y_flag)
-
-                data_parms <- data_parms %>%
-                    rowwise() %>%
-                    mutate(temp_sd = sd_temp_mean(temp_target),
-                           temp_mean = min(rnorm(1, mean = temp_target, sd = temp_sd), 45.9)) %>% 
-                    select(-temp_sd)
-
-                summary(data_parms)
-                
-                data_tmp <- switch(sampling_dist,
-                                   qpoisson = {
-                                       data_parms %>%
-                                           mutate(motif_count= sim_qpoisson_counts(temp_mean, y0, x0, xmax, phi))},
-                                   nb = {
-                                       data_parms %>%
-                                           mutate(motif_count = sim_nb_counts(temp_mean, y0, x0, xmax, theta))
-                                   }
-                                   )
-                
-                if(nrow(data_sim) == 0) {
-                    data_sim <- data_tmp
-                } else {
-                    data_sim <- bind_rows(data_sim, data_tmp)
-                }
-            }
-        }
-    }
-}
-
-
-
-```
-
-========
->>>>>>>> restore.real.data.fit:code/2023-01-16_brms_two.piece.nb_complex.grouping/rstan.and.brms_two.piece_fit.various.models.to.real.data.Rmd
-
 # Fit Models
 ## Common Parameters
  
@@ -343,14 +160,7 @@ n_chains <- n_cores
 ### Filter Data
 ```{r}
 
-<<<<<<<< HEAD:code/2023-01-12_brms_generate.and.fit.realistic.simulated.data/brms_two.piece_create.and.fit.simulated.data.Rmd
-x_f <- "groups_1"
-y_f <- "groups_1"
-sampling_d <- "nb"
-n_r <- 32
-========
 data <- data_ind
->>>>>>>> restore.real.data.fit:code/2023-01-16_brms_two.piece.nb_complex.grouping/rstan.and.brms_two.piece_fit.various.models.to.real.data.Rmd
 
 data <- data_sim %>% filter(x_flag == x_f,
                             y_flag == y_f,
@@ -370,11 +180,6 @@ Working with `groups_1` data, but try to estimate each individual's `x0` and `y0
 
 ```{r}
 
-<<<<<<<< HEAD:code/2023-01-12_brms_generate.and.fit.realistic.simulated.data/brms_two.piece_create.and.fit.simulated.data.Rmd
-## These aren't currently used
-flags <- c("groups_1")
-models <- c("brms")
-========
 ##y0_grouping <- map_int(data$male, ~ if_else(. %in% y0_group[[1]], 1, 2))
 models <- c("rstan", "brms")
 models <- c("brms")
@@ -383,9 +188,6 @@ flags <- c("grouping_1", "pooled")
 #flags <- c("pooled")
 #flags <- c("grouping_1", "pooled")
 
-
-
->>>>>>>> restore.real.data.fit:code/2023-01-16_brms_two.piece.nb_complex.grouping/rstan.and.brms_two.piece_fit.various.models.to.real.data.Rmd
 flags_x <- flags
 flags_y <- flags
 ## Stop
@@ -693,8 +495,6 @@ for(model in models) {
 
 nb_fit_tbl <- fit_tbl
 
-<<<<<<<< HEAD:code/2023-01-12_brms_generate.and.fit.realistic.simulated.data/brms_two.piece_create.and.fit.simulated.data.Rmd
-========
 save(file = "fit_tbl.Rda", fit_tbl)
 
 ```
@@ -770,5 +570,4 @@ rownames(comp) <- desc
 
 print(comp)
 
->>>>>>>> restore.real.data.fit:code/2023-01-16_brms_two.piece.nb_complex.grouping/rstan.and.brms_two.piece_fit.various.models.to.real.data.Rmd
 ```
