@@ -1,7 +1,7 @@
 ---
 title: "Piecewise Regression with NB Error on Simulated Data using BRMS"
 author: "Michael Gilchrist"
-date: "date: 2023-01-"
+date: "2023-01-12"
 output: pdf_document
 ---
 
@@ -22,8 +22,8 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=5E1, ou
 ```
 # Goal
 
-- Fit two piece nb to data using brms and rstan
-- Not confident in fittings, moving to work with simulated data.
+- Simulate realistic data based on data we have on `motif_count`.
+- Fit two piece nb to simulated data using `brms` and possibly `rstan`.
 
 ## Recap
 
@@ -133,7 +133,6 @@ n_male <- length(unique(data_ind$male))
 
 
 
-<<<<<<<< HEAD:code/2023-01-12_brms_generate.and.fit.realistic.simulated.data/brms_two.piece_create.and.fit.simulated.data.Rmd
 ## Create Simulated Dataset
 
 - Simulation based on code from "code/2022-12-15_rstan_two.piece.qpoisson.with.simulated.data/rstan_twopiece_fit.various.models.to.simulated.data.Rmd"
