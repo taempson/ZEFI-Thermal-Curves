@@ -1,0 +1,320 @@
+---
+title: "Piecewise Hierarchical Regression with NB error on Real Data using STAN Directly"
+author: "Michael Gilchrist"
+date: "date: 2022-12-22"
+output: pdf_document
+---
+
+```{r setup, include=FALSE, }
+
+knitr::opts_chunk$set(
+  warning = TRUE, # show warnings
+  message = TRUE, # show messages
+  error = TRUE, # do not interrupt generation in case of errors,
+  echo = TRUE  # show R code
+)
+
+
+if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=2E2, output = TRUE)
+
+```
+# Goal
+
+- Fit two piece quasipoisson to data
+
+## Recap
+
+# Set up
+
+## Install libraries
+
+```{r, message = FALSE}
+
+# install packages user might not have by replacing FALSE with TRUE
+
+## load libraries
+library(stats)
+library(MASS) # provides negative binomial fitting:  glm.nb
+library(ggplot2)
+library(ggpubr)
+library(grid)
+library(gridExtra)
+library(GGally)
+library(broom)
+library(tidyverse)
+library(viridisLite)
+library(cmdstanr)
+library(rstan)
+options(mc.cores = (parallel::detectCores()-2))
+rstan_options(auto_write = TRUE)
+library(loo)
+
+
+## options(ggplot2.continuous.colour="viridis",
+##        ggplot2.discrete.colour="viridis",
+##        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
+##        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
+
+library(reshape2)
+library(lme4)
+library(latex2exp)
+
+```
+
+## Load Data
+
+```{r}
+load(file.path("input", "data.processing_2022-12-15.Rda"),
+     verbose = TRUE)
+
+
+motif_data
+```
+
+
+# Examine Data
+
+## Create Working Dataset
+
+```{r}
+
+filter_data <- TRUE
+
+if(filter_data) {
+  males_filtered_disp <- motif_stats_40C %>%
+    filter(dispersion < 50) %>%
+    pull(male)
+
+  males_filtered_mean <- motif_stats %>%
+    filter(mean > 10) %>% # changing from 10 to 40 removes previous male 7 (T258)
+    pull(male)
+
+  male_vector <- intersect(males_filtered_mean, males_filtered_disp)
+} else {
+  male_vector <- motif_data %>% select(male) %>% distinct()
+}
+
+data_ind <- motif_data %>%
+    filter(male %in% male_vector) %>%
+    mutate(male = droplevels(male)) %>%
+    mutate(index = as.integer(male)) %>%
+    mutate(male = as.character(male)) %>% 
+    arrange(index) %>%
+    select(male, index, motif_count, temp, round, trial_round, date, counter) %>% 
+  ##    left_join(index_shape, by = "index") %>%
+  mutate()
+
+stats_ind <- motif_stats %>%
+    filter(male %in% male_vector) 
+
+
+data_ind <- data_ind %>% filter(temp < 38) %>%
+    group_by(male) %>% mutate(y0_simple.est = mean(motif_count), phi_ind = var(motif_count)/y0_simple.est) %>% ## phi is overdispersion parameter
+    ungroup()
+
+summary(data_ind)
+
+summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_simple.est), y0_sd = sd(y0_simple.est), phi_bar = median(phi_ind))
+
+n_male <- length(unique(data_ind$male))
+
+```
+
+
+## Set Up Data
+
+```{r}
+
+data <- data_ind
+motif_count <- data %>% pull(motif_count)
+temp <- data %>% pull(temp)
+N <- length(temp)
+index <- data %>% pull(index)
+## parameters to be printed
+
+pars <- c("t0", "y0")
+pars_full <- c(pars, "lp__")
+```
+
+# Fit Models
+
+## Negative Binomial
+ 
+```{r}
+
+iter <- 15000
+tmax <- 46
+t0max <- tmax - 0.5;
+t0min <- 20;
+## values to use for model predictions
+tp = seq(25, tmax, length.out = 100)
+n_cores <- 4
+n_chains <- n_cores
+
+##y0_grouping <- map_int(data$male, ~ if_else(. %in% y0_group[[1]], 1, 2))
+
+stan_file <- "two.piece_hierarchical.nb_1.0.stan"
+
+## For debugging
+cmodel <- cmdstan_model(stan_file = stan_file)
+
+stan_model(file = stan_file,
+           verbose = TRUE)
+
+
+## Define groups
+
+flags <- c("separate", "grouping_1", "pooled")
+flags_x <- flags
+flags_y <- flags
+fit_tbl <- crossing(x0 = flags_x, y0 = flags_y,
+                    desc = "NA_character",
+                    y0_group_list = list(NA),
+                    x0_group_list = list(NA),
+                    fit = list(NA),
+                    llik = list(NA),
+                    r_eff = list(NA),
+                    loo = list(NA)
+                    )
+
+
+
+for(x_flag in flags_x) {
+    for(y_flag in flags_y) {
+
+        desc <- paste0("x0 = ", x_flag, ", y0 = ", y_flag)
+        curr_row <- which(fit_tbl$x0 == x_flag & fit_tbl$y0 == y_flag)
+
+        fit_tbl[ curr_row, ]$desc <- desc
+        print(desc)
+        
+        x0_group_list <- list()
+        y0_group_list <- list()
+        
+        switch(x_flag,
+               separate = {
+                   x0_group_list <- data$male %>% unique() %>% as.list()
+               },
+               grouping_1 = {
+                   ## set up groupings based on 2022-12-20 analysis
+                   ## Using male ID's instead index to make code more robust
+                   x0_group_list[[1]] <- c("T235", "T237", "T244", "T247", "T257", "T260")
+                   x0_group_list[[2]] <- c("T234", "T236", "T243", "T246", "T258")
+               },
+               pooled = {
+                   x0_group_list[[1]] <- data$male
+               }
+               )
+
+
+        switch(y_flag,
+               separate = {
+                   y0_group_list <- data$male %>% unique() %>% as.list()
+               },
+               grouping_1 = {
+                   ## set up groupings based on 2022-12-20 analysis
+                   ## Using male ID's instead index to make code more robust
+                   y0_group_list[[1]] <- c("T234", "T243", "T244", "T246", "T258", "T260") 
+                   y0_group_list[[2]] <- c("T235", "T236", "T237", "T247", "T257")
+               },
+               pooled = {
+                   y0_group_list[[1]] <- data$male
+               }
+               )
+
+        fit_tbl[ curr_row, ]$x0_group_list[[1]] <- x0_group_list
+
+        fit_tbl[ curr_row, ]$y0_group_list[[1]] <- y0_group_list    
+
+        ## Convert lists to a vector of concatenated strings
+        ## This will simplify mapping male to an x0/y0 index 
+        x0_group <-lapply(x0_group_list, paste, collapse = " ") %>% unlist()
+        y0_group <-lapply(y0_group_list, paste, collapse = " ") %>% unlist()
+
+        x0_index <- sapply(as.character(data$male), function(x) str_which(x0_group, x))
+        y0_index <- sapply(as.character(data$male), function(x) str_which(y0_group, x))
+
+        fit <- stan(file = stan_file,
+                      model_name = desc,
+                      data=list(x = temp,
+                                y = motif_count,
+                                N = N,
+                                X = length(x0_group),
+                                Y = length(y0_group),
+                                NB = 1,
+                                xx = x0_index,
+                                yy = y0_index,
+                                nbb = rep(1,N),
+                                xmax = tmax,
+                                x0_min = t0min,
+                                x0_max = t0max,
+                                y_xmax = 0,
+                                y0_min = 10,
+                                sd_y0_prior = 200,
+                                alpha_theta_prior = 10,
+                                alpha_phi_prior = 10,
+                                ##tp = tp,
+                                ## max threshold value.
+                                ## having it too close to xmax *sometimes* leads to sampling
+                                ## near xmax, but with lower lp and very high E13) b0 values
+                                y_xmax = 0),
+                    cores = n_cores,
+                    chains = n_chains,                    
+                    iter = iter,
+                    warmup = floor(iter/2),
+                    verbose = TRUE)
+        
+        fit_tbl[ curr_row, ]$fit <- list(fit)
+        
+    }
+}
+
+
+## save(file = "fit_tbl.Rda", fit_tbl)
+
+```  
+
+### LOO Analysis
+
+```{r}
+
+for(curr_row in 1:length(fit_tbl$fit)) {
+
+  desc <- fit_tbl[[curr_row, "desc"]]
+  fit <- fit_tbl[[curr_row, "fit"]][[1]]
+  print(paste0("Model ", curr_row, ": ", desc))
+
+  # loo analysis based on: http://mc-stan.org/loo/articles/loo2-with-rstan.html
+  #
+  # Extract pointwise log-likelihood
+  # using merge_chains=FALSE returns an array, which is easier to 
+  # use with relative_eff()
+  llik <- extract_log_lik(fit, merge_chains = FALSE)
+  fit_tbl[[curr_row, "llik"]] <- list(llik)
+
+  # as of loo v2.0.0 we can optionally provide relative effective sample sizes
+  # when calling loo, which allows for better estimates of the PSIS effective
+  # sample sizes and Monte Carlo error
+  r_eff <- relative_eff(exp(llik), cores = n_cores)
+  fit_tbl[[curr_row, "r_eff"]] <- list(r_eff)
+  
+  # preferably use more than 2 cores (as many cores as possible)
+  # will use value of 'mc.cores' option if cores is not specified
+  loo <- loo(llik, r_eff = r_eff,
+             cores = n_cores,
+             save_psis = TRUE,
+             moment_match = TRUE) 
+  fit_tbl[[curr_row, "loo"]] <- list(loo)
+  print(loo)
+
+}
+
+
+comp <- loo_compare(fit_tbl$loo) #, simplify = TRUE)
+
+comp %>% rownames() %>% sub(pattern = "model", x= ., "") %>% as.integer() 
+
+print(comp)
+print(fit_tbl$desc, width = 10)
+
+```
