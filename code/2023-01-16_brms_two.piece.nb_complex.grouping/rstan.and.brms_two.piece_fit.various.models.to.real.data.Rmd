@@ -1,7 +1,7 @@
 ---
 title: "Piecewise Regression with NB Error on Real Data using rstan and BRMS"
 author: "Michael Gilchrist"
-date: "date: 2023-01-"
+date: "date: 2023-01-09"
 output: pdf_document
 ---
 
@@ -27,13 +27,12 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=5E1, ou
 
 ## Recap
 
-While `brms` can build and run the models, there are serious issues
+While `brms` can build and runt he models, there are serious issues
 
 - We get negative `mu` parameters for the NB.
 - We get lots of `NaN` in the output
 - I am unsure if I'm actually fitting the model as I intend.
   For example, when using two groups for "x0", I don't get two estimates of "x0"
-- I have failed to use male as a fundamental grouping beyond the `separate` setting.
 
 # Set up
 
@@ -132,15 +131,17 @@ n_male <- length(unique(data_ind$male))
 ```
 
 
+
+
 # Fit Models
 ## Common Parameters
  
 ```{r}
 
-iter <- 1000
-xmax <- 46
-x0max <- xmax - 0.5;
-x0min <- 20;
+iter <- 4000
+tmax <- 46
+t0max <- tmax - 0.5;
+t0min <- 20;
 
 y_xmax <- 0
 y0_min <- 10
@@ -151,33 +152,27 @@ beta_phi_prior <- 0.01 ## gamma dist rate parameter for nb. brms default is 0.01
 
 
 ## values to use for model predictions
-tp = seq(25, xmax, length.out = 100)
+tp = seq(25, tmax, length.out = 100)
 n_cores <- 4
 n_chains <- n_cores
 ```
-## Simulated Data
+## Indicate Dataset to Use: Real vs Simulated
 
-### Filter Data
 ```{r}
 
 data <- data_ind
 
-data <- data_sim %>% filter(x_flag == x_f,
-                            y_flag == y_f,
-                            sampling_dist == sampling_d,
-                            n_reps == n_r) %>%
-    rename(temp = temp_mean, male = index) %>%
-    rename(y = motif_count, x = temp) %>%
-    mutate(male = factor(male))
+motif_count <- data %>% pull(motif_count)
+temp <- data %>% pull(temp)
+N <- length(temp)
+index <- data %>% pull(index) ## male identifier
+## parameters to be printed
 
 ```
-### Fit Model
 
 
-#### `x0` and `y0` Parameter Structure: Individual
-
-Working with `groups_1` data, but try to estimate each individual's `x0` and `y0`
-
+## Fitting Routines
+ 
 ```{r}
 
 ##y0_grouping <- map_int(data$male, ~ if_else(. %in% y0_group[[1]], 1, 2))
@@ -188,124 +183,24 @@ flags <- c("grouping_1", "pooled")
 #flags <- c("pooled")
 #flags <- c("grouping_1", "pooled")
 
+
+
 flags_x <- flags
 flags_y <- flags
-## Stop
-
-N <- length(data)
-
-
-## Priors
-
-my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 1) +
-    prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
-
-## Parameter Structure
-## x_form <- formula(x0 ~ (1|male))  ## use for "groups_Z"
-x_form <- formula(x0 ~ -1 + male) ## use for "individual"
-
-## y_form <- formula(y0 ~ (1|male)) ## use for "groups_Z"
-y_form <- formula(y0 ~ -1 + male) ## use for "individual"
-
-nlform <- bf(y ~  0 - (xmax - fmax(x0, x)) * (0 - y0)/(46 - x0),
-             x_form,
-             y_form,
-             nl = TRUE)
-
-get_prior(nlform, data = data, family = negbinomial(link = "identity", link_shape = "identity"))
+fit_tbl <- crossing(model = models,
+                    x0 = flags_x, y0 = flags_y,
+                    desc = "NA_character",
+                    y0_group_list = list(NA),
+                    x0_group_list = list(NA),
+                    fit = list(NA),
+                    llik = list(NA),
+                    r_eff = list(NA),
+                    loo = list(NA)
+                    )
 
 
-
-## Output suggests correct model is fit with x ~ 1|male; y ~ 1|male, but
-## - It takes forever to run
-##   with 32 replicates/(temp male):
-##      22sec/1000 transitions
-##      or ~500s/1000 iterations!
-## - It likely requires a larger delta and more samples than 1000
-## However, the structure of the fit output looks good
-## 
-##     > fit
-##  Family: negbinomial 
-##   Links: mu = identity; shape = identity 
-## Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
-##          x0 ~ (1 | male)
-##          y0 ~ (1 | male)
-##    Data: data (Number of observations: 1920) 
-##   Draws: 4 chains, each with iter = 1000; warmup = 500; thin = 1;
-##          total post-warmup draws = 2000
-## 
-## Group-Level Effects: 
-## ~male (Number of levels: 12) 
-##                  Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
-## sd(x0_Intercept)     1.98      0.60     1.11     3.47 1.01      619      924
-## sd(y0_Intercept)    79.34     16.23    53.79   116.80 1.00      513      731
-## 
-## Population-Level Effects: 
-##              Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
-## x0_Intercept    38.74      0.62    37.46    39.99 1.00      537      568
-## y0_Intercept   114.78     24.09    68.31   162.73 1.02      290      349
-## 
-## Family Specific Parameters: 
-##       Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
-## shape     3.16      0.11     2.95     3.38 1.00     1938     1338
-## 
-## Draws were sampled using sampling(NUTS). For each parameter, Bulk_ESS
-## and Tail_ESS are effective sample size measures, and Rhat is the potential
-## scale reduction factor on split chains (at convergence, Rhat = 1).
-## Warning message:
-## There were 22 divergent transitions after warmup. Increasing adapt_delta above 0.8 may help. See http://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup 
-##     >
-
-fit <- brm(nlform,
-           data = data,
-           ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
-           ## link_shape corresponds to `phi` of `stan`'s
-           ## Negbinomial_2
-           ## Defining `phi = mu/theta` creates a quasipoisson
-           ## distribution with overdispersion parameter (1 +theta)
-           family = negbinomial(link = "identity", link_shape = "identity"),
-           prior = my_priors,
-           iter = iter,           
-                                        #control = list(adapt_delta = 0.975),
-           save_model = "brms_two.piece.stan")
-## Avoid having brms recompile model by defining
-## model in global environment
-                                        #if(!exists("stanfit"))
-
-
-```
-
-### Cruft
-```{r}
-
-} else {
-
-    ## Define parameters based on what's in brms_two.piece.stan
-fit <- brm(nlform,
-           N = length(data),
-           Y = data$y0,
-           K_x0 = length(unique(data$x0))
-           K_y0 = length(unique(data$y0))
-           ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
-           ## link_shape corresponds to `phi` of `stan`'s
-           ## Negbinomial_2
-           ## Defining `phi = mu/theta` creates a quasipoisson
-           ## distribution with overdispersion parameter (1 +theta)
-           family = negbinomial(link = "identity", link_shape = "identity"),
-           prior = my_priors,
-           iter = iter,           
-           #control = list(adapt_delta = 0.975),
-           save_model = "brms_two.piece.stan")
-## Avoid having brms recompile model by defining
-## model in global environment
-                                        #if(!exists("stanfit"))
-}
-```
-
-```{r}
 stan_file <- "two.piece_nb_1.1.stan"
-model_name <- sub(".stan", "", stan_file)
-
+model_name <- "two.piece.rstan"
 ## For debugging
 ##cmodel <- cmdstan_model(stan_file = stan_file)
 
@@ -333,10 +228,10 @@ for(model in models) {
             y0_group_list <- list()
             
             switch(x_flag,
-                   uniform_1 = {
+                   separate = {
                        x0_group_list <- data$male %>% unique() %>% as.list()
                    },
-                   groups_1 = {
+                   grouping_1 = {
                        ## set up groupings based on 2022-12-20 analysis
                        ## Using male ID's instead index to make code more robust
                        x0_group_list[[1]] <- c("T235", "T237", "T244", "T247", "T257", "T260")
@@ -393,9 +288,9 @@ for(model in models) {
                                         yy = y0_index,
                                         ## male_index = index,
                                         nbb = rep(1,N),
-                                        xmax = xmax,
-                                        x0_min = x0min,
-                                        x0_max = x0max,
+                                        xmax = tmax,
+                                        x0_min = t0min,
+                                        x0_max = t0max,
                                         y_xmax = y_xmax,
                                         y0_min = y0_min,
                                         sd_y0_prior = sd_y0_prior,
@@ -571,3 +466,48 @@ rownames(comp) <- desc
 print(comp)
 
 ```
+## Plot Results
+
+- Incomplete; doesn't work.
+
+```{r}
+
+pars <- c("t0", "y0")
+pars_full <- c(pars, "lp__")
+
+
+for(curr_row in 1:length(fit_tbl$fit)) {
+
+    desc <- fit_tbl[[curr_row, "desc"]]
+    fit <- fit_tbl[[curr_row, "fit"]]
+
+    x0_group_list <- fit_tbl[[curr_row, "x0_group_list"]][[1]]
+    y0_group_list <- fit_tbl[[curr_row, "y0_group_list"]][[1]]
+
+    
+}
+
+    
+    pars <- c("x0", "y0", "theta")
+    pars_full <- c(pars, "lp__")
+
+    print(desc)
+    print(fit, pars = pars)
+                                        #traceplot(model, pars = pars, inc_warmup = FALSE)
+                                        #plot(model, pars = pars) #, ggtitle(title))
+
+        pairs(model, pars = pars_full)
+
+        ## Plot parameter estimate summaries
+        tmp_plot <- list()
+        for(par in pars) {
+            tmp_plot[[par]] <- stan_plot(model, pars = par)
+        }
+        gt <- arrangeGrob(grobs = tmp_plot)
+        as_ggplot(gt)
+
+    }
+}
+```
+
+
