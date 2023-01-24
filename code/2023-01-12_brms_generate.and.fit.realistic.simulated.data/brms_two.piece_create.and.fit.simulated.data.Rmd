@@ -326,13 +326,15 @@ beta_phi_prior <- 0.01 ## gamma dist rate parameter for nb. brms default is 0.01
 
 
 ## values to use for model predictions
-tp = seq(25, xmax, length.out = 100)
+x_for_predictions = seq(25, xmax, length.out = 100)
 n_cores <- 4
 n_chains <- n_cores
 ```
 ## Simulated Data
 
-### Filter Data
+
+### Analyze `x ~ groups_1, y ~ groups_1`
+#### Set Up Data
 ```{r}
 
 x_f <- "groups_1"
@@ -349,17 +351,16 @@ data <- data_sim %>% filter(x_flag == x_f,
     mutate(male = factor(male))
 
 ```
-### Fit Model
+#### Fit Model
 
 
-#### `x0` and `y0` Parameter Structure: Individual
+##### `x0` and `y0` Parameter Structure: Individual
 
 Working with `groups_1` data, but try to estimate each individual's `x0` and `y0`
 
 ```{r}
 
-## These aren't currently used
-flags <- c("groups_1")
+flags <- c("individual", "groups_1")
 models <- c("brms")
 flags_x <- flags
 flags_y <- flags
@@ -373,19 +374,28 @@ N <- length(data)
 my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 1) +
     prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
 
-## Parameter Structure
-## x_form <- formula(x0 ~ (1|male))  ## use for "groups_Z"
-x_form <- formula(x0 ~ -1 + male) ## use for "individual"
+for(x_flag in flags_x) {
+  for(y_flag in flags_y) {
 
-## y_form <- formula(y0 ~ (1|male)) ## use for "groups_Z"
-y_form <- formula(y0 ~ -1 + male) ## use for "individual"
-
-nlform <- bf(y ~  0 - (xmax - fmax(x0, x)) * (0 - y0)/(46 - x0),
+    ## Parameter Structure
+    x_form <- switch(x_flag,
+                    individual = formula(x0 ~ -1 + male), 
+                    groups_1 = formula(x0 ~ (1|male)),
+                    groups_2 = formula(x0 ~ 1 + (xx|male))
+                    )
+                
+    y_form <- switch(y_flag,
+                    individual = formula(y0 ~ -1 + male), 
+                    groups_1 = formula(y0 ~ (1|male)),
+                    groups_2 = formula(y0 ~ 1 + (yy|male))
+                    )
+    nlform <- bf(
+      y ~  0 - (xmax - fmax(x0, x)) * (0 - y0)/(46 - x0),
              x_form,
              y_form,
              nl = TRUE)
 
-get_prior(nlform, data = data, family = negbinomial(link = "identity", link_shape = "identity"))
+    if(FALSE) get_prior(nlform, data = data, family = negbinomial(link = "identity", link_shape = "identity"))
 
 
 
@@ -575,7 +585,7 @@ for(model in models) {
                                         alpha_theta_prior = alpha_theta_prior,
                                         alpha_phi_prior = alpha_phi_prior,
                                                 beta_phi_prior = beta_phi_prior
-                                        ##tp = tp,
+                                        ##x_for_predictions = x_for_predictions,
                                         ## max threshold value.
                                         ## having it too close to xmax *sometimes* leads to sampling
                                         ## near xmax, but with lower lp and very high E13) b0 values
