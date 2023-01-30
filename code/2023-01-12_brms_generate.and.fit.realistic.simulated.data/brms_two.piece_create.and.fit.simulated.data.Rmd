@@ -7,13 +7,18 @@ output: pdf_document
 
 ```{r setup, include=FALSE, }
 
+## Global options
+options(digits = 3)
+
+### Knitr specific
 knitr::opts_chunk$set(
   warning = TRUE, # show warnings
   message = FALSE, # show messages
   error = TRUE, # do not interrupt generation in case of errors,
   echo = TRUE  # show R code
+  fig.width = 8
+  fig.path = "Figures/"
 )
-
 
 options("warn" = 1) ## print warnings when they occur
 
@@ -56,7 +61,7 @@ library(tidyverse)
 library(viridisLite)
 library(cmdstanr)
 library(rstan)
-options(mc.cores = (parallel::detectCores()-2))
+options(mc.cores = 4) #(parallel::detectCores()-2))
 rstan_options(auto_write = TRUE)
 library(brms)
 library(loo)
@@ -312,7 +317,7 @@ for(sampling_dist in c("qpoisson", "nb")) {
  
 ```{r}
 
-iter <- 1000
+iter <- 2000
 xmax <- 46
 x0max <- xmax - 0.5;
 x0min <- 20;
@@ -360,13 +365,23 @@ Working with `groups_1` data, but try to estimate each individual's `x0` and `y0
 
 ```{r}
 
+adapt_delta <- 0.975
 flags <- c("individual", "groups_1")
 models <- c("brms")
 flags_x <- flags
 flags_y <- flags
-## Stop
-
 N <- length(data)
+
+fit_tbl <- crossing(model = models,
+                    x0 = flags_x, y0 = flags_y,
+                    desc = "NA_character",
+                    y0_group_list = list(NA),
+                    x0_group_list = list(NA),
+                    fit = list(NA),
+                    llik = list(NA),
+                    r_eff = list(NA),
+                    loo = list(NA)
+                    )
 
 
 ## Priors
@@ -374,70 +389,40 @@ N <- length(data)
 my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 1) +
     prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
 
+
+model = models[[1]]
+
 for(x_flag in flags_x) {
   for(y_flag in flags_y) {
+
+      ## Set up variables for saving model and fit
+      desc <- paste0(model, ": ", x_flag, ", ", y_flag)
+      curr_row <- which(fit_tbl$model == model &
+                        fit_tbl$x0 == x_flag &
+                        fit_tbl$y0 == y_flag)
+      fit_tbl[ curr_row, ]$desc <- desc
+      print(desc)
 
     ## Parameter Structure
     x_form <- switch(x_flag,
                     individual = formula(x0 ~ -1 + male), 
-                    groups_1 = formula(x0 ~ (1|male)),
-                    groups_2 = formula(x0 ~ 1 + (xx|male))
+                    groups_1 = formula(x0 ~ (1|| male)), # no need for xx when there's only 1 group
+                    groups_2 = formula(x0 ~ 1 + (xx|| male))
                     )
                 
     y_form <- switch(y_flag,
                     individual = formula(y0 ~ -1 + male), 
-                    groups_1 = formula(y0 ~ (1|male)),
-                    groups_2 = formula(y0 ~ 1 + (yy|male))
+                    groups_1 = formula(y0 ~ (1|| male)),
+                    groups_2 = formula(y0 ~ 1 + (yy|| male))
                     )
     nlform <- bf(
-      y ~  0 - (xmax - fmax(x0, x)) * (0 - y0)/(46 - x0),
+      y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
              x_form,
              y_form,
              nl = TRUE)
 
     if(FALSE) get_prior(nlform, data = data, family = negbinomial(link = "identity", link_shape = "identity"))
 
-
-
-## Output suggests correct model is fit with x ~ 1|male; y ~ 1|male, but
-## - It takes forever to run
-##   with 32 replicates/(temp male):
-##      22sec/1000 transitions
-##      or ~500s/1000 iterations!
-## - It likely requires a larger delta and more samples than 1000
-## However, the structure of the fit output looks good
-## 
-##     > fit
-##  Family: negbinomial 
-##   Links: mu = identity; shape = identity 
-## Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
-##          x0 ~ (1 | male)
-##          y0 ~ (1 | male)
-##    Data: data (Number of observations: 1920) 
-##   Draws: 4 chains, each with iter = 1000; warmup = 500; thin = 1;
-##          total post-warmup draws = 2000
-## 
-## Group-Level Effects: 
-## ~male (Number of levels: 12) 
-##                  Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
-## sd(x0_Intercept)     1.98      0.60     1.11     3.47 1.01      619      924
-## sd(y0_Intercept)    79.34     16.23    53.79   116.80 1.00      513      731
-## 
-## Population-Level Effects: 
-##              Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
-## x0_Intercept    38.74      0.62    37.46    39.99 1.00      537      568
-## y0_Intercept   114.78     24.09    68.31   162.73 1.02      290      349
-## 
-## Family Specific Parameters: 
-##       Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
-## shape     3.16      0.11     2.95     3.38 1.00     1938     1338
-## 
-## Draws were sampled using sampling(NUTS). For each parameter, Bulk_ESS
-## and Tail_ESS are effective sample size measures, and Rhat is the potential
-## scale reduction factor on split chains (at convergence, Rhat = 1).
-## Warning message:
-## There were 22 divergent transitions after warmup. Increasing adapt_delta above 0.8 may help. See http://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup 
-##     >
 
 fit <- brm(nlform,
            data = data,
@@ -448,15 +433,217 @@ fit <- brm(nlform,
            ## distribution with overdispersion parameter (1 +theta)
            family = negbinomial(link = "identity", link_shape = "identity"),
            prior = my_priors,
-           iter = iter,           
-                                        #control = list(adapt_delta = 0.975),
+           iter = iter,
+           verbose = 2, # 0, 1, or 2. 1 is default
+           refresh = 0, # turn off sample number updates
+           control = list(adapt_delta = adapt_delta,
+                          max_treedepth = 12),
+           chains = n_chains,
+           cores = n_cores,
            save_model = "brms_two.piece.stan")
-## Avoid having brms recompile model by defining
-## model in global environment
-                                        #if(!exists("stanfit"))
+      ## Avoid having brms recompile model by defining
+      ## model in global environment
+      stanfit <- fit
+      
+      #fit_exp <- expose_functions(fit) , vectorize = TRUE)
+      #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
+      print(fit)     
+      fit_tbl[ curr_row, ]$fit <- list(fit)
+  }
+}
 
+
+save(file = "fit_tbl_groups_1_data_n32.Rda", fit_tbl)
 
 ```
+
+##### Output from model fits
+
+- Text indicating model is repeatedly recompiled has been removed.
+
+
+```{verbatim}
+
+"brms: individual, individual"
+
+STARTING SAMPLER FOR MODEL 'anon_model' NOW.
+ Family: negbinomial 
+  Links: mu = identity; shape = identity 
+Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
+         x0 ~ -1 + male
+         y0 ~ -1 + male
+   Data: data (Number of observations: 1920) 
+  Draws: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+         total post-warmup draws = 4000
+
+Population-Level Effects: 
+          Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+x0_male1     36.71      0.95    34.59    38.31 1.00     3962     2515
+x0_male2     39.84      0.73    38.21    41.11 1.00     4141     2758
+x0_male3     38.62      0.83    36.95    40.09 1.00     4203     2884
+x0_male4     36.28      1.36    33.46    38.56 1.00     3494     2213
+x0_male5     38.41      0.91    36.30    39.92 1.00     3652     2013
+x0_male6     41.94      0.40    41.13    42.70 1.00     5015     3010
+x0_male7     40.62      0.66    39.23    41.81 1.00     3883     2603
+x0_male8     39.76      0.54    38.65    40.83 1.00     4593     2903
+x0_male9     38.83      0.68    37.33    40.06 1.00     3720     2208
+x0_male10    34.97      1.28    32.20    37.23 1.00     3959     2235
+x0_male11    38.35      0.92    36.35    39.92 1.00     3594     2494
+x0_male12    37.60      0.93    35.60    39.24 1.00     4784     2653
+y0_male1    203.65     18.38   172.07   245.09 1.00     4081     2287
+y0_male2     64.66      4.94    56.13    75.63 1.00     4234     2683
+y0_male3    255.97     21.00   220.31   301.97 1.00     4173     3255
+y0_male4     56.43      6.57    45.23    70.94 1.00     3480     2279
+y0_male5    138.49     12.72   117.90   166.93 1.00     3438     1854
+y0_male6    194.18     10.38   174.98   215.31 1.00     5181     3374
+y0_male7     47.21      3.31    41.53    54.58 1.00     4037     2942
+y0_male8     66.33      4.11    58.96    75.13 1.00     4298     2202
+y0_male9    167.19     12.86   145.12   195.89 1.00     3663     2052
+y0_male10    39.47      4.02    32.34    48.28 1.00     3882     2193
+y0_male11   135.30     12.28   115.05   163.19 1.00     3690     2485
+y0_male12    11.18      1.03     9.44    13.46 1.00     4690     2752
+
+Family Specific Parameters: 
+      Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+shape     3.16      0.11     2.95     3.39 1.00     6356     2791
+
+Draws were sampled using sampling(NUTS). For each parameter, Bulk_ESS
+and Tail_ESS are effective sample size measures, and Rhat is the potential
+scale reduction factor on split chains (at convergence, Rhat = 1).
+
+
+[1] "brms: individual, groups_1"
+Warning: There were 1 divergent transitions after warmup. See
+https://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup
+
+Family: negbinomial 
+  Links: mu = identity; shape = identity 
+Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
+         x0 ~ -1 + male
+         y0 ~ (1 || male)
+   Data: data (Number of observations: 1920) 
+  Draws: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+         total post-warmup draws = 4000
+
+Group-Level Effects: 
+~male (Number of levels: 12) 
+                 Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+sd(y0_Intercept)    79.47     17.63    53.35   120.20 1.01     1025     1510
+
+Population-Level Effects: 
+             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+x0_male1        36.90      0.89    34.95    38.40 1.00     4360     2100
+x0_male2        39.84      0.71    38.34    41.14 1.00     6063     2805
+x0_male3        38.90      0.77    37.37    40.22 1.00     5115     2939
+x0_male4        36.22      1.38    33.29    38.54 1.00     4729     1931
+x0_male5        38.47      0.88    36.52    39.96 1.00     4562     2180
+x0_male6        41.96      0.39    41.18    42.70 1.00     5524     2704
+x0_male7        40.60      0.68    39.20    41.82 1.00     6539     2973
+x0_male8        39.74      0.55    38.63    40.81 1.00     5978     2674
+x0_male9        38.89      0.64    37.53    40.06 1.00     4379     2072
+x0_male10       34.86      1.29    32.10    37.16 1.00     3517     1535
+x0_male11       38.38      0.89    36.52    39.91 1.00     4700     3019
+x0_male12       37.57      0.95    35.46    39.24 1.00     6090     2482
+y0_Intercept   113.58     23.65    66.58   161.39 1.00      673     1110
+
+Family Specific Parameters: 
+      Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+shape     3.16      0.11     2.95     3.37 1.00     5899     3261
+
+Draws were sampled using sampling(NUTS). For each parameter, Bulk_ESS
+and Tail_ESS are effective sample size measures, and Rhat is the potential
+scale reduction factor on split chains (at convergence, Rhat = 1).
+
+
+[1] "brms: groups_1, individual"
+
+STARTING SAMPLER FOR MODEL 'anon_model' NOW.
+ Family: negbinomial 
+  Links: mu = identity; shape = identity 
+Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
+         x0 ~ (1 || male)
+         y0 ~ -1 + male
+   Data: data (Number of observations: 1920) 
+  Draws: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+         total post-warmup draws = 4000
+
+Group-Level Effects: 
+~male (Number of levels: 12) 
+                 Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+sd(x0_Intercept)     1.94      0.56     1.11     3.33 1.00     1573     2117
+
+Population-Level Effects: 
+             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+x0_Intercept    38.66      0.66    37.30    39.87 1.00     1521     2104
+y0_male1       196.56     15.51   169.69   230.59 1.00     5089     2429
+y0_male2        65.37      4.86    56.63    75.99 1.00     5114     3014
+y0_male3       255.48     20.14   221.03   297.36 1.00     5183     3093
+y0_male4        52.41      5.18    44.11    64.23 1.00     4203     3194
+y0_male5       137.23     11.29   118.18   162.25 1.00     4677     2431
+y0_male6       196.18     10.53   177.03   218.01 1.00     5688     2252
+y0_male7        48.15      3.38    42.22    55.27 1.00     5018     2311
+y0_male8        66.73      4.08    59.38    75.27 1.00     6890     2734
+y0_male9       167.08     12.05   146.34   193.20 1.00     5657     2651
+y0_male10       36.45      3.29    30.75    43.43 1.00     4483     2649
+y0_male11      134.29     11.14   114.90   158.91 1.00     4292     3117
+y0_male12       10.98      0.95     9.26    13.11 1.00     5302     2654
+
+Family Specific Parameters: 
+      Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+shape     3.16      0.11     2.95     3.38 1.00     8311     2839
+
+Draws were sampled using sampling(NUTS). For each parameter, Bulk_ESS
+and Tail_ESS are effective sample size measures, and Rhat is the potential
+scale reduction factor on split chains (at convergence, Rhat = 1).
+
+
+[1] "brms: groups_1, groups_1"
+ Family: negbinomial 
+  Links: mu = identity; shape = identity 
+Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
+         x0 ~ (1 || male)
+         y0 ~ (1 || male)
+   Data: data (Number of observations: 1920) 
+  Draws: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+         total post-warmup draws = 4000
+
+Group-Level Effects: 
+~male (Number of levels: 12) 
+                 Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+sd(x0_Intercept)     1.90      0.56     1.10     3.29 1.00     1520     2195
+sd(y0_Intercept)    79.31     17.07    52.91   119.09 1.00     1126     1904
+
+Population-Level Effects: 
+             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+x0_Intercept    38.72      0.63    37.41    39.95 1.00     1297     1459
+y0_Intercept   113.89     23.82    66.15   161.34 1.00      634     1000
+
+Family Specific Parameters: 
+      Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+shape     3.16      0.11     2.95     3.38 1.00     4387     3042
+
+Draws were sampled using sampling(NUTS). For each parameter, Bulk_ESS
+and Tail_ESS are effective sample size measures, and Rhat is the potential
+scale reduction factor on split chains (at convergence, Rhat = 1).
+
+```
+
+#### Generate useful plots
+
+```{r}
+
+## Define fmax() which is used in the model and needs to be defined within R.
+## Ideally this would be done via expose_functions() in `brms`, but that's not working.
+gmax <- function(a, b) max(a,b)
+
+fmax <- Vectorize(max)
+
+plot(conditional_effects(fit), points = TRUE)
+
+```
+
+#### Compare Parameter Estimates to Truth
+
 
 ### Cruft
 ```{r}
@@ -500,9 +687,10 @@ if(! exists("rstan_model")) {
                              )
 }
 
-for(model in models) {
-    for(x_flag in flags_x) {
-        for(y_flag in flags_y) {
+model <- models[[1]]
+
+for(x_flag in flags_x) {
+    for(y_flag in flags_y) {
             
             desc <- paste0(model, ": ", x_flag, ", ", y_flag)
             curr_row <- which(fit_tbl$model == model &
@@ -671,10 +859,10 @@ for(model in models) {
                  )
             print(fit)
             fit_tbl[ curr_row, ]$fit <- list(fit)
-            
-        }
+        
     }
 }
+
 
 nb_fit_tbl <- fit_tbl
 
