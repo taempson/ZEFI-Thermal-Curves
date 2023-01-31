@@ -82,7 +82,10 @@ library(latex2exp)
 ## Load Data
 
 ```{r}
-load(file.path("input", "data.processing_2022-12-15.Rda"),
+input_dir <- file.path("input")
+output_dir <- file.path("output")
+
+load(file.path(input_dir, "data.processing_2022-12-15.Rda"),
      verbose = TRUE)
 
 
@@ -128,11 +131,16 @@ data_ind <- data_ind %>% filter(temp < 38) %>%
     ungroup()
 
 summary(data_ind)
+n_male <- length(unique(data_ind$male))
 
 ## for calculation of 'theta_bar' (size in `rnbinom`) see note in `Set Up Simulate Data`
 summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_simple.est), y0_sd = sd(y0_simple.est), phi_bar = median(phi_ind), theta_bar = y0_bar^2/(y0_sd^2 - y0_bar))
+comment(summary_stats) <- "summary stats for observed bird motifs"
 
-n_male <- length(unique(data_ind$male))
+save(summary_stats, file = file.path(output_dir, "obs_summary_stats.Rda"))
+
+
+
 
 ```
 
@@ -208,10 +216,13 @@ sd_temp_mean <- function(temp_target) {
     sqrt(var_temp_mean(temp_target))
     }
 
+two_piece_model <- function(temp, y0, x0, xmax, theta) {
+  ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(xmax-x0)))
+}
 
 sim_nb_counts <- function(temp, y0, x0, xmax, theta) {
     ## Calculate expected value given parametes
-    mu <- ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(xmax-x0))) 
+    mu <- two_piece_mode(temp, y0, x0, xmax, theta)
                                         #print(paste("size: ", size, "count: ", count))
     rnbinom(1, size = theta, mu = mu)
 }
@@ -236,6 +247,10 @@ sim_qpoisson_counts <- function(temp, y0, x0, xmax, phi) {
 - Parameter values in this tibble will be used to create simulated data.
 
 ```{r}
+
+data_sim_file <- file.path(output_dir, "data_sim_tbl")
+recreate_simulated_data <- FALSE
+
 phi <- summary_stats$phi_bar ## overdispersion parameter
 theta <- summary_stats$theta_bar ## size parameter
 y0_bar <- summary_stats$y0_bar
@@ -243,76 +258,84 @@ y0_sd <- summary_stats$y0_sd
 xmax <- 46
 n_male <- 12
 
+## Simulate data if it doesn't exist or if desired
 
-## Generate 'true' parameters
-## If TRUE, replace estimated y_0 with simulated values,
-## else use estimates from observed data 
-y_flags <- c("uniform_1", "uniform_2", "groups_1", "groups_2")
-x_flags <- y_flags
+if( ! file.exists(data_sim_file) | recreate_simulated_data) {
+  ## Generate 'true' parameters
+  ## If TRUE, replace estimated y_0 with simulated values,
+  ## else use estimates from observed data 
+  y_flags <- c("uniform_1", "uniform_2", "groups_1", "groups_2")
+  x_flags <- y_flags
 
-data_sim <- tibble()
+  data_sim <- tibble()
 
-replicates <- c(2, 8, 32)
-temp_target <- c(30, 38, 40, 42, 44)
+  replicates <- c(2, 8, 32)
+  temp_target <- c(30, 38, 40, 42, 44)
 
-set.seed(2022)
+  set.seed(2022)
 
-for(sampling_dist in c("qpoisson", "nb")) {
+  for(sampling_dist in c("qpoisson", "nb")) {
     for(x_flag in x_flags) {
-        for(y_flag in y_flags) {
-            for(n_reps in replicates) {
+      for(y_flag in y_flags) {
+        for(n_reps in replicates) {
 
-                y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd) %>%
-                    rename(y0 = parm, yy = grp)
-                x0_sim <- sim_parms(flag = x_flag, n_male = n_male, mean = 39, sd = 1, min = 35, max = 45.9)  %>%
-                    rename(x0 = parm, xx = grp)
+          y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd) %>%
+            rename(y0 = parm, yy = grp)
+          x0_sim <- sim_parms(flag = x_flag, n_male = n_male, mean = 39, sd = 1, min = 35, max = 45.9)  %>%
+            rename(x0 = parm, xx = grp)
 
-                x0_y0_sim <- full_join(x0_sim, y0_sim, by = "index") %>%
-                    relocate(index) ## move index to first column
+          x0_y0_sim <- full_join(x0_sim, y0_sim, by = "index") %>%
+            relocate(index) ## move index to first column
 
 
-                ## Create relevant subset data matrix
-                data_parms <- crossing(sampling_dist = sampling_dist,
-                                       x0_y0_sim,
-                                       temp_target = temp_target,
-                                       n_reps = n_reps,
-                                       rep = 1:n_reps,
-                                       x_flag = x_flag,
-                                       y_flag = y_flag)
+          ## Create relevant subset data matrix
+          data_parms <- crossing(sampling_dist = sampling_dist,
+                                 x0_y0_sim,
+                                 temp_target = temp_target,
+                                 n_reps = n_reps,
+                                 rep = 1:n_reps,
+                                 x_flag = x_flag,
+                                 y_flag = y_flag)
 
-                data_parms <- data_parms %>%
-                    rowwise() %>%
-                    mutate(temp_sd = sd_temp_mean(temp_target),
-                           temp_mean = min(rnorm(1, mean = temp_target, sd = temp_sd), 45.9)) %>% 
-                    select(-temp_sd)
+          data_parms <- data_parms %>%
+            rowwise() %>%
+            mutate(temp_sd = sd_temp_mean(temp_target),
+                   temp_mean = min(rnorm(1, mean = temp_target, sd = temp_sd), 45.9)) %>% 
+            select(-temp_sd)
 
-                summary(data_parms)
-                
-                data_tmp <- switch(sampling_dist,
-                                   qpoisson = {
-                                       data_parms %>%
-                                           mutate(motif_count= sim_qpoisson_counts(temp_mean, y0, x0, xmax, phi))},
-                                   nb = {
-                                       data_parms %>%
-                                           mutate(motif_count = sim_nb_counts(temp_mean, y0, x0, xmax, theta))
-                                   }
-                                   )
-                
-                if(nrow(data_sim) == 0) {
-                    data_sim <- data_tmp
-                } else {
-                    data_sim <- bind_rows(data_sim, data_tmp)
-                }
-            }
+          summary(data_parms)
+          
+          data_tmp <- switch(sampling_dist,
+                             qpoisson = {
+                               data_parms %>%
+                                 mutate(motif_count= sim_qpoisson_counts(temp_mean, y0, x0, xmax, phi))},
+                             nb = {
+                               data_parms %>%
+                                 mutate(motif_count = sim_nb_counts(temp_mean, y0, x0, xmax, theta))
+                             }
+                             )
+          
+          if(nrow(data_sim) == 0) {
+            data_sim <- data_tmp
+          } else {
+            data_sim <- bind_rows(data_sim, data_tmp)
+          }
         }
+      }
     }
+  }
+
+  ## undo 'rowwise'
+  data_sim <- data_sim %>% ungroup()
+
+  save(data_sim, file = data_sim_file)
+} else {
+  load(data_sim_file)
 }
-
-
-
 ```
 
 # Fit Models
+
 ## Common Parameters
  
 ```{r}
@@ -338,18 +361,19 @@ n_chains <- n_cores
 ## Simulated Data
 
 
-### Analyze `x ~ groups_1, y ~ groups_1`
+### Analyze `x ~ groups_1|2, y ~ groups_1|2`
 #### Set Up Data
 ```{r}
 
-x_f <- "groups_1"
-y_f <- "groups_1"
-sampling_d <- "nb"
+
+x_flag_data <- "groups_2"
+y_flag_data <- "groups_2"
+sampling_dist <- "nb"
 n_r <- 32
 
-data <- data_sim %>% filter(x_flag == x_f,
-                            y_flag == y_f,
-                            sampling_dist == sampling_d,
+data <- data_sim %>% filter(x_flag == x_flag_data,
+                            y_flag == y_flag_data,
+                            sampling_dist == sampling_dist,
                             n_reps == n_r) %>%
     rename(temp = temp_mean, male = index) %>%
     rename(y = motif_count, x = temp) %>%
@@ -361,12 +385,11 @@ data <- data_sim %>% filter(x_flag == x_f,
 
 ##### `x0` and `y0` Parameter Structure: Individual
 
-Working with `groups_1` data, but try to estimate each individual's `x0` and `y0`
+Working with `groups_2` data
 
 ```{r}
-
-adapt_delta <- 0.975
-flags <- c("individual", "groups_1")
+adapt_delta <- 0.9
+flags <- c("groups_1", "groups_2")
 models <- c("brms")
 flags_x <- flags
 flags_y <- flags
@@ -395,13 +418,14 @@ model = models[[1]]
 for(x_flag in flags_x) {
   for(y_flag in flags_y) {
 
-      ## Set up variables for saving model and fit
-      desc <- paste0(model, ": ", x_flag, ", ", y_flag)
-      curr_row <- which(fit_tbl$model == model &
-                        fit_tbl$x0 == x_flag &
+    ## Set up variables for saving model and fit
+    desc <- paste0(model, ": ", x_flag, ", ", y_flag)
+    curr_row <- which(fit_tbl$model == model &
+                          fit_tbl$x0 == x_flag &
                         fit_tbl$y0 == y_flag)
-      fit_tbl[ curr_row, ]$desc <- desc
-      print(desc)
+    fit_tbl[ curr_row, ]$desc <- desc
+
+    print(desc)
 
     ## Parameter Structure
     x_form <- switch(x_flag,
@@ -434,10 +458,12 @@ fit <- brm(nlform,
            family = negbinomial(link = "identity", link_shape = "identity"),
            prior = my_priors,
            iter = iter,
-           verbose = 2, # 0, 1, or 2. 1 is default
-           refresh = 0, # turn off sample number updates
+           silent = ifelse(interactive(), 1, 2)), # 0, 1, or 2. 1 is default
            control = list(adapt_delta = adapt_delta,
-                          max_treedepth = 12),
+                          max_treedepth = 12,
+                          ## Only print out sampling progress if in interactive mode
+                          refresh = ifelse(interactive(),max(iter/10, 1), 0)
+                          ),
            chains = n_chains,
            cores = n_cores,
            save_model = "brms_two.piece.stan")
@@ -448,12 +474,16 @@ fit <- brm(nlform,
       #fit_exp <- expose_functions(fit) , vectorize = TRUE)
       #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
       print(fit)     
-      fit_tbl[ curr_row, ]$fit <- list(fit)
+    fit_tbl[ curr_row, ]$fit <- list(fit)
+
+    ## Print and then clear warnings
+    warnings(summary)
+    warning(immediate. = FALSE)
+
   }
 }
 
-
-save(file = "fit_tbl_groups_1_data_n32.Rda", fit_tbl)
+save(file = file.path(output_dir, paste0("fit_tbl_data_", x_flag_data, "_", y_flag_data, "_n32.Rda")), fit_tbl)
 
 ```
 
@@ -461,6 +491,8 @@ save(file = "fit_tbl_groups_1_data_n32.Rda", fit_tbl)
 
 - Text indicating model is repeatedly recompiled has been removed.
 
+
+###### Analysis of `groups_1` Data
 
 ```{verbatim}
 
@@ -643,6 +675,9 @@ plot(conditional_effects(fit), points = TRUE)
 ```
 
 #### Compare Parameter Estimates to Truth
+
+
+
 
 
 ### Cruft
