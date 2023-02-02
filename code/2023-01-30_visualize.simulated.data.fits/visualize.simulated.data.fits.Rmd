@@ -112,8 +112,8 @@ Simulated data is based on these values
 
 load(file.path(input_dir, "obs_summary_stats.Rda"), verbose = TRUE)
 
-xx_means <- c(39-2, 39+2) ## values based on mean = 39, sd = 1 and n_sd = 2
-yy_means <- summary_stats$y0_bar + c(-2, 2)*summary_stats$y0_sd
+x0_group_means <- c(39-2, 39+2) ## values based on mean = 39, sd = 1 and n_sd = 2
+y0_group_means <- summary_stats$y0_bar + c(-2, 2)*summary_stats$y0_sd
 
 
 ```
@@ -134,7 +134,7 @@ print(input_tmp)
 ## Here that's the `walk()` function's environment.
 walk(input_tmp,  ~ load(.x, envir = .GlobalEnv, verbose = TRUE))
 
-data <- data_sim %>% filter(x_flag == x_flag_data & y_flag == x_flag_data, sampling_dist =="nb", n_reps == 32) ## could try to add column with strings for faced_grid labelling mutate(factor(xx, labels = c("mean(x_0) =  
+data <- data_sim %>% filter(x_flag == x_flag_data & y_flag == x_flag_data, sampling_dist =="nb", n_reps == 32) ## could try to add column with strings for faced_grid labelling mutate(factor(x0_group, labels = c("mean(x_0) =  
 ```
 
 A snapshot of the data looks like this:
@@ -146,23 +146,23 @@ head(data, 10)
 
 ```{r fig.width = tiny_width, fig.height = tiny_height}
 
-data_parms <- data[, c("index", "x0", "xx", "y0", "yy")] %>% unique()
+data_parms <- data[, c("index", "x0", "x0_group", "y0", "y0_group")] %>% unique()
 
 p <- ggplot(data_parms)b
 
 hist_x0_vals <- p + 
-  aes(x0, fill = factor(xx)) +
+  aes(x0, fill = x0_group) +
   geom_histogram(binwidth = 0.75)
 last_plot()
 hist_y0_vals <- p +
-  aes(y0, fill = factor(yy)) +
+  aes(y0, fill = y0_group) +
   geom_histogram(binwidth = 0.75)
 last_plot()
 
 scatter_x0_vs_y0 <- p +
-  aes(x = x0, y = y0, color = interaction(xx, yy, sep=':')) + 
+  aes(x = x0, y = y0, color = interaction(x0_group, y0_group, sep=':')) + 
   geom_point() +
-    guides(color=guide_legend(title="groups\n  xx:yy"))
+    guides(color=guide_legend(title="groups\n  x_0:y_0"))
   last_plot()
 
 ```
@@ -171,9 +171,9 @@ scatter_x0_vs_y0 <- p +
 ```{r}
 
 plot <- ggplot(data) +
-  aes(y = motif_count, x = temp_mean, color = factor(index)) +
+  aes(y = motif_count, x = temp_mean, color = index) +
   geom_point() +
-  facet_grid(rows = vars(xx), cols = vars(yy), scales = "free_y")
+  facet_grid(rows = vars(x0_group), cols = vars(y0_group), scales = "free_y")
 last_plot()
 ```
 
