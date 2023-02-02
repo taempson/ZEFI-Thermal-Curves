@@ -287,14 +287,16 @@ if( ! file.exists(data_sim_file) | recreate_simulated_data) {
                 for(n_reps in replicates) {
 
                     y0_sim <- sim_parms(flag = y_flag, n_male = n_male, mean = y0_bar, sd = y0_sd, n_sd = 3) %>%
-                      rename(y0 = parm, y_group = grp, y0_bar = bar, y0_sd = sd)
+                      rename(y0 = parm, y0_group = grp, y0_bar = bar, y0_sd = sd)
                   
                     x0_sim <- sim_parms(flag = x_flag, n_male = n_male, mean = x0_bar, sd = x0_sd, min = 35, max = 45.9)  %>%
-                        rename(x0 = parm, x_group = grp, x0_bar = bar, x0_sd = sd)
+                        rename(x0 = parm, x0_group = grp, x0_bar = bar, x0_sd = sd)
                     
                     x0_y0_sim <- full_join(x0_sim, y0_sim, by = "index") %>%
                         relocate(index) %>% ## move index to first column
-                        mutate(x_group = factor(x_group), y_group = factor(y_group))
+                        mutate(x0_group = factor(x0_group),
+                               y0_group = factor(y0_group),
+                               index = factor(index))
 
                     ## Create relevant subset data matrix
                     parms_tmp <- crossing(sampling_dist = sampling_dist,
@@ -389,28 +391,27 @@ dim(data)
 p <- ggplot(parms)
 
 hist_x0_vals <- p + 
-    aes(x0, fill = factor(x_group)) +
+    aes(x0, fill = x0_group) +
   geom_histogram(binwidth = 0.75) 
 last_plot()
 
 hist_y0_vals <- p +
-    aes(y0, fill = factor(y_group)) +
+    aes(y0, fill = y0_group) +
     geom_histogram(binwidth = 25)
 last_plot()
 
 scatter_x0_vs_y0 <- p +
-  aes(x = x0, y = y0, color = interaction(x_group, y_group, sep=':')) + 
+  aes(x = x0, y = y0, color = interaction(x0_group, y0_group, sep=':')) + 
   geom_point() +
-    guides(color=guide_legend(title="groups\n  x_group:y_group"))
+    guides(color=guide_legend(title="groups\n  x0_group:y0_group"))
   last_plot()
 
 
 plot <- ggplot(data) +
-  aes(y = motif_count, x = temp_mean, color = factor(index)) +
+  aes(y = motif_count, x = temp_mean, color = index) +
   geom_point() +
-  facet_grid(rows = vars(x_group), cols = vars(y_group)) #, scales = "free_y")
+  facet_grid(rows = vars(x0_group), cols = vars(y0_group)) #, scales = "free_y")
 last_plot()
-
 
 ```
 
@@ -511,14 +512,14 @@ for(x_flag in flags_x) {
         ## Parameter Structure
         x_form <- switch(x_flag,
                          individual = formula(x0 ~ -1 + male), 
-                         groups_1 = formula(x0 ~ (1|| male)), # no need for x_group when there's only 1 group
-                         groups_2 = formula(x0 ~ 1 + (x_group|| male))
+                         groups_1 = formula(x0 ~ (1|| male)), # no need for x0_group when there's only 1 group
+                         groups_2 = formula(x0 ~ 1 + (x0_group|| male))
                          )
         
         y_form <- switch(y_flag,
                          individual = formula(y0 ~ -1 + male), 
                          groups_1 = formula(y0 ~ (1|| male)),
-                         groups_2 = formula(y0 ~ 1 + (y_group|| male))
+                         groups_2 = formula(y0 ~ 1 + (y0_group|| male))
                          )
         nlform <- bf(
             y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
