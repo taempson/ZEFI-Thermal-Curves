@@ -360,7 +360,7 @@ if( ! file.exists(data_sim_file) | recreate_simulated_data) {
 ```{r plot_parameters}
 
 sampling_d <- "nb"
-n_reps <- replicates[[2]]
+n_reps <- replicates[[1]]
 
 ## Use `rlang` injection paradigm
 ## `!!` tels R to evaluate argument before evaluating function, so it uses the
@@ -422,7 +422,6 @@ last_plot()
 
 ```{r}
 
-iter <- 800
 xmax <- 46
 x0max <- xmax - 0.5;
 x0min <- 20;
@@ -444,7 +443,9 @@ n_chains <- n_cores
 
 
 ### Analyze `x ~ groups_1|2, y ~ groups_1|2`
+
 #### Set Up Data
+
 ```{r}
 
 
@@ -453,7 +454,7 @@ y_flag_data <- "groups_2"
 sampling_dist <- "nb"
 n_r <- 32
 
-data <- data_sim %>% filter(x_flag == x_flag_data,
+data_base <- data_sim %>% filter(x_flag == x_flag_data,
                             y_flag == y_flag_data,
                             sampling_dist == sampling_dist,
                             n_reps == n_r) %>%
@@ -469,8 +470,9 @@ data <- data_sim %>% filter(x_flag == x_flag_data,
 Working with `groups_2` data
 
 ```{r}
-adapt_delta <- 0.95
-flags <- c("groups_2")
+adapt_delta <- 0.875 #0.95
+iter <- 1000
+flags <- c("uniform_1", "uniform_2", "groups_1", "groups_2")
 models <- c("brms")
 flags_x <- flags
 flags_y <- flags
@@ -487,11 +489,12 @@ fit_tbl <- crossing(model = models,
                     loo = list(NA)
                     )
 
-
 ## Priors
 
-my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 1) +
-    prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
+my_priors <- prior(
+  # uniform(10, 1000), nlpar = "y0", lb = 10) +
+  normal(150, 200), nlpar = "y0", lb = 10) +
+  prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
 
 
 model = models[[1]]
@@ -507,20 +510,27 @@ for(x_flag in flags_x) {
         fit_tbl[ curr_row, ]$desc <- desc
 
         print(desc)
+      ## Refresh data in case x0_group or y0_group are all set to 1
+      data <- data_base
 
+      ## Set flags based on fitted model structure
+      if(x_flag %in% c("uniform_1", "groups_1")) data <- mutate(data, x0_group = 1)
+      if(y_flag %in% c("uniform_1", "groups_1")) data <-mutate(data, y0_group = 1)
+      
         ## Parameter Structure
         x_form <- switch(x_flag,
-                         individual = formula(x0 ~ -1 + male), 
-                         groups_1 = formula(x0 ~ (1|| male)), # no need for x0_group when there's only 1 group
-                         #groups_2 = formula(x0 ~ (1||male) + x0_group)
-                         groups_2 = formula(x0 ~ (x0_group||male) )
+                         uniform_1 = formula(x0 ~ -1 + male),
+                         uniform_2 = formula(x0 ~ -1 + male + x0_group),
+                         # Don't include x0_group info which is determined by the data set
+                         groups_1 = formula(x0 ~ (1||male)), 
+                         groups_2 = formula(x0 ~ (1||male) + x0_group)
                          )
         
         y_form <- switch(y_flag,
-                         individual = formula(y0 ~ -1 + male), 
-                         groups_1 = formula(y0 ~ (1|| male)),
-                         #groups_2 = formula(y0 ~ (1|| male) + y0_group)
-                         groups_2 = formula(y0 ~ (y0_group||male))
+                         uniform_1 = formula(y0 ~ -1 + male),
+                         uniform_2 = formula(y0 ~ -1 + male + y0_group),
+                         groups_1 = formula(y0 ~ (1|| male)), 
+                         groups_2 = formula(y0 ~ (1|| male) + y0_group)
                          )
         nlform <- bf(
             y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
@@ -528,9 +538,13 @@ for(x_flag in flags_x) {
             y_form,
             nl = TRUE)
 
-        if(TRUE) get_prior(nlform, data = data, family = negbinomial(link = "identity", link_shape = "identity"))
+        if(TRUE) print(get_prior(nlform, data = data, family = negbinomial(link = "identity", link_shape = "identity")))
 
-
+#    }}
+##
+#```
+#
+#```{r}
         fit <- brm(nlform,
                    data = data,
                    ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
@@ -561,11 +575,11 @@ stan
     ## Print and then clear warnings
     warnings(summary)
     warning(immediate. = FALSE)
-
+save(file = file.path(output_dir, paste0("fit_tbl_data.Rda-tmp")), fit_tbl)
 }
 }
 
-save(file = file.path(output_dir, paste0("fit_tbl_data_", x_flag_data, "_", y_flag_data, "_n32.Rda")), fit_tbl)
+save(file = file.path(output_dir, paste0("fit_tbl_data_", x_flag_data, "_", y_flag_data, "_n_reps_", n_reps, ".Rda")), fit_tbl)
 
 ```
 
@@ -632,16 +646,16 @@ https://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup
 
 Family: negbinomial 
   Links: mu = identity; shape = identity 
-Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
+FormOBBula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
          x0 ~ -1 + male
          y0 ~ (1 || male)
-   Data: data (Number of observations: 1920) 
-  Draws: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+ AOA  DBata: data (Number of observations: 1920) 
+~  DrawsOB: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
          total post-warmup draws = 4000
 
 Group-Level Effects: 
 ~male (Number of levels: 12) 
-                 Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+          OBB       Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
 sd(y0_Intercept)    79.47     17.63    53.35   120.20 1.01     1025     1510
 
 Population-Level Effects: 
@@ -655,7 +669,7 @@ x0_male6        41.96      0.39    41.18    42.70 1.00     5524     2704
 x0_male7        40.60      0.68    39.20    41.82 1.00     6539     2973
 x0_male8        39.74      0.55    38.63    40.81 1.00     5978     2674
 x0_male9        38.89      0.64    37.53    40.06 1.00     4379     2072
-x0_male10       34.86      1.29    32.10    37.16 1.00     3517     1535
+x0_male10    BOB   34.86      1.29    32.10    37.16 1.00     3517     1535
 x0_male11       38.38      0.89    36.52    39.91 1.00     4700     3019
 x0_male12       37.57      0.95    35.46    39.24 1.00     6090     2482
 y0_Intercept   113.58     23.65    66.58   161.39 1.00      673     1110
@@ -666,12 +680,12 @@ shape     3.16      0.11     2.95     3.37 1.00     5899     3261
 
 Draws were sampled using sampling(NUTS). For each parameter, Bulk_ESS
 and Tail_ESS are effective sample size measures, and Rhat is the potential
-scale reduction factor on split chains (at convergence, Rhat = 1).
+scale reduction OBBfactor on split chains (at convergence, Rhat = 1).
 
-
+B
 [1] "brms: groups_1, individual"
 
-STARTING SAMPLER FOR MODEL 'anon_model' NOW.
+SOB:ODOODODODODD SAMPLER FOR MODEL 'anon_model' NOW.
  Family: negbinomial 
   Links: mu = identity; shape = identity 
 Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
@@ -689,19 +703,27 @@ sd(x0_Intercept)     1.94      0.56     1.11     3.33 1.00     1573     2117
 Population-Level Effects: 
              Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
 x0_Intercept    38.66      0.66    37.30    39.87 1.00     1521     2104
-y0_male1       196.56     15.51   169.69   230.59 1.00     5089     2429
+y0_male1       BOB196.56     15.51   169.69   230.59 1.00     5089     2429
 y0_male2        65.37      4.86    56.63    75.99 1.00     5114     3014
 y0_male3       255.48     20.14   221.03   297.36 1.00     5183     3093
 y0_male4        52.41      5.18    44.11    64.23 1.00     4203     3194
 y0_male5       137.23     11.29   118.18   162.25 1.00     4677     2431
 y0_male6       196.18     10.53   177.03   218.01 1.00     5688     2252
-y0_male7        48.15      3.38    42.22    55.27 1.00     5018     2311
+y0_male7        48OBOBOB.15      3.38    42.22    55.27 1.00     5018     2311
 y0_male8        66.73      4.08    59.38    75.27 1.00     6890     2734
 y0_male9       167.08     12.05   146.34   193.20 1.00     5657     2651
-y0_male10       36.45      3.29    30.75    43.43 1.00     4483     2649
+y0_male10       36.45   OBOB   3.29    30.75    43.43 1.00     4483     2649
 y0_male11      134.29     11.14   114.90   158.91 1.00     4292     3117
-y0_male12       10.98      0.95     9.26    13.11 1.00     5302     2654
+y0_male12       10.98      0B.95     9.26    13.11 1.00     5302     2654
+5F
 
+
+
+
+
+
+
+t
 Family Specific Parameters: 
       Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
 shape     3.16      0.11     2.95     3.38 1.00     8311     2839
