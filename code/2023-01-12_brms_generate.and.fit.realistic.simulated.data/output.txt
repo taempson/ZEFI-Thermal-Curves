@@ -1,0 +1,1434 @@
+
+R version 4.2.2 Patched (2022-11-10 r83330) -- "Innocent and Trusting"
+Copyright (C) 2022 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> setwd('/home/mikeg/Repositories/ZEFI-Thermal-Curves/code/2023-01-12_brms_generate.and.fit.realistic.simulated.data/')
+> Error in ss(file, echo = visibly, local = local, print.eval = output,  : 
+  /tmp/brms_two.piece_create.and.fit.simulated.data.Rmd!aEceou:10:23: unexpected symbol
+9:                       echo = TRUE  # show R code
+10:                       fig.width
+                          ^
+> . + > # install packages user might not have by replacing FALSE with TRUE
+> 
+> ## load libraries
+> library(stats)
+> library(MASS) # provides negative binomial fitting:  glm.nb
+> library(ggplot2)
+> library(ggpubr)
+> library(grid)
+> library(gridExtra)
+> library(GGally)
+Registered S3 method overwritten by 'GGally':
+  method from   
+  +.gg   ggplot2
+> library(broom)
+> library(tidyverse)
+── Attaching packages ──────────────────────────────────────────── tidyverse 1.3.2 ──
+✔ tibble  3.1.8     ✔ dplyr   1.1.0
+✔ tidyr   1.3.0     ✔ stringr 1.5.0
+✔ readr   2.1.3     ✔ forcats 1.0.0
+✔ purrr   1.0.1     
+── Conflicts ─────────────────────────────────────────────── tidyverse_conflicts() ──
+✖ dplyr::combine() masks gridExtra::combine()
+✖ dplyr::filter()  masks stats::filter()
+✖ dplyr::lag()     masks stats::lag()
+✖ dplyr::select()  masks MASS::select()
+> library(viridisLite)
+> library(cmdstanr)
+This is cmdstanr version 0.5.3
+- CmdStanR documentation and vignettes: mc-stan.org/cmdstanr
+- CmdStan path: /home/mikeg/.cmdstan/cmdstan-2.31.0
+- CmdStan version: 2.31.0
+> library(rstan)
+Loading required package: StanHeaders
+
+rstan version 2.26.13 (Stan version 2.26.1)
+
+For execution on a local, multicore CPU with excess RAM we recommend calling
+options(mc.cores = parallel::detectCores()).
+To avoid recompilation of unchanged Stan programs, we recommend calling
+rstan_options(auto_write = TRUE)
+For within-chain threading using `reduce_sum()` or `map_rect()` Stan functions,
+change `threads_per_chain` option:
+rstan_options(threads_per_chain = 1)
+
+
+Attaching package: ‘rstan’
+
+The following object is masked from ‘package:tidyr’:
+
+    extract
+
+> options(mc.cores = 4) #(parallel::detectCores()-2))
+> rstan_options(auto_write = TRUE)
+> library(brms)
+Error in library(brms) : there is no package called ‘brms’
+> . + > input_dir <- file.path("input")
+> output_dir <- file.path("output")
+> load(file.path(input_dir, "data.processing_2022-12-15.Rda"),
++      verbose = TRUE)
+Loading objects:
+  motif_data
+  motif_data_40C
+  motif_stats
+  motif_stats_40C
+  bird_bill_data
+> motif_data
+# A tibble: 146 × 28
+   male  round trial_round motif…¹ motif…² temp_…³ humid…⁴ chamber date  counter
+   <fct> <dbl>       <dbl>   <int>   <dbl>   <dbl>   <dbl> <fct>   <chr> <chr>  
+ 1 T229      1           1       0 0          45.8      NA 6       02/1… KIM    
+ 2 T229      1           2      24 0.0131     42.3      NA 6       02/1… KIM    
+ 3 T229      1           3     114 0.0622     40.7      NA 6       02/1… KIM    
+ 4 T229      1           4     198 0.108      26.2      NA 6       02/1… KIM    
+ 5 T229      1           5     315 0.172      34.9      NA 6       02/2… KIM    
+ 6 T231      1           1      57 0.0431     42.8      NA 2       02/1… RAS    
+ 7 T231      1           2       7 0.00529    45.0      NA 2       02/1… RAS    
+ 8 T231      1           3      86 0.0650     41.1      NA 2       02/1… KIM    
+ 9 T231      1           4      24 0.0181     27.2      NA 2       02/1… RAS    
+10 T231      1           5     215 0.162      36.5      NA 2       02/2… RAS    
+# … with 136 more rows, 18 more variables: test_order <int>, temp_target <dbl>,
+#   temp_median <dbl>, humdity_mean <dbl>, motif_rate <dbl>, mass <dbl>,
+#   n_obs_completed <lgl>, motif_count_plus_1 <int>,
+#   log_motif_count_plus_1 <dbl>, temp <dbl>, n_obs_round <int>, n_obs <int>,
+#   trial <int>, motif_prop_round <dbl>, weights <dbl>, svp <dbl>, vpd <dbl>,
+#   vpd_offset <dbl>, and abbreviated variable names ¹​motif_count, ²​motif_prop,
+#   ³​temp_mean, ⁴​humidity_mean
+# ℹ Use `print(n = ...)` to see more rows, and `colnames()` to see all variable names
+> . + > filter_data <- TRUE
+> if(filter_data) {
++     males_filtered_disp <- motif_stats_40C %>%
++         filter(dispersion < 50) %>%
++         pull(male)
++ 
++     males_filtered_mean <- motif_stats %>%
++         filter(mean > 10) %>% # changing from 10 to 40 removes previous male 7 (T258)
++         pull(male)
++ 
++     male_v .... [TRUNCATED] 
+> data_ind <- motif_data %>%
++     filter(male %in% male_vector) %>%
++     mutate(male = droplevels(male)) %>%
++     mutate(index = as.integer(male)) %>%
++     mutate(male = as.character(male)) %>% 
++     arrange(index) %>%
++     select(male, index, motif_count, temp_target, temp, round, trial_round .... [TRUNCATED] 
+> stats_ind <- motif_stats %>%
++     filter(male %in% male_vector) 
+> data_ind <- data_ind %>% filter(temp < 38) %>%
++     group_by(male) %>% mutate(y0_simple.est = mean(motif_count), phi_ind = var(motif_count)/y0_simple.est) %>% ## phi is overdispersion parameter
++     ungroup()
+> summary(data_ind)
+     male               index         motif_count     temp_target   
+ Length:38          Min.   : 1.000   Min.   :  0.0   Min.   :27.00  
+ Class :character   1st Qu.: 3.000   1st Qu.: 52.5   1st Qu.:27.00  
+ Mode  :character   Median : 5.500   Median : 89.0   Median :35.00  
+                    Mean   : 5.579   Mean   :112.9   Mean   :31.61  
+                    3rd Qu.: 8.000   3rd Qu.:167.2   3rd Qu.:35.00  
+                    Max.   :11.000   Max.   :425.0   Max.   :40.00  
+      temp           round        trial_round        date          
+ Min.   :25.71   Min.   :1.000   Min.   :1.000   Length:38         
+ 1st Qu.:29.51   1st Qu.:1.000   1st Qu.:2.000   Class :character  
+ Median :33.52   Median :3.000   Median :3.000   Mode  :character  
+ Mean   :31.88   Mean   :2.211   Mean   :3.105                     
+ 3rd Qu.:34.34   3rd Qu.:3.000   3rd Qu.:4.000                     
+ Max.   :37.64   Max.   :3.000   Max.   :6.000                     
+   counter          y0_simple.est       phi_ind       
+ Length:38          Min.   : 24.00   Min.   :  0.142  
+ Class :character   1st Qu.: 64.33   1st Qu.:  6.955  
+ Mode  :character   Median : 93.20   Median : 12.986  
+                    Mean   :112.89   Mean   : 33.913  
+                    3rd Qu.:166.38   3rd Qu.: 48.000  
+                    Max.   :246.25   Max.   :128.361  
+> n_male <- length(unique(data_ind$male))
+> ## for calculation of 'theta_bar' (size in `rnbinom`) see note in `Set Up Simulate Data`
+> summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_simple.est), y0_sd = sd(y0_simple.est), phi_bar = median(phi_ind), theta_bar = y0_bar^2/(y0_sd^2 - y0_bar))
+> comment(summary_stats) <- "summary stats for observed bird motifs"
+> save(summary_stats, file = file.path(output_dir, "obs_summary_stats.Rda"))
+> . + > sim_parms <- function(flag = "uniform_1", n_male = 10, mean_global = 100, sd = 10, n_sd = 2, min = 10, max = 600) {
++ 
++     mean_low <- mean_global - n_sd * sd
++     mean_high <- mean_global + n_sd * sd
++     n_low <- ceiling(n_male/2)
++     n_high <- n_male - n_low
++     
++     switch(flag,
++    .... [TRUNCATED] 
+> var_temp_mean <- function(temp_target) {
++     ## Returns expected variance in temp_mean given temp_target
++     ## numbers from analysis in `code/2023-01-13_temp_target.vs.var/compare.temp_target.vs.var.Rmd`
++     var = max(0.891, -5.16 + 0.167 * temp_target)
++ 
++     return(var)
++ }
+> sd_temp_mean <- function(temp_target) {
++     sqrt(var_temp_mean(temp_target))
++ }
+> two_piece_model <- function(temp, y0, x0, xmax, theta) {
++     ifelse(temp < x0, y0, y0 * (1-(temp-x0)/(xmax-x0)))
++ }
+> sim_nb_counts <- function(temp, y0, x0, xmax, theta) {
++     ## Calculate expected value given parametes
++     mu <- two_piece_model(temp, y0, x0, xmax, theta)
++                                         #print(paste("size: ", size, "count: ", count))
++     rnbinom(1, size = theta, mu = mu)
++ }
+> sim_qpoisson_counts <- function(temp, y0, x0, xmax, phi) {
++ 
++     ## Calculate expected value given parametes
++     mu <- two_piece_model(temp, y0, x0, xmax, theta)
++     
++     ## calculate theta parameter based on mu and phi
++     theta = mu/(phi - 1)
++                                          .... [TRUNCATED] 
+> . + > parms_sim_file <- file.path(output_dir, "parms_sim_tbl")
+> data_sim_file <- file.path(output_dir, "data_sim_tbl")
+> recreate_simulated_data <- TRUE
+> phi <- summary_stats$phi_bar ## overdispersion parameter
+> theta <- summary_stats$theta_bar ## size parameter
+> y0_bar <- summary_stats$y0_bar ## make slightly larger
+> y0_sd <- summary_stats$y0_sd/3 ## assume there's more than one population and so make it smaller
+> x0_bar <- 39 ## based on vague prior knowledge
+> x0_sd <- 1 ## ditto
+> xmax <- 46
+> n_male <- 12
+> ## Simulate data if it doesn't exist or if desired
+> 
+> if( ! file.exists(data_sim_file) | recreate_simulated_data) {
++     ## Generate 'true' parameters
++     ## If TRUE, replace estimated y_0 with simulated values,
++     ## else use estimates from observed data 
++     y_flags <- c("uniform_1", " ..." ... [TRUNCATED] 
++ sampling_d <- "nb"
+> n_reps <- replicates[[2]]
+> ## Use `rlang` injection paradigm
+> ## `!!` tels R to evaluate argument before evaluating function, so it uses the
+> ## variable defined in the .globalEnvironment() rather than . of filter
+> ## See  https://stackoverflow.com/a/47171513/5322644
+> parms_tmp <- parms_sim %>%
++   filter(sampling_dist  .... [TRUNCATED] 
+> data_tmp <- data_sim %>%
++   filter(sampling_dist == !!sampling_dist,
++          n_reps == !!n_reps)
+> dim(parms_tmp)
+[1] 7680   16
+> x_flag <- "groups_2"
+> y_flag <- "groups_2"
+> parms <- parms_tmp %>% filter(x_flag == !!x_flag, y_flag == !!y_flag) %>%
++   select(-c(temp_mean, temp_target, rep)) %>%
++   unique()
+> dim(parms)
+[1] 12 13
+> data <- data_tmp %>% filter(x_flag == !!x_flag, y_flag == !!y_flag)
+> dim(data)
+[1] 480  17
+> p <- ggplot(parms)
+> hist_x0_vals <- p + 
++     aes(x0, fill = x0_group) +
++   geom_histogram(binwidth = 0.75) 
+> last_plot()
+> hist_y0_vals <- p +
++     aes(y0, fill = y0_group) +
++     geom_histogram(binwidth = 25)
+> last_plot()
+> scatter_x0_vs_y0 <- p +
++   aes(x = x0, y = y0, color = interaction(x0_group, y0_group, sep=':')) + 
++   geom_point() +
++     guides(color=guide_legend(title="groups\n  x0_group:y0_group"))
+>   last_plot()
+> plot <- ggplot(data) +
++   aes(y = motif_count, x = temp_mean, color = index) +
++   geom_point() +
++   facet_grid(rows = vars(x0_group), cols = vars(y0_group)) #, scales = "free_y")
+> last_plot()
++ iter <- 2000
+> xmax <- 46
+> x0max <- xmax - 0.5;
+> x0min <- 20;
+> y_xmax <- 0
+> y0_min <- 10
+> sd_y0_prior <- 200
+> alpha_theta_prior <- 10 ## exponential dist scale parameter for overdispersion theta in quasipoisson
+> alpha_phi_prior <- 0.01 ## gamma dist shape parameter for nb. brms default is 0.01
+> beta_phi_prior <- 0.01 ## gamma dist rate parameter for nb. brms default is 0.01
+> ## values to use for model predictions
+> x_for_predictions = seq(25, xmax, length.out = 100)
+> n_cores <- 4
+> n_chains <- n_cores
+> . + > x_flag_data <- "groups_2"
+> y_flag_data <- "groups_2"
+> sampling_dist <- "nb"
+> n_r <- 32
+> data <- data_sim %>% filter(x_flag == x_flag_data,
++                             y_flag == y_flag_data,
++                             sampling_dist == sampling_dist,
++                             n_reps == n_r) %>%
++     rename(temp = temp_mean, male = index) %>%
++     rename(y = motif_count, x =  .... [TRUNCATED] 
+> x_flag_data <- "groups_2"
+> y_flag_data <- "groups_2"
+> sampling_dist <- "nb"
+> n_r <- 32
+> data <- data_sim %>% filter(x_flag == x_flag_data,
++                             y_flag == y_flag_data,
++                             sampling_dist == sampling_dist,
++                             n_reps == n_r) %>%
++     rename(temp = temp_mean, male = index) %>%
++     rename(y = motif_count, x =  .... [TRUNCATED] 
+> adapt_delta <- 0.95
+> flags <- c("groups_1", "groups_2")
+> models <- c("brms")
+> flags_x <- flags
+> flags_y <- flags
+> N <- length(data)
+> fit_tbl <- crossing(model = models,
++                     x0 = flags_x, y0 = flags_y,
++                     desc = "NA_character",
++                     y0_group_list = list(NA),
++                     x0_group_list = list(NA),
++                     fit = list(NA),
++                     llik = list .... [TRUNCATED] 
+> ## Priors
+> 
+> my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 1) +
++     prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
+Error in prior(normal(150, 200), nlpar = "y0", lb = 1) (from brms_two.piece_create.and.fit.simulated.data.Rmd!SoU0Hu#22) : 
+  could not find function "prior"
+> library(brms)
+Error in library(brms) : there is no package called ‘brms’
+
+> 
+> library(brms)
+Loading required package: Rcpp
+Loading 'brms' package (version 2.18.0). Useful instructions
+can be found by typing help('brms'). A more detailed introduction
+to the package is available through vignette('brms_overview').
+
+Attaching package: ‘brms’
+
+The following object is masked from ‘package:rstan’:
+
+    loo
+
+The following object is masked from ‘package:stats’:
+
+    ar
+
+> + > adapt_delta <- 0.95
+> flags <- c("groups_1", "groups_2")
+> models <- c("brms")
+> flags_x <- flags
+> flags_y <- flags
+> N <- length(data)
+> fit_tbl <- crossing(model = models,
++                     x0 = flags_x, y0 = flags_y,
++                     desc = "NA_character",
++                     y0_group_list = list(NA),
++                     x0_group_list = list(NA),
++                     fit = list(NA),
++                     llik = list .... [TRUNCATED] 
+> ## Priors
+> 
+> my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 1) +
++     prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
+> model = models[[1]]
+> for(x_flag in flags_x) {
++     for(y_flag in flags_y) {
++ 
++         ## Set up variables for saving model and fit
++         desc <- paste0(model, ": ", x_flag, ", ", y_flag)
++         curr_row <- which(fit_tbl$model == model &
++                           fit_tbl$x0 == x_flag &
++                    .... [TRUNCATED] 
+[1] "brms: groups_1, groups_1"
+Compiling Stan program...
+Start sampling
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 1).
+Chain 1: Rejecting initial value:
+Chain 1:   Error evaluating the log probability at the initial value.
+Chain 1: Exception: neg_binomial_2_lpmf: Location parameter[1] is -0.204494, but must be positive finite! (in 'anon_model', line 77, column 4 to column 49)
+Chain 1: 
+Chain 1: Gradient evaluation took 0.003851 seconds
+Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 38.51 seconds.
+Chain 1: Adjust your expectations accordingly!
+Chain 1: 
+Chain 1: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 2).
+Chain 2: Rejecting initial value:
+Chain 2:   Error evaluating the log probability at the initial value.
+Chain 2: Exception: neg_binomial_2_lpmf: Location parameter[1441] is -0.0470986, but must be positive finite! (in 'anon_model', line 77, column 4 to column 49)
+Chain 2: Rejecting initial value:
+Chain 2:   Error evaluating the log probability at the initial value.
+Chain 2: Exception: neg_binomial_2_lpmf: Location parameter[1] is -8.55282, but must be positive finite! (in 'anon_model', line 77, column 4 to column 49)
+Chain 2: 
+Chain 2: Gradient evaluation took 0.004102 seconds
+Chain 2: 1000 transitions using 10 leapfrog steps per transition would take 41.02 seconds.
+Chain 2: Adjust your expectations accordingly!
+Chain 2: 
+Chain 2: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 3).
+Chain 3: 
+Chain 3: Gradient evaluation took 0.004337 seconds
+Chain 3: 1000 transitions using 10 leapfrog steps per transition would take 43.37 seconds.
+Chain 3: Adjust your expectations accordingly!
+Chain 3: 
+Chain 3: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 4).
+Chain 4: 
+Chain 4: Gradient evaluation took 0.005228 seconds
+Chain 4: 1000 transitions using 10 leapfrog steps per transition would take 52.28 seconds.
+Chain 4: Adjust your expectations accordingly!
+Chain 4: 
+Chain 4: 
+Chain 2: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 3: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 1: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 4: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 4: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 1: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 3: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 2: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 3: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 4: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 1: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 2: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 3: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 4: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 1: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 2: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 3: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 1: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 2: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 4: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 3: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 3: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 1: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 1: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 4: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 4: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 2: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 2: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 1: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 3: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 2: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 4: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 1: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 3: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 2: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 4: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 1: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 3: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 2: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 1: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 4: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 2: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 3: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 1: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 1: 
+Chain 1:  Elapsed Time: 1138.72 seconds (Warm-up)
+Chain 1:                1185.57 seconds (Sampling)
+Chain 1:                2324.29 seconds (Total)
+Chain 1: 
+Chain 2: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 2: 
+Chain 2:  Elapsed Time: 1284.33 seconds (Warm-up)
+Chain 2:                1070.28 seconds (Sampling)
+Chain 2:                2354.61 seconds (Total)
+Chain 2: 
+Chain 4: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 3: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 3: 
+Chain 3:  Elapsed Time: 1107.25 seconds (Warm-up)
+Chain 3:                1326.67 seconds (Sampling)
+Chain 3:                2433.92 seconds (Total)
+Chain 3: 
+Chain 4: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 4: 
+Chain 4:  Elapsed Time: 1238.39 seconds (Warm-up)
+Chain 4:                1291.24 seconds (Sampling)
+Chain 4:                2529.63 seconds (Total)
+Chain 4: 
+ Family: negbinomial 
+  Links: mu = identity; shape = identity 
+Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
+         x0 ~ (1 || male)
+         y0 ~ (1 || male)
+   Data: data (Number of observations: 3840) 
+  Draws: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+         total post-warmup draws = 4000
+
+Group-Level Effects: 
+~male (Number of levels: 12) 
+                 Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+sd(x0_Intercept)     2.06      0.55     1.24     3.36 1.01     1201     2146
+sd(y0_Intercept)    61.13     14.49    39.98    96.12 1.00     1011     1735
+
+Population-Level Effects: 
+             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+x0_Intercept    38.93      0.64    37.64    40.18 1.00     1046     1303
+y0_Intercept   117.64     18.38    79.56   152.89 1.00      878     1283
+
+Family Specific Parameters: 
+      Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+shape     2.33      0.05     2.22     2.43 1.00     3759     2652
+
+Draws were sampled using sampling(NUTS). For each parameter, Bulk_ESS
+and Tail_ESS are effective sample size measures, and Rhat is the potential
+scale reduction factor on split chains (at convergence, Rhat = 1).
+[1] "brms: groups_1, groups_2"
+Compiling Stan program...
+Start sampling
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 1).
+Chain 1: 
+Chain 1: Gradient evaluation took 0.00567 seconds
+Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 56.7 seconds.
+Chain 1: Adjust your expectations accordingly!
+Chain 1: 
+Chain 1: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 2).
+Chain 2: Rejecting initial value:
+Chain 2:   Error evaluating the log probability at the initial value.
+Chain 2: Exception: neg_binomial_2_lpmf: Location parameter[161] is -5.19385, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+Chain 2: Rejecting initial value:
+Chain 2:   Error evaluating the log probability at the initial value.
+Chain 2: Exception: neg_binomial_2_lpmf: Location parameter[481] is -0.916042, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+Chain 2: Rejecting initial value:
+Chain 2:   Error evaluating the log probability at the initial value.
+Chain 2: Exception: neg_binomial_2_lpmf: Location parameter[801] is -1.64033, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+Chain 2: 
+Chain 2: Gradient evaluation took 0.006901 seconds
+Chain 2: 1000 transitions using 10 leapfrog steps per transition would take 69.01 seconds.
+Chain 2: Adjust your expectations accordingly!
+Chain 2: 
+Chain 2: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 3).
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[321] is -3.1901, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[481] is -5.45184, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[641] is -0.443264, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 4).
+Chain 3: 
+Chain 3: Gradient evaluation took 0.006155 seconds
+Chain 3: 1000 transitions using 10 leapfrog steps per transition would take 61.55 seconds.
+Chain 3: Adjust your expectations accordingly!
+Chain 3: 
+Chain 3: 
+Chain 4: Rejecting initial value:
+Chain 4:   Error evaluating the log probability at the initial value.
+Chain 4: Exception: neg_binomial_2_lpmf: Location parameter[641] is -0.366475, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+Chain 4: 
+Chain 4: Gradient evaluation took 0.007667 seconds
+Chain 4: 1000 transitions using 10 leapfrog steps per transition would take 76.67 seconds.
+Chain 4: Adjust your expectations accordingly!
+Chain 4: 
+Chain 4: 
+Chain 1: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 2: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 3: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 4: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 2: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 4: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 1: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 3: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 4: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 1: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 2: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 3: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 4: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 1: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 2: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 3: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 4: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 2: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 1: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 3: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 4: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 4: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 2: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 2: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 3: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 3: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 1: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 1: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 4: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 1: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 2: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 3: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 4: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 1: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 2: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 4: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 3: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 1: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 4: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 2: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 1: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 3: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 4: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 4: 
+Chain 4:  Elapsed Time: 1524.2 seconds (Warm-up)
+Chain 4:                1095.38 seconds (Sampling)
+Chain 4:                2619.57 seconds (Total)
+Chain 4: 
+Chain 2: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 1: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 1: 
+Chain 1:  Elapsed Time: 1707.09 seconds (Warm-up)
+Chain 1:                950.911 seconds (Sampling)
+Chain 1:                2658 seconds (Total)
+Chain 1: 
+Chain 3: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 2: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 2: 
+Chain 2:  Elapsed Time: 1666.84 seconds (Warm-up)
+Chain 2:                1135.67 seconds (Sampling)
+Chain 2:                2802.51 seconds (Total)
+Chain 2: 
+Chain 3: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 3: 
+Chain 3:  Elapsed Time: 1694.79 seconds (Warm-up)
+Chain 3:                1166.62 seconds (Sampling)
+Chain 3:                2861.4 seconds (Total)
+Chain 3: 
+ Family: negbinomial 
+  Links: mu = identity; shape = identity 
+Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
+         x0 ~ (1 || male)
+         y0 ~ 1 + (y0_group || male)
+   Data: data (Number of observations: 3840) 
+  Draws: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+         total post-warmup draws = 4000
+
+Group-Level Effects: 
+~male (Number of levels: 12) 
+                 Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+sd(x0_Intercept)     1.94      0.54     1.17     3.24 1.00     1178     2144
+sd(y0_Intercept)    27.83     10.47    14.71    55.63 1.00      862      916
+sd(y0_y0_group2)   126.51     33.41    77.51   210.92 1.00     1267     1950
+
+Population-Level Effects: 
+             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+x0_Intercept    38.79      0.59    37.58    39.97 1.00     1273     1693
+y0_Intercept    59.97     11.95    39.19    86.77 1.00      873      972
+
+Family Specific Parameters: 
+      Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+shape     3.13      0.08     2.98     3.29 1.01     5387     2796
+
+Draws were sampled using sampling(NUTS). For each parameter, Bulk_ESS
+and Tail_ESS are effective sample size measures, and Rhat is the potential
+scale reduction factor on split chains (at convergence, Rhat = 1).
+[1] "brms: groups_2, groups_1"
+Compiling Stan program...
+Start sampling
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 1).
+Chain 1: Rejecting initial value:
+Chain 1:   Error evaluating the log probability at the initial value.
+Chain 1: Exception: neg_binomial_2_lpmf: Location parameter[321] is -3.03661, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+Chain 1: Rejecting initial value:
+Chain 1:   Error evaluating the log probability at the initial value.
+Chain 1: Exception: neg_binomial_2_lpmf: Location parameter[1] is -7.11991, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 2).
+Chain 1: 
+Chain 1: Gradient evaluation took 0.005994 seconds
+Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 59.94 seconds.
+Chain 1: Adjust your expectations accordingly!
+Chain 1: 
+Chain 1: 
+Chain 2: Rejecting initial value:
+Chain 2:   Error evaluating the log probability at the initial value.
+Chain 2: Exception: neg_binomial_2_lpmf: Location parameter[161] is -9.01027, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+Chain 2: 
+Chain 2: Gradient evaluation took 0.006128 seconds
+Chain 2: 1000 transitions using 10 leapfrog steps per transition would take 61.28 seconds.
+Chain 2: Adjust your expectations accordingly!
+Chain 2: 
+Chain 2: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 3).
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[321] is -0.0443536, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[161] is -0.736992, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+Chain 3: 
+Chain 3: Gradient evaluation took 0.006809 seconds
+Chain 3: 1000 transitions using 10 leapfrog steps per transition would take 68.09 seconds.
+Chain 3: Adjust your expectations accordingly!
+Chain 3: 
+Chain 3: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 4).
+Chain 4: Rejecting initial value:
+Chain 4:   Error evaluating the log probability at the initial value.
+Chain 4: Exception: neg_binomial_2_lpmf: Location parameter[1] is -0.175402, but must be positive finite! (in 'anon_model', line 80, column 4 to column 49)
+Chain 4: 
+Chain 4: Gradient evaluation took 0.005352 seconds
+Chain 4: 1000 transitions using 10 leapfrog steps per transition would take 53.52 seconds.
+Chain 4: Adjust your expectations accordingly!
+Chain 4: 
+Chain 4: 
+Chain 1: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 2: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 3: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 4: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 4: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 3: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 1: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 2: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 4: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 1: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 3: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 2: Iteration:  400 / 2000 [ 20%]  (Warmup)
+  C-c C-c
+Warning messages:
+1: In eval(ei, envir) : 
+2: There were 14 divergent transitions after warmup. See
+https://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup
+to find out why this is a problem and how to eliminate them. 
+3: Examine the pairs() plot to diagnose sampling problems
+ 
+4: There were 14 divergent transitions after warmup. Increasing adapt_delta above 0.95 may help. See http://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup 
+5: In eval(ei, envir) : 
+> Error in ss(file, echo = visibly, local = local, print.eval = output,  : 
+  /tmp/brms_two.piece_create.and.fit.simulated.data.Rmd!8sa2Yz:52:9: unexpected symbol
+51:                          )
+52:         nlform
+            ^
+> adapt_delta <- 0.95
+> flags <- c("groups_2")
+> models <- c("brms")
+> flags_x <- flags
+> flags_y <- flags
+> N <- length(data)
+> fit_tbl <- crossing(model = models,
++                     x0 = flags_x, y0 = flags_y,
++                     desc = "NA_character",
++                     y0_group_list = list(NA),
++                     x0_group_list = list(NA),
++                     fit = list(NA),
++                     llik = list .... [TRUNCATED] 
+> ## Priors
+> 
+> my_priors <- prior(normal(150, 200), nlpar = "y0", lb = 1) +
++     prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
+> model = models[[1]]
+> for(x_flag in flags_x) {
++     for(y_flag in flags_y) {
++ 
++         ## Set up variables for saving model and fit
++         desc <- paste0(model, ": ", x_flag, ", ", y_flag)
++         curr_row <- which(fit_tbl$model == model &
++                           fit_tbl$x0 == x_flag &
++                    .... [TRUNCATED] 
+[1] "brms: groups_2, groups_2"
+Error: The following priors do not correspond to any model parameter: 
+<lower=1> b_y0 ~ normal(150, 200)
+<lower=30,upper=45.5> b_x0 ~ uniform(30, 45.5)
+Function 'get_prior' might be helpful to you.
+> get_prior(nlsform)
+Error in is.brmsfit(formula) : object 'nlsform' not found
+> get_prior(nlform)
+Error: Data must be specified using the 'data' argument.
+> get_prior(nlform, data = data)
+                 prior class      coef group resp dpar nlpar lb ub       source
+ student_t(3, 0, 62.3) sigma                                  0         default
+ student_t(3, 0, 62.3)    sd                              x0  0         default
+ student_t(3, 0, 62.3)    sd            male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd x0_group2  male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd                              y0  0         default
+ student_t(3, 0, 62.3)    sd            male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd y0_group2  male              y0  0    (vectorized)
+>         x_form <- switch(x_flag,
++                          individual = formula(x0 ~ -1 + male), 
++                          groups_1 = formula(x0 ~ (1|| male)), # no need for x0_group when there's only 1 group
++                          groups_2 = formula(x0 ~ (1||male) + x0_group))
+>                          )
+Error: unexpected ')' in "                         )"
+>         y_form <- switch(y_flag,
++                          individual = formula(y0 ~ -1 + male), 
++                          groups_1 = formula(y0 ~ (1|| male)),
++                          groups_2 = formula(y0 ~ y0_group + (1|| male))
++                          )
+>         nlform <- bf(
++             y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
++             x_form,
++             y_form,
++             nl = TRUE)
+> get_prior(nlform, data = data)
+                 prior class      coef group resp dpar nlpar lb ub       source
+ student_t(3, 0, 62.3) sigma                                  0         default
+                (flat)     b                              x0            default
+                (flat)     b Intercept                    x0       (vectorized)
+                (flat)     b x0_group2                    x0       (vectorized)
+ student_t(3, 0, 62.3)    sd                              x0  0         default
+ student_t(3, 0, 62.3)    sd            male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              x0  0    (vectorized)
+                (flat)     b                              y0            default
+                (flat)     b Intercept                    y0       (vectorized)
+                (flat)     b y0_group2                    y0       (vectorized)
+ student_t(3, 0, 62.3)    sd                              y0  0         default
+ student_t(3, 0, 62.3)    sd            male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              y0  0    (vectorized)
+>         y_form <- switch(y_flag,
++                          individual = formula(y0 ~ -1 + male), 
++                          groups_1 = formula(y0 ~ (1|| male)),
++                          groups_2 = formula(y0 ~ -1 + (y0_group|| male))
++                          )
+>         nlform <- bf(
++             y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
++             x_form,
++             y_form,
++             nl = TRUE)
+> get_prior(nlform, data = data)
+                 prior class      coef group resp dpar nlpar lb ub       source
+ student_t(3, 0, 62.3) sigma                                  0         default
+                (flat)     b                              x0            default
+                (flat)     b Intercept                    x0       (vectorized)
+                (flat)     b x0_group2                    x0       (vectorized)
+ student_t(3, 0, 62.3)    sd                              x0  0         default
+ student_t(3, 0, 62.3)    sd            male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd                              y0  0         default
+ student_t(3, 0, 62.3)    sd            male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd y0_group2  male              y0  0    (vectorized)
+>                          groups_2 = formula(y0 ~ (y0_group|| male))
+>         nlform <- bf(
++             y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
++             x_form,
++             y_form,
++             nl = TRUE)
+> get_prior(nlform, data = data)
+                 prior class      coef group resp dpar nlpar lb ub       source
+ student_t(3, 0, 62.3) sigma                                  0         default
+                (flat)     b                              x0            default
+                (flat)     b Intercept                    x0       (vectorized)
+                (flat)     b x0_group2                    x0       (vectorized)
+ student_t(3, 0, 62.3)    sd                              x0  0         default
+ student_t(3, 0, 62.3)    sd            male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd                              y0  0         default
+ student_t(3, 0, 62.3)    sd            male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd y0_group2  male              y0  0    (vectorized)
+>                          groups_2 = formula(y0 ~ (1||male) + y0_group)
+>         nlform <- bf(
++             y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
++             x_form,
++             y_form,
++             nl = TRUE)
+> get_prior(nlform, data = data)
+                 prior class      coef group resp dpar nlpar lb ub       source
+ student_t(3, 0, 62.3) sigma                                  0         default
+                (flat)     b                              x0            default
+                (flat)     b Intercept                    x0       (vectorized)
+                (flat)     b x0_group2                    x0       (vectorized)
+ student_t(3, 0, 62.3)    sd                              x0  0         default
+ student_t(3, 0, 62.3)    sd            male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd                              y0  0         default
+ student_t(3, 0, 62.3)    sd            male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd y0_group2  male              y0  0    (vectorized)
+>                          groups_2 = formula(x0 ~ -1 + (x0_group||male))
+>         x_form <- switch(x_flag,
++                          individual = formula(x0 ~ -1 + male), 
++                          groups_1 = formula(x0 ~ (1|| male)), # no need for x0_group when there's only 1 group
++                          groups_2 = formula(x0 ~ -1 + (x0_group||male))
++                          )
+>         
+>         y_form <- switch(y_flag,
++                          individual = formula(y0 ~ -1 + male), 
++                          groups_1 = formula(y0 ~ (1|| male)),
++                          groups_2 = formula(y0 ~ -1 + (y0_group||male))
++                          )
+>         nlform <- bf(
++             y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
++             x_form,
++             y_form,
++             nl = TRUE)
+> get_prior(nlform, data = data)
+                 prior class      coef group resp dpar nlpar lb ub       source
+ student_t(3, 0, 62.3) sigma                                  0         default
+ student_t(3, 0, 62.3)    sd                              x0  0         default
+ student_t(3, 0, 62.3)    sd            male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd x0_group2  male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd                              y0  0         default
+ student_t(3, 0, 62.3)    sd            male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd y0_group2  male              y0  0    (vectorized)
+>         fit <- brm(nlform,
++                    data = data,
++                    family = negbinomial(link = "identity", link_shape = "identity"),
++                    prior = my_priors,
++                    iter = iter,
++                    silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
++                    control = list(adapt_delta = adapt_delta,
++                        max_treedepth = 12),
++                    refresh = ifelse(interactive(),max(iter/10, 1), 0),
++         chains = n_chains,
++         cores = n_cores,
++         save_model = "brms_two.piece.stan")
+Error: The following priors do not correspond to any model parameter: 
+<lower=1> b_y0 ~ normal(150, 200)
+<lower=30,upper=45.5> b_x0 ~ uniform(30, 45.5)
+Function 'get_prior' might be helpful to you.
+>         ## Parameter Structure
+>         x_form <- switch(x_flag,
++                          individual = formula(x0 ~ -1 + male), 
++                          groups_1 = formula(x0 ~ (1|| male)), # no need for x0_group when there's only 1 group
++                          groups_2 = formula(x0 ~ (1||male) + x0_group)
++                          )
+>         
+>         y_form <- switch(y_flag,
++                          individual = formula(y0 ~ -1 + male), 
++                          groups_1 = formula(y0 ~ (1|| male)),
++                          groups_2 = formula(y0 ~ (1|| male) + y0_group)
++                          )
+>         nlform <- bf(
++             y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
++             x_form,
++             y_form,
++             nl = TRUE)
+> get_prior(nlform, data = data)
+                 prior class      coef group resp dpar nlpar lb ub       source
+ student_t(3, 0, 62.3) sigma                                  0         default
+                (flat)     b                              x0            default
+                (flat)     b Intercept                    x0       (vectorized)
+                (flat)     b x0_group2                    x0       (vectorized)
+ student_t(3, 0, 62.3)    sd                              x0  0         default
+ student_t(3, 0, 62.3)    sd            male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              x0  0    (vectorized)
+                (flat)     b                              y0            default
+                (flat)     b Intercept                    y0       (vectorized)
+                (flat)     b y0_group2                    y0       (vectorized)
+ student_t(3, 0, 62.3)    sd                              y0  0         default
+ student_t(3, 0, 62.3)    sd            male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              y0  0    (vectorized)
+>         fit <- brm(nlform,
++                    data = data,
++                    ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
++                    ## link_shape corresponds to `phi` of `stan`'s
++                    ## Negbinomial_2
++                    ## Defining `phi = mu/theta` creates a quasipoisson
++                    ## distribution with overdispersion parameter (1 +theta)
++                    family = negbinomial(link = "identity", link_shape = "identity"),
++                    prior = my_priors,
++                    iter = iter,
++                    silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
++                    control = list(adapt_delta = adapt_delta,
++                        max_treedepth = 12),
++                        ## Only print out sampling progress if in interactive mode
++                    refresh = ifelse(interactive(),max(iter/10, 1), 0),
++         chains = n_chains,
++         cores = n_cores,
++         save_model = "brms_two.piece.stan")
+Compiling Stan program...
+Start sampling
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 1).
+Chain 1: Rejecting initial value:
+Chain 1:   Error evaluating the log probability at the initial value.
+Chain 1: Exception: neg_binomial_2_lpmf: Location parameter[161] is -1.19077, but must be positive finite! (in 'anon_model', line 77, column 4 to column 49)
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 2).
+Chain 1: 
+Chain 1: Gradient evaluation took 0.00781 seconds
+Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 78.1 seconds.
+Chain 1: Adjust your expectations accordingly!
+Chain 1: 
+Chain 1: 
+Chain 2: Rejecting initial value:
+Chain 2:   Error evaluating the log probability at the initial value.
+Chain 2: Exception: neg_binomial_2_lpmf: Location parameter[1] is -4.56774, but must be positive finite! (in 'anon_model', line 77, column 4 to column 49)
+Chain 2: 
+Chain 2: Gradient evaluation took 0.005786 seconds
+Chain 2: 1000 transitions using 10 leapfrog steps per transition would take 57.86 seconds.
+Chain 2: Adjust your expectations accordingly!
+Chain 2: 
+Chain 2: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 3).
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[161] is -1.0492, but must be positive finite! (in 'anon_model', line 77, column 4 to column 49)
+Chain 3: 
+Chain 3: Gradient evaluation took 0.004985 seconds
+Chain 3: 1000 transitions using 10 leapfrog steps per transition would take 49.85 seconds.
+Chain 3: Adjust your expectations accordingly!
+Chain 3: 
+Chain 3: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 4).
+Chain 4: Rejecting initial value:
+Chain 4:   Error evaluating the log probability at the initial value.
+Chain 4: Exception: neg_binomial_2_lpmf: Location parameter[161] is -0.0441731, but must be positive finite! (in 'anon_model', line 77, column 4 to column 49)
+Chain 4: 
+Chain 4: Gradient evaluation took 0.006115 seconds
+Chain 4: 1000 transitions using 10 leapfrog steps per transition would take 61.15 seconds.
+Chain 4: Adjust your expectations accordingly!
+Chain 4: 
+Chain 4: 
+Chain 1: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 2: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 3: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 4: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 3: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 1: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 2: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 4: Iteration:  200 / 2000 [ 10%]  (Warmup)
+Chain 3: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 1: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 4: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 2: Iteration:  400 / 2000 [ 20%]  (Warmup)
+Chain 1: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 3: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 4: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 2: Iteration:  600 / 2000 [ 30%]  (Warmup)
+Chain 1: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 3: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 4: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 2: Iteration:  800 / 2000 [ 40%]  (Warmup)
+Chain 1: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 1: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 3: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 3: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 2: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 2: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 4: Iteration: 1000 / 2000 [ 50%]  (Warmup)
+Chain 4: Iteration: 1001 / 2000 [ 50%]  (Sampling)
+Chain 1: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 3: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 2: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 4: Iteration: 1200 / 2000 [ 60%]  (Sampling)
+Chain 1: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 3: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 2: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 1: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 4: Iteration: 1400 / 2000 [ 70%]  (Sampling)
+Chain 2: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 3: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 2: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 1: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 3: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 4: Iteration: 1600 / 2000 [ 80%]  (Sampling)
+Chain 2: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 2: 
+Chain 2:  Elapsed Time: 600.252 seconds (Warm-up)
+Chain 2:                413.98 seconds (Sampling)
+Chain 2:                1014.23 seconds (Total)
+Chain 2: 
+Chain 1: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 1: 
+Chain 1:  Elapsed Time: 553.818 seconds (Warm-up)
+Chain 1:                477.306 seconds (Sampling)
+Chain 1:                1031.12 seconds (Total)
+Chain 1: 
+Chain 3: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 3: 
+Chain 3:  Elapsed Time: 560.355 seconds (Warm-up)
+Chain 3:                481.301 seconds (Sampling)
+Chain 3:                1041.66 seconds (Total)
+Chain 3: 
+Chain 4: Iteration: 1800 / 2000 [ 90%]  (Sampling)
+Chain 4: Iteration: 2000 / 2000 [100%]  (Sampling)
+Chain 4: 
+Chain 4:  Elapsed Time: 601.527 seconds (Warm-up)
+Chain 4:                511.04 seconds (Sampling)
+Chain 4:                1112.57 seconds (Total)
+Chain 4: 
+Warning messages:
+1: There were 1 divergent transitions after warmup. See
+https://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup
+to find out why this is a problem and how to eliminate them. 
+2: Examine the pairs() plot to diagnose sampling problems
+ 
+> print(fit)
+ Family: negbinomial 
+  Links: mu = identity; shape = identity 
+Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
+         x0 ~ (1 || male) + x0_group
+         y0 ~ (1 || male) + y0_group
+   Data: data (Number of observations: 3840) 
+  Draws: 4 chains, each with iter = 2000; warmup = 1000; thin = 1;
+         total post-warmup draws = 4000
+
+Group-Level Effects: 
+~male (Number of levels: 12) 
+                 Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+sd(x0_Intercept)     3.13      1.28     1.43     6.40 1.00     1467     2190
+sd(y0_Intercept)    18.60      5.37    10.93    32.18 1.00     1240     1878
+
+Population-Level Effects: 
+             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+x0_Intercept    36.34      1.14    33.89    38.39 1.00      960     1394
+x0_x0_group2    37.80      4.47    30.36    45.07 1.00     4592     2383
+y0_Intercept    50.57      6.22    38.77    63.84 1.00     1018     1497
+y0_y0_group2   109.75      5.14    99.70   119.86 1.00     2690     2934
+
+Family Specific Parameters: 
+      Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+shape     2.42      0.06     2.31     2.54 1.00     4986     2723
+
+Draws were sampled using sampling(NUTS). For each parameter, Bulk_ESS
+and Tail_ESS are effective sample size measures, and Rhat is the potential
+scale reduction factor on split chains (at convergence, Rhat = 1).
+Warning message:
+There were 1 divergent transitions after warmup. Increasing adapt_delta above 0.95 may help. See http://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup 
+>         ## Parameter Structure
+>         x_form <- switch(x_flag,
++                          individual = formula(x0 ~ -1 + male), 
++                          groups_1 = formula(x0 ~ (1|| male)), # no need for x0_group when there's only 1 group
++                          #groups_2 = formula(x0 ~ (1||male) + x0_group)
++                          groups_2 = formula(x0 ~ (x0_group||male) )
++                          )
+>         
+>         y_form <- switch(y_flag,
++                          individual = formula(y0 ~ -1 + male), 
++                          groups_1 = formula(y0 ~ (1|| male)),
++                          #groups_2 = formula(y0 ~ (1|| male) + y0_group)
++                          groups_2 = formula(y0 ~ (y0_group||male))
++                          )
+>         nlform <- bf(
++             y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
++             x_form,
++             y_form,
++             nl = TRUE)
+> 
+>         if(TRUE) get_prior(nlform, data = data, family = negbinomial(link = "identity", link_shape = "identity"))
+                 prior class      coef group resp dpar nlpar lb ub       source
+     gamma(0.01, 0.01) shape                                  0         default
+                (flat)     b                              x0            default
+                (flat)     b Intercept                    x0       (vectorized)
+ student_t(3, 0, 62.3)    sd                              x0  0         default
+ student_t(3, 0, 62.3)    sd            male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              x0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd x0_group2  male              x0  0    (vectorized)
+                (flat)     b                              y0            default
+                (flat)     b Intercept                    y0       (vectorized)
+ student_t(3, 0, 62.3)    sd                              y0  0         default
+ student_t(3, 0, 62.3)    sd            male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd Intercept  male              y0  0    (vectorized)
+ student_t(3, 0, 62.3)    sd y0_group2  male              y0  0    (vectorized)
+> 
+>         fit <- brm(nlform,
++                    data = data,
++                    ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
++                    ## link_shape corresponds to `phi` of `stan`'s
++                    ## Negbinomial_2
++                    ## Defining `phi = mu/theta` creates a quasipoisson
++                    ## distribution with overdispersion parameter (1 +theta)
++                    family = negbinomial(link = "identity", link_shape = "identity"),
++                    prior = my_priors,
++                    iter = iter,
++                    silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
++                    control = list(adapt_delta = adapt_delta,
++                        max_treedepth = 12),
++                        ## Only print out sampling progress if in interactive mode
++                    refresh = ifelse(interactive(),max(iter/10, 1), 0),
++         chains = n_chains,
++         cores = n_cores,
++         save_model = "brms_two.piece.stan")
+Compiling Stan program...
+Start sampling
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 1).
+Chain 1: Rejecting initial value:
+Chain 1:   Error evaluating the log probability at the initial value.
+Chain 1: Exception: neg_binomial_2_lpmf: Location parameter[321] is -1.65981, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 1: 
+Chain 1: Gradient evaluation took 0.003876 seconds
+Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 38.76 seconds.
+Chain 1: Adjust your expectations accordingly!
+Chain 1: 
+Chain 1: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 2).
+Chain 2: Rejecting initial value:
+Chain 2:   Error evaluating the log probability at the initial value.
+Chain 2: Exception: neg_binomial_2_lpmf: Location parameter[3681] is -1.14486, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 2: 
+Chain 2: Gradient evaluation took 0.005832 seconds
+Chain 2: 1000 transitions using 10 leapfrog steps per transition would take 58.32 seconds.
+Chain 2: Adjust your expectations accordingly!
+Chain 2: 
+Chain 2: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 3).
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[321] is -5.66565, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[481] is -2.73666, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[1] is -1.14514, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[1121] is -1.13023, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[481] is -5.15808, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 3: 
+Chain 3: Gradient evaluation took 0.004436 seconds
+Chain 3: 1000 transitions using 10 leapfrog steps per transition would take 44.36 seconds.
+Chain 3: Adjust your expectations accordingly!
+Chain 3: 
+Chain 3: 
+Chain 1: Iteration:    1 / 2000 [  0%]  (Warmup)
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 4).
+Chain 4: Rejecting initial value:
+Chain 4:   Error evaluating the log probability at the initial value.
+Chain 4: Exception: neg_binomial_2_lpmf: Location parameter[801] is -4.43636, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 4: 
+Chain 4: Gradient evaluation took 0.004885 seconds
+Chain 4: 1000 transitions using 10 leapfrog steps per transition would take 48.85 seconds.
+Chain 4: Adjust your expectations accordingly!
+Chain 4: 
+Chain 4: 
+Chain 3: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 2: Iteration:    1 / 2000 [  0%]  (Warmup)
+Chain 4: Iteration:    1 / 2000 [  0%]  (Warmup)
+        fit <- brm(nlform,
++                    data = data,
++                    ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
++                    ## link_shape corresponds to `phi` of `stan`'s
++                    ## Negbinomial_2
++                    ## Defining `phi = mu/theta` creates a quasipoisson
++                    ## distribution with overdispersion parameter (1 +theta)
++                    family = negbinomial(link = "identity", link_shape = "identity"),
++                    prior = my_priors,
++                    iter = iter,
++                    silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
++                    control = list(adapt_delta = adapt_delta,
++                        max_treedepth = 12),
++                        ## Only print out sampling progress if in interactive mode
++                    refresh = ifelse(interactive(),max(iter/10, 1), 0),
++         chains = n_chains,
++         cores = n_cores,
++         save_model = "brms_two.piece.stan")
++     ## Avoid having brms recompile model by defining
++     ## model in global environment
++     stanfit <- fit
++     
++                                         #fit_exp <- expose_functions(fit) , vectorize = TRUE)
++                                         #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
++     print(fit)     
++ 
+  C-c C-c
+> iter <- 800
+>         fit <- brm(nlform,
++                    data = data,
++                    ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
++                    ## link_shape corresponds to `phi` of `stan`'s
++                    ## Negbinomial_2
++                    ## Defining `phi = mu/theta` creates a quasipoisson
++                    ## distribution with overdispersion parameter (1 +theta)
++                    family = negbinomial(link = "identity", link_shape = "identity"),
++                    prior = my_priors,
++                    iter = iter,
++                    silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
++                    control = list(adapt_delta = adapt_delta,
++                        max_treedepth = 12),
++                        ## Only print out sampling progress if in interactive mode
++                    refresh = ifelse(interactive(),max(iter/10, 1), 0),
++         chains = n_chains,
++         cores = n_cores,
++         save_model = "brms_two.piece.stan")
+Compiling Stan program...
+recompiling to avoid crashing R session
+Start sampling
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 1).
+Chain 1: 
+Chain 1: Gradient evaluation took 0.006646 seconds
+Chain 1: 1000 transitions using 10 leapfrog steps per transition would take 66.46 seconds.
+Chain 1: Adjust your expectations accordingly!
+Chain 1: 
+Chain 1: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 2).
+Chain 2: Rejecting initial value:
+Chain 2:   Error evaluating the log probability at the initial value.
+Chain 2: Exception: neg_binomial_2_lpmf: Location parameter[1] is -0.29947, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 2: Rejecting initial value:
+Chain 2:   Error evaluating the log probability at the initial value.
+Chain 2: Exception: neg_binomial_2_lpmf: Location parameter[641] is -1.13586, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 2: 
+Chain 2: Gradient evaluation took 0.007932 seconds
+Chain 2: 1000 transitions using 10 leapfrog steps per transition would take 79.32 seconds.
+Chain 2: Adjust your expectations accordingly!
+Chain 2: 
+Chain 2: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 3).
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[1] is -0.33836, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 3: Rejecting initial value:
+Chain 3:   Error evaluating the log probability at the initial value.
+Chain 3: Exception: neg_binomial_2_lpmf: Location parameter[481] is -0.484971, but must be positive finite! (in 'anon_model', line 83, column 4 to column 49)
+Chain 3: 
+Chain 3: Gradient evaluation took 0.005921 seconds
+Chain 3: 1000 transitions using 10 leapfrog steps per transition would take 59.21 seconds.
+Chain 3: Adjust your expectations accordingly!
+Chain 3: 
+Chain 3: 
+
+SAMPLING FOR MODEL 'anon_model' NOW (CHAIN 4).
+Chain 4: 
+Chain 4: Gradient evaluation took 0.006213 seconds
+Chain 4: 1000 transitions using 10 leapfrog steps per transition would take 62.13 seconds.
+Chain 4: Adjust your expectations accordingly!
+Chain 4: 
+Chain 4: 
+Chain 1: Iteration:   1 / 800 [  0%]  (Warmup)
+Chain 2: Iteration:   1 / 800 [  0%]  (Warmup)
+Chain 3: Iteration:   1 / 800 [  0%]  (Warmup)
+Chain 4: Iteration:   1 / 800 [  0%]  (Warmup)
+Chain 1: Iteration:  80 / 800 [ 10%]  (Warmup)
+Chain 4: Iteration:  80 / 800 [ 10%]  (Warmup)
+Chain 3: Iteration:  80 / 800 [ 10%]  (Warmup)
+Chain 2: Iteration:  80 / 800 [ 10%]  (Warmup)
+Chain 1: Iteration: 160 / 800 [ 20%]  (Warmup)
+Chain 4: Iteration: 160 / 800 [ 20%]  (Warmup)
+Chain 3: Iteration: 160 / 800 [ 20%]  (Warmup)
+Chain 1: Iteration: 240 / 800 [ 30%]  (Warmup)
+Chain 2: Iteration: 160 / 800 [ 20%]  (Warmup)
+Chain 4: Iteration: 240 / 800 [ 30%]  (Warmup)
+Chain 3: Iteration: 240 / 800 [ 30%]  (Warmup)
+Chain 2: Iteration: 240 / 800 [ 30%]  (Warmup)
+Chain 3: Iteration: 320 / 800 [ 40%]  (Warmup)
+Chain 4: Iteration: 320 / 800 [ 40%]  (Warmup)
+Chain 1: Iteration: 320 / 800 [ 40%]  (Warmup)
+Chain 2: Iteration: 320 / 800 [ 40%]  (Warmup)
+Chain 4: Iteration: 400 / 800 [ 50%]  (Warmup)
+Chain 4: Iteration: 401 / 800 [ 50%]  (Sampling)
+Chain 1: Iteration: 400 / 800 [ 50%]  (Warmup)
+Chain 1: Iteration: 401 / 800 [ 50%]  (Sampling)
+Chain 3: Iteration: 400 / 800 [ 50%]  (Warmup)
+Chain 3: Iteration: 401 / 800 [ 50%]  (Sampling)
+Chain 2: Iteration: 400 / 800 [ 50%]  (Warmup)
+Chain 2: Iteration: 401 / 800 [ 50%]  (Sampling)
+Chain 4: Iteration: 480 / 800 [ 60%]  (Sampling)
+Chain 1: Iteration: 480 / 800 [ 60%]  (Sampling)
+Chain 2: Iteration: 480 / 800 [ 60%]  (Sampling)
+Chain 4: Iteration: 560 / 800 [ 70%]  (Sampling)
+Chain 3: Iteration: 480 / 800 [ 60%]  (Sampling)
+Chain 1: Iteration: 560 / 800 [ 70%]  (Sampling)
+Chain 2: Iteration: 560 / 800 [ 70%]  (Sampling)
+Chain 4: Iteration: 640 / 800 [ 80%]  (Sampling)
+Chain 1: Iteration: 640 / 800 [ 80%]  (Sampling)
+Chain 2: Iteration: 640 / 800 [ 80%]  (Sampling)
+Chain 3: Iteration: 560 / 800 [ 70%]  (Sampling)
+Chain 4: Iteration: 720 / 800 [ 90%]  (Sampling)
+Chain 1: Iteration: 720 / 800 [ 90%]  (Sampling)
+Chain 2: Iteration: 720 / 800 [ 90%]  (Sampling)
+Chain 4: Iteration: 800 / 800 [100%]  (Sampling)
+Chain 4: 
+Chain 4:  Elapsed Time: 3084.85 seconds (Warm-up)
+Chain 4:                2240.76 seconds (Sampling)
+Chain 4:                5325.62 seconds (Total)
+Chain 4: 
+Chain 1: Iteration: 800 / 800 [100%]  (Sampling)
+Chain 1: 
+Chain 1:  Elapsed Time: 3088.25 seconds (Warm-up)
+Chain 1:                2314.55 seconds (Sampling)
+Chain 1:                5402.8 seconds (Total)
+Chain 1: 
+Chain 3: Iteration: 640 / 800 [ 80%]  (Sampling)
+Chain 2: Iteration: 800 / 800 [100%]  (Sampling)
+Chain 2: 
+Chain 2:  Elapsed Time: 3518.97 seconds (Warm-up)
+Chain 2:                2070.03 seconds (Sampling)
+Chain 2:                5589 seconds (Total)
+Chain 2: 
+Chain 3: Iteration: 720 / 800 [ 90%]  (Sampling)
+Chain 3: Iteration: 800 / 800 [100%]  (Sampling)
+Chain 3: 
+Chain 3:  Elapsed Time: 3101.38 seconds (Warm-up)
+Chain 3:                3352.73 seconds (Sampling)
+Chain 3:                6454.11 seconds (Total)
+Chain 3: 
+Warning messages:
+1: There were 1 transitions after warmup that exceeded the maximum treedepth. Increase max_treedepth above 12. See
+https://mc-stan.org/misc/warnings.html#maximum-treedepth-exceeded 
+2: Examine the pairs() plot to diagnose sampling problems
+ 
+3: Bulk Effective Samples Size (ESS) is too low, indicating posterior means and medians may be unreliable.
+Running the chains for more iterations may help. See
+https://mc-stan.org/misc/warnings.html#bulk-ess 
+4: Tail Effective Samples Size (ESS) is too low, indicating posterior variances and tail quantiles may be unreliable.
+Running the chains for more iterations may help. See
+https://mc-stan.org/misc/warnings.html#tail-ess 
+>     ## Avoid having brms recompile model by defining
+>     ## model in global environment
+>     stanfit <- fit
+> print(fit)
+ Family: negbinomial 
+  Links: mu = identity; shape = identity 
+Formula: y ~ 0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0) 
+         x0 ~ (x0_group || male)
+         y0 ~ (y0_group || male)
+   Data: data (Number of observations: 3840) 
+  Draws: 4 chains, each with iter = 800; warmup = 400; thin = 1;
+         total post-warmup draws = 1600
+
+Group-Level Effects: 
+~male (Number of levels: 12) 
+                 Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+sd(x0_Intercept)     4.74      1.39     2.69     7.96 1.00      772     1320
+sd(x0_x0_group2)     8.80      2.83     5.16    15.51 1.01      413      755
+sd(y0_Intercept)    24.55     10.34    12.73    52.12 1.00      626      652
+sd(y0_y0_group2)   124.45     33.29    75.51   213.10 1.00      607      873
+
+Population-Level Effects: 
+             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+x0_Intercept    35.00      1.64    31.69    38.35 1.01      376      330
+y0_Intercept    63.14     11.56    44.18    90.88 1.01      447      487
+
+Family Specific Parameters: 
+      Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+shape     3.49      0.08     3.34     3.65 1.00     2990     1023
+
+Draws were sampled using sampling(NUTS). For each parameter, Bulk_ESS
+and Tail_ESS are effective sample size measures, and Rhat is the potential
+scale reduction factor on split chains (at convergence, Rhat = 1).
+> 

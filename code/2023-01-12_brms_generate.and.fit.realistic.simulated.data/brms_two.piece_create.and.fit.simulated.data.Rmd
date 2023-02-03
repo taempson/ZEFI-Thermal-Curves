@@ -422,7 +422,7 @@ last_plot()
 
 ```{r}
 
-iter <- 2000
+iter <- 800
 xmax <- 46
 x0max <- xmax - 0.5;
 x0min <- 20;
@@ -458,8 +458,7 @@ data <- data_sim %>% filter(x_flag == x_flag_data,
                             sampling_dist == sampling_dist,
                             n_reps == n_r) %>%
     rename(temp = temp_mean, male = index) %>%
-    rename(y = motif_count, x = temp) %>%
-    mutate(male = factor(male))
+    rename(y = motif_count, x = temp) 
 
 ```
 #### Fit Model
@@ -470,8 +469,8 @@ data <- data_sim %>% filter(x_flag == x_flag_data,
 Working with `groups_2` data
 
 ```{r}
-adapt_delta <- 0.9
-flags <- c("groups_1", "groups_2")
+adapt_delta <- 0.95
+flags <- c("groups_2")
 models <- c("brms")
 flags_x <- flags
 flags_y <- flags
@@ -513,13 +512,15 @@ for(x_flag in flags_x) {
         x_form <- switch(x_flag,
                          individual = formula(x0 ~ -1 + male), 
                          groups_1 = formula(x0 ~ (1|| male)), # no need for x0_group when there's only 1 group
-                         groups_2 = formula(x0 ~ 1 + (x0_group|| male))
+                         #groups_2 = formula(x0 ~ (1||male) + x0_group)
+                         groups_2 = formula(x0 ~ (x0_group||male) )
                          )
         
         y_form <- switch(y_flag,
                          individual = formula(y0 ~ -1 + male), 
                          groups_1 = formula(y0 ~ (1|| male)),
-                         groups_2 = formula(y0 ~ 1 + (y0_group|| male))
+                         #groups_2 = formula(y0 ~ (1|| male) + y0_group)
+                         groups_2 = formula(y0 ~ (y0_group||male))
                          )
         nlform <- bf(
             y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
@@ -527,7 +528,7 @@ for(x_flag in flags_x) {
             y_form,
             nl = TRUE)
 
-        if(FALSE) get_prior(nlform, data = data, family = negbinomial(link = "identity", link_shape = "identity"))
+        if(TRUE) get_prior(nlform, data = data, family = negbinomial(link = "identity", link_shape = "identity"))
 
 
         fit <- brm(nlform,
@@ -551,7 +552,7 @@ for(x_flag in flags_x) {
     ## Avoid having brms recompile model by defining
     ## model in global environment
     stanfit <- fit
-    
+stan    
                                         #fit_exp <- expose_functions(fit) , vectorize = TRUE)
                                         #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
     print(fit)     
