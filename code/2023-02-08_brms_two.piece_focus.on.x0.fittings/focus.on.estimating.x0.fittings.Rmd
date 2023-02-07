@@ -1,0 +1,314 @@
+---
+title: "Piecewise Regression with NB Error on 2022 and Earlier Data using BRMS"
+author: "Michael Gilchrist"
+date: "Created: 2023-02-07; Code run on `r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE, }
+
+## Global options
+options(digits = 3)
+
+### Knitr specific
+knitr::opts_chunk$set(
+                      warning = TRUE, # show warnings
+                      message = FALSE, # show messages
+                      error = TRUE, # do not interrupt generation in case of errors,
+                      echo = TRUE  # show R code
+                      fig.width = 8,
+                      fig.path = "Figures/"
+                  )
+
+options("warn" = 1) ## print warnings when they occur
+
+if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=5E1, output = TRUE)
+
+```
+# Goal
+
+- Fit two piece nb to real data using `brms` where the goal is to extract as much info on `x0` as possible.
+- Code largely derived from `../2023-01-12_brms_generate.and.fit.realistic.simulated.data/brms_two.piece_create.and.fit.simulated.data.Rmd`
+
+
+## Recap
+
+# Set up
+
+## Install libraries
+
+```{r, message = FALSE}
+
+# install packages user might not have by replacing FALSE with TRUE
+
+## load libraries
+library(stats)
+library(MASS) # provides negative binomial fitting:  glm.nb
+library(ggplot2)
+library(ggpubr)
+library(grid)
+library(gridExtra)
+library(GGally)
+library(broom)
+library(tidyverse)
+library(viridisLite)
+library(cmdstanr)
+library(rstan)
+options(mc.cores = 4) #(parallel::detectCores()-2))
+rstan_options(auto_write = TRUE)
+library(brms)
+library(loo)
+library(shinystan)
+
+
+## options(ggplot2.continuous.colour="viridis",
+##        ggplot2.discrete.colour="viridis",
+##        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
+##        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
+
+library(reshape2)
+library(lme4)
+library(latex2exp)
+
+```
+
+## Load Data
+
+```{r}
+input_dir <- file.path("input")
+output_dir <- file.path("output")
+
+load(file.path(input_dir, "data.processing_2022-12-15.Rda"),
+     verbose = TRUE)
+
+
+motif_data
+```
+# Process Data
+## Create Working Dataset
+
+```{r}
+
+filter_data <- TRUE
+
+if(filter_data) {
+    males_filtered_disp <- motif_stats_40C %>%
+        filter(dispersion < 50) %>%
+        pull(male)
+
+    males_filtered_mean <- motif_stats %>%
+        filter(mean > 10) %>% # changing from 10 to 40 removes previous male 7 (T258)
+        pull(male)
+
+    male_vector <- intersect(males_filtered_mean, males_filtered_disp)
+} else {
+    male_vector <- motif_data %>% select(male) %>% distinct()
+}
+
+data_ind <- motif_data %>%
+    filter(male %in% male_vector) %>%
+    mutate(male = droplevels(male)) %>%
+    mutate(index = as.integer(male)) %>%
+    mutate(male = as.character(male)) %>% 
+    arrange(index) %>%
+    select(male, index, motif_count, temp_target, temp, round, trial_round, date, counter) %>% 
+    ##    left_join(index_shape, by = "index") %>%
+    mutate()
+
+stats_ind <- motif_stats %>%
+    filter(male %in% male_vector) 
+
+
+data_ind <- data_ind %>% filter(temp < 38) %>%
+    group_by(male) %>% mutate(y0_simple.est = mean(motif_count), phi_ind = var(motif_count)/y0_simple.est) %>% ## phi is overdispersion parameter
+    ungroup()
+
+summary(data_ind)
+n_male <- length(unique(data_ind$male))
+
+## for calculation of 'theta_bar' (size in `rnbinom`) see note in `Set Up Simulate Data`
+summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_simple.est), y0_sd = sd(y0_simple.est), phi_bar = median(phi_ind), theta_bar = y0_bar^2/(y0_sd^2 - y0_bar))
+comment(summary_stats) <- "summary stats for observed bird motifs"
+
+#save(summary_stats, file = file.path(output_dir, "obs_summary_stats.Rda"))
+
+```
+# Fit Models
+
+## Common Parameters
+
+```{r}
+
+xmax <- 46
+x0max <- xmax - 0.5;
+x0min <- 20;
+
+y_xmax <- 0
+y0_min <- 10
+sd_y0_prior <- 200
+alpha_theta_prior <- 10 ## exponential dist scale parameter for overdispersion theta in quasipoisson
+alpha_phi_prior <- 0.01 ## gamma dist shape parameter for nb. brms default is 0.01
+beta_phi_prior <- 0.01 ## gamma dist rate parameter for nb. brms default is 0.01
+
+
+## values to use for model predictions
+x_for_predictions = seq(25, xmax, length.out = 100)
+n_cores <- 4
+n_chains <- n_cores
+```
+
+### Analyze `x ~ uniform_1 | groups_1, y ~ individual`
+
+Set up Data
+
+```{r}
+
+data_base <- data_ind %>%
+    mutate(x0_group = NA, y0_group = NA, male = factor(male)) %>%
+    rename(y = motif_count, x = temp) 
+
+```
+
+```{r}
+
+adapt_delta <- 0.95 #0.95
+iter <- 4000
+thin <- 1
+
+#models <- c("brms")
+sampling_dists <- c("nb", "lognormal", "com_poisson") 
+flags_x <- c("individual", "uniform_1", "groups_1")
+flags_y <- c("individual")
+N <- length(data)
+
+fit_tbl <- crossing(#model = models,
+                    sampling_dist = sampling_dists,
+                    x0_flag = flags_x, y0_flag = flags_y,
+                    desc = "NA_character",
+                    y0_group_list = list(NA), #tbl_tmp, #list(NA),
+                    x0_group_list = list(NA),
+                    fit = list(NA),
+                    llik = list(NA),
+                    r_eff = list(NA),
+                    loo = list(NA)
+                    )
+
+## Priors
+
+my_priors <- prior(
+  # uniform(10, 1000), nlpar = "y0", lb = 10) +
+  normal(150, 200), nlpar = "y0", lb = 10) +
+  prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
+
+
+## Run Analysis
+for(x_flag in flags_x) {
+    for(y_flag in flags_y) {
+
+        ## Set up variables for saving model and fit
+        desc <- paste0(model, ": ", x_flag, ", ", y_flag)
+        curr_row <- which(#fit_tbl$model == model &
+                          fit_tbl$x0_flag == x_flag &
+                          fit_tbl$y0_flag == y_flag)
+        fit_tbl[ curr_row, ]$desc <- desc
+
+      print(desc)
+      ## Refresh data in case x0_group or y0_group are all set to 1
+      data <- data_base
+
+      ## Set flags based on fitted model structure
+      if(x_flag %in% c("uniform_1", "groups_1")) data <- mutate(data, x0_group = 1)
+      if(y_flag %in% c("uniform_1", "groups_1")) data <-mutate(data, y0_group = 1)
+      if(x_flag %in% c("individual")) data <- mutate(data, x0_group = male)
+      if(y_flag %in% c("individual")) data <- mutate(data, y0_group = male)
+
+
+
+      ## Note we need to put a tibble into a list because row updates, even if doing
+      ## just one cell, require a list format.
+      fit_tbl[[curr_row, "x0_group_list"]] <- list(unique(data[, c("male", "x0_group")]))
+      fit_tbl[[curr_row, "y0_group_list"]] <- list(unique(data[, c("male", "y0_group")]))
+
+        ## Parameter Structure
+        x_form <- switch(x_flag,
+                         uniform_1 = formula(x0 ~ 1),
+                         uniform_2 = formula(x0 ~ 1 + x0_group),
+                         # Don't include x0_group info which is determined by the data set
+                         groups_1 = formula(x0 ~ (1||male)), 
+                         groups_2 = formula(x0 ~ (1||male) + x0_group),
+                         individual = formula(x0 ~ -1 + male)
+                         )
+        
+        y_form <- switch(y_flag,
+                         uniform_1 = formula(y0 ~ 1),
+                         uniform_2 = formula(y0 ~ 1 + y0_group),
+                         groups_1 = formula(y0 ~ (1|| male)), 
+                         groups_2 = formula(y0 ~ (1|| male) + y0_group),
+                         individual = formula(y0 ~ -1 + male)
+                         )
+        nlform <- bf(
+            y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
+            x_form,
+            y_form,
+            nl = TRUE)
+
+        family <- switch(sampling_dist,
+                         "nb"= negbinomial(link = "identity", link_shape = "identity"),
+                         "lognormal" = lognormal(link = "identity", link_sigma = "log"),
+                         ## generalized poisson
+                         ## quasipoisson
+                         ## COM-Poisson: See https://discourse.mc-stan.org/t/brms-and-conway-maxwell-poisson-distribution/7368/17
+                         ##   Also: str(brmsfamily("com_poisson"))
+                         "com_poisson"=com_poisson(link="identity", link_shape="log")
+                         )
+        
+        if(TRUE) print(get_prior(nlform,
+                                 data = data,
+                                 family = family
+                                 ))
+
+        save_model <-paste0(paste("brms", sampling_dist, x_flag, y_flag, sep="_"), ".stan")
+        
+        fit <- brm(nlform,
+                   data = data,
+                   ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
+                   ## link_shape corresponds to `phi` of `stan`'s
+                   ## Negbinomial_2
+                   ## Defining `phi = mu/theta` creates a quasipoisson
+                   ## distribution with overdispersion parameter (1 +theta)
+                   family = negbinomial(link = "identity", link_shape = "identity"),
+                   prior = my_priors,
+                   iter = iter,
+                   thin = thin,
+                   silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
+                   control = list(adapt_delta = adapt_delta,
+                                  max_treedepth = 12),
+                       ## Only print out sampling progress if in interactive mode
+                   refresh = ifelse(interactive(),max(iter/5, 1), 0),
+        chains = n_chains,
+        cores = n_cores,
+        save_model = save_model)
+    ## Avoid having brms recompile model by defining
+    ## model in global environment
+    stanfit <- fit
+
+                                        #fit_exp <- expose_functions(fit) , vectorize = TRUE)
+                                        #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
+        print(fit)
+        save(file = file.path(output_dir, paste0(save_model, ".Rda-tmp")), fit)
+    fit_tbl[ curr_row, ]$fit <- list(fit)
+
+      ## Print current warnings
+      warnings(summary)
+      ## Clear warnings()
+      ##warning(immediate. = FALSE)
+
+    }
+}
+
+save(file = file.path(output_dir, paste0("fit_tbl_data_", x_flag_data, "_", y_flag_data, "_n_reps_", n_reps, ".Rda")), fit_tbl)
+
+```
+
+##### Output from model fits
+
