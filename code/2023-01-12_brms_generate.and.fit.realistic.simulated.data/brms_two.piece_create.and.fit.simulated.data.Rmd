@@ -446,42 +446,50 @@ n_chains <- n_cores
 
 #### Set Up Data
 
+
+##### Data `sampling_dist`, `x0`, and `y0`: "nb", "groups_2", "groups_2"
 ```{r}
 
 
 x_flag_data <- "groups_2"
 y_flag_data <- "groups_2"
-sampling_dist <- "nb"
-n_r <- 32
+sampling_dist_data <- "nb"
+n_reps <- 32
 
 data_base <- data_sim %>% filter(x_flag == x_flag_data,
                             y_flag == y_flag_data,
-                            sampling_dist == sampling_dist,
-                            n_reps == n_r) %>%
+                            sampling_dist == sampling_dist_data,
+                            n_reps == !!n_reps) %>%
     rename(temp = temp_mean, male = index) %>%
     rename(y = motif_count, x = temp) 
 
 ```
+
 #### Fit Model
 
 
-##### `x0` and `y0` Parameter Structure: Individual
+##### Analysis `sampling_dist`, `x0`, and `y0`: "nb", "uniform_z", "groups_z"
 
-Working with `groups_2` data
+Working with `groups_2; nb` data
 
 ```{r}
-adapt_delta <- 0.875 #0.95
-iter <- 1000
+adapt_delta <- 0.9 #0.95
+iter <- 2000
+thin <- 2
+
+## could include "individual"
 flags <- c("uniform_1", "uniform_2", "groups_1", "groups_2")
 models <- c("brms")
+sampling_dist_fit <- "nb"
 flags_x <- flags
 flags_y <- flags
 N <- length(data)
 
 fit_tbl <- crossing(model = models,
-                    x0 = flags_x, y0 = flags_y,
+                    sampling_dist = sampling_dist_fit,
+                    x0_flag = flags_x, y0_flag = flags_y,
                     desc = "NA_character",
-                    y0_group_list = list(NA),
+                    y0_group_list = list(NA), #tbl_tmp, #list(NA),
                     x0_group_list = list(NA),
                     fit = list(NA),
                     llik = list(NA),
@@ -505,32 +513,43 @@ for(x_flag in flags_x) {
         ## Set up variables for saving model and fit
         desc <- paste0(model, ": ", x_flag, ", ", y_flag)
         curr_row <- which(fit_tbl$model == model &
-                          fit_tbl$x0 == x_flag &
-                          fit_tbl$y0 == y_flag)
+                          fit_tbl$x0_flag == x_flag &
+                          fit_tbl$y0_flag == y_flag)
         fit_tbl[ curr_row, ]$desc <- desc
 
-        print(desc)
+      print(desc)
       ## Refresh data in case x0_group or y0_group are all set to 1
       data <- data_base
 
       ## Set flags based on fitted model structure
       if(x_flag %in% c("uniform_1", "groups_1")) data <- mutate(data, x0_group = 1)
       if(y_flag %in% c("uniform_1", "groups_1")) data <-mutate(data, y0_group = 1)
-      
+      if(x_flag %in% c("individual")) data <- mutate(data, x0_group = male)
+      if(y_flag %in% c("individual")) data <- mutate(data, y0_group = male)
+
+
+
+      ## Note we need to put a tibble into a list because row updates, even if doing
+      ## just one cell, require a list format.
+      fit_tbl[[curr_row, "x0_group_list"]] <- list(unique(data[, c("male", "x0_group")]))
+      fit_tbl[[curr_row, "y0_group_list"]] <- list(unique(data[, c("male", "y0_group")]))
+
         ## Parameter Structure
         x_form <- switch(x_flag,
-                         uniform_1 = formula(x0 ~ -1 + male),
-                         uniform_2 = formula(x0 ~ -1 + male + x0_group),
+                         uniform_1 = formula(x0 ~ 1),
+                         uniform_2 = formula(x0 ~ 1 + x0_group),
                          # Don't include x0_group info which is determined by the data set
                          groups_1 = formula(x0 ~ (1||male)), 
-                         groups_2 = formula(x0 ~ (1||male) + x0_group)
+                         groups_2 = formula(x0 ~ (1||male) + x0_group),
+                         individual = formula(x0 ~ -1 + male)
                          )
         
         y_form <- switch(y_flag,
-                         uniform_1 = formula(y0 ~ -1 + male),
-                         uniform_2 = formula(y0 ~ -1 + male + y0_group),
+                         uniform_1 = formula(y0 ~ 1),
+                         uniform_2 = formula(y0 ~ 1 + y0_group),
                          groups_1 = formula(y0 ~ (1|| male)), 
-                         groups_2 = formula(y0 ~ (1|| male) + y0_group)
+                         groups_2 = formula(y0 ~ (1|| male) + y0_group),
+                         individual = formula(y0 ~ -1 + male)
                          )
         nlform <- bf(
             y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
@@ -555,9 +574,10 @@ for(x_flag in flags_x) {
                    family = negbinomial(link = "identity", link_shape = "identity"),
                    prior = my_priors,
                    iter = iter,
+                   thin = 2,
                    silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
                    control = list(adapt_delta = adapt_delta,
-                       max_treedepth = 12),
+                                  max_treedepth = 12),
                        ## Only print out sampling progress if in interactive mode
                    refresh = ifelse(interactive(),max(iter/10, 1), 0),
         chains = n_chains,
@@ -576,7 +596,7 @@ stan
     warnings(summary)
     warning(immediate. = FALSE)
 save(file = file.path(output_dir, paste0("fit_tbl_data.Rda-tmp")), fit_tbl)
-}
+    }
 }
 
 save(file = file.path(output_dir, paste0("fit_tbl_data_", x_flag_data, "_", y_flag_data, "_n_reps_", n_reps, ".Rda")), fit_tbl)
