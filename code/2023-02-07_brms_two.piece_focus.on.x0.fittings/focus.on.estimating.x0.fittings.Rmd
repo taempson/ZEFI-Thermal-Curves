@@ -33,6 +33,10 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=5E1, ou
 
 ## Recap
 
+- Code runs.
+- Have tried nb model as well as more exotic error models.
+- Having set `x0max` to 45.9, we get 95% PI that are below this point.
+
 # Set up
 
 ## Install libraries
