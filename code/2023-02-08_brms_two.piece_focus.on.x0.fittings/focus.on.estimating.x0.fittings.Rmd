@@ -202,104 +202,108 @@ my_priors <- prior(
 
 
 ## Run Analysis
-fit_save_to_tbl <- function(x_flag = "uniform_1",
-                            y_flag="uniform_1",
-                            sampling_dist = "nb",
-                            data,
-                            priors) { 
-  ## Set up variables for saving model and fit
-  desc <- paste0(model, ": ", x_flag, ", ", y_flag)
-  print(desc)
+for(x_flag in flags_x) {
+    for(y_flag in flags_y) {
 
-  ## Set flags based on fitted model structure
-  if(x_flag %in% c("uniform_1", "groups_1")) data <- mutate(data, x0_group = 1)
-  if(y_flag %in% c("uniform_1", "groups_1")) data <-mutate(data, y0_group = 1)
-  if(x_flag %in% c("individual")) data <- mutate(data, x0_group = male)
-  if(y_flag %in% c("individual")) data <- mutate(data, y0_group = male)
+        ## Set up variables for saving model and fit
+        desc <- paste0(model, ": ", x_flag, ", ", y_flag)
+        curr_row <- which(#fit_tbl$model == model &
+                          fit_tbl$x0_flag == x_flag &
+                          fit_tbl$y0_flag == y_flag)
+        fit_tbl[ curr_row, ]$desc <- desc
+
+      print(desc)
+      ## Refresh data in case x0_group or y0_group are all set to 1
+      data <- data_base
+
+      ## Set flags based on fitted model structure
+      if(x_flag %in% c("uniform_1", "groups_1")) data <- mutate(data, x0_group = 1)
+      if(y_flag %in% c("uniform_1", "groups_1")) data <-mutate(data, y0_group = 1)
+      if(x_flag %in% c("individual")) data <- mutate(data, x0_group = male)
+      if(y_flag %in% c("individual")) data <- mutate(data, y0_group = male)
 
 
 
-  ## Note we need to put a tibble into a list because row updates, even if doing
-  ## just one cell, require a list format.
-  ##fit_tbl[[curr_row, "x0_group_list"]] <- list(unique(data[, c("male", "x0_group")]))
-  ##fit_tbl[[curr_row, "y0_group_list"]] <- list(unique(data[, c("male", "y0_group")]))
-  x0_group_list <- list(unique(data[, c("male", "x0_group")]))
-  x0_group_list <- list(unique(data[, c("male", "x0_group")]))
-  
-  ## Parameter Structure
-  x_form <- switch(x_flag,
-                   uniform_1 = formula(x0 ~ 1),
-                   uniform_2 = formula(x0 ~ 1 + x0_group),
-                   # Don't include x0_group info which is determined by the data set
-                   groups_1 = formula(x0 ~ (1||male)), 
-                   groups_2 = formula(x0 ~ (1||male) + x0_group),
-                   individual = formula(x0 ~ -1 + male)
-                   )
+      ## Note we need to put a tibble into a list because row updates, even if doing
+      ## just one cell, require a list format.
+      fit_tbl[[curr_row, "x0_group_list"]] <- list(unique(data[, c("male", "x0_group")]))
+      fit_tbl[[curr_row, "y0_group_list"]] <- list(unique(data[, c("male", "y0_group")]))
 
-  y_form <- switch(y_flag,
-                   uniform_1 = formula(y0 ~ 1),
-                   uniform_2 = formula(y0 ~ 1 + y0_group),
-                   groups_1 = formula(y0 ~ (1|| male)), 
-                   groups_2 = formula(y0 ~ (1|| male) + y0_group),
-                   individual = formula(y0 ~ -1 + male)
-                   )
-  nlform <- bf(
-    y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
-    x_form,
-    y_form,
-    nl = TRUE)
+        ## Parameter Structure
+        x_form <- switch(x_flag,
+                         uniform_1 = formula(x0 ~ 1),
+                         uniform_2 = formula(x0 ~ 1 + x0_group),
+                         # Don't include x0_group info which is determined by the data set
+                         groups_1 = formula(x0 ~ (1||male)), 
+                         groups_2 = formula(x0 ~ (1||male) + x0_group),
+                         individual = formula(x0 ~ -1 + male)
+                         )
+        
+        y_form <- switch(y_flag,
+                         uniform_1 = formula(y0 ~ 1),
+                         uniform_2 = formula(y0 ~ 1 + y0_group),
+                         groups_1 = formula(y0 ~ (1|| male)), 
+                         groups_2 = formula(y0 ~ (1|| male) + y0_group),
+                         individual = formula(y0 ~ -1 + male)
+                         )
+        nlform <- bf(
+            y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
+            x_form,
+            y_form,
+            nl = TRUE)
 
-  family <- switch(sampling_dist,
-                   "nb"= negbinomial(link = "identity", link_shape = "identity"),
-                   "lognormal" = lognormal(link = "identity", link_sigma = "log"),
-                   ## generalized poisson
-                   ## quasipoisson
-                   ## COM-Poisson: See https://discourse.mc-stan.org/t/brms-and-conway-maxwell-poisson-distribution/7368/17
-                   ##   Also: str(brmsfamily("com_poisson"))
-                   "com_poisson"=com_poisson(link="identity", link_shape="log")
-                   )
+        family <- switch(sampling_dist,
+                         "nb"= negbinomial(link = "identity", link_shape = "identity"),
+                         "lognormal" = lognormal(link = "identity", link_sigma = "log"),
+                         ## generalized poisson
+                         ## quasipoisson
+                         ## COM-Poisson: See https://discourse.mc-stan.org/t/brms-and-conway-maxwell-poisson-distribution/7368/17
+                         ##   Also: str(brmsfamily("com_poisson"))
+                         "com_poisson"=com_poisson(link="identity", link_shape="log")
+                         )
+        
+        if(TRUE) print(get_prior(nlform,
+                                 data = data,
+                                 family = family
+                                 ))
 
-  if(TRUE) print(get_prior(nlform,
-                           data = data,
-                           family = family
-                           ))
+        save_model <-paste0(paste("brms", sampling_dist, x_flag, y_flag, sep="_"), ".stan")
+        
+        fit <- brm(nlform,
+                   data = data,
+                   ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
+                   ## link_shape corresponds to `phi` of `stan`'s
+                   ## Negbinomial_2
+                   ## Defining `phi = mu/theta` creates a quasipoisson
+                   ## distribution with overdispersion parameter (1 +theta)
+                   family = negbinomial(link = "identity", link_shape = "identity"),
+                   prior = my_priors,
+                   iter = iter,
+                   thin = thin,
+                   silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
+                   control = list(adapt_delta = adapt_delta,
+                                  max_treedepth = 12),
+                       ## Only print out sampling progress if in interactive mode
+                   refresh = ifelse(interactive(),max(iter/5, 1), 0),
+        chains = n_chains,
+        cores = n_cores,
+        save_model = save_model)
+    ## Avoid having brms recompile model by defining
+    ## model in global environment
+    stanfit <- fit
 
-  save_model <-paste0(paste("brms", sampling_dist, x_flag, y_flag, sep="_"), ".stan")
+                                        #fit_exp <- expose_functions(fit) , vectorize = TRUE)
+                                        #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
+        print(fit)
+        save(file = file.path(output_dir, paste0(save_model, ".Rda-tmp")), fit)
+    fit_tbl[ curr_row, ]$fit <- list(fit)
 
-  fit <- brm(nlform,
-             data = data,
-             ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
-             ## link_shape corresponds to `phi` of `stan`'s
-             ## Negbinomial_2
-             ## Defining `phi = mu/theta` creates a quasipoisson
-             ## distribution with overdispersion parameter (1 +theta)
-             family = negbinomial(link = "identity", link_shape = "identity"),
-             prior = my_priors,
-             iter = iter,
-             thin = thin,
-             silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
-             control = list(adapt_delta = adapt_delta,
-                            max_treedepth = 12),
-             ## Only print out sampling progress if in interactive mode
-             refresh = ifelse(interactive(),max(iter/5, 1), 0),
-             chains = n_chains,
-             cores = n_cores,
-             save_model = save_model)
-  ## Avoid having brms recompile model by defining
-  ## model in global environment
-  stanfit <- fit
+      ## Print current warnings
+      warnings(summary)
+      ## Clear warnings()
+      ##warning(immediate. = FALSE)
 
-  #fit_exp <- expose_functions(fit) , vectorize = TRUE)
-  #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
-  print(fit)
-  save(file = file.path(output_dir, paste0(save_model, ".Rda-tmp")), fit)
-  fit_tbl[ curr_row, ]$fit <- list(fit)
-
-  ## Print current warnings
-  warnings(summary)
-  ## Clear warnings()
-  ##warning(immediate. = FALSE)
-  return(fit_tbl[curr_row, ])
+    }
 }
 
 save(file = file.path(output_dir, paste0("fit_tbl_data_", x_flag_data, "_", y_flag_data, "_n_reps_", n_reps, ".Rda")), fit_tbl)
