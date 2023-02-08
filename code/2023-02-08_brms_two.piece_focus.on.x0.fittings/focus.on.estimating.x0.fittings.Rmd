@@ -106,28 +106,33 @@ if(filter_data) {
 }
 
 data_ind <- motif_data %>%
-    filter(male %in% male_vector) %>%
-    mutate(male = droplevels(male)) %>%
-    mutate(index = as.integer(male)) %>%
-    mutate(male = as.character(male)) %>% 
-    arrange(index) %>%
-    select(male, index, motif_count, temp_target, temp, round, trial_round, date, counter) %>% 
-    ##    left_join(index_shape, by = "index") %>%
-    mutate()
+  filter(male %in% male_vector) %>%
+  mutate(male = droplevels(male)) %>%
+  mutate(index = as.integer(male)) %>%
+  mutate(male = as.character(male)) %>% 
+  arrange(index) %>%
+  select(male, index, motif_count, temp_target, temp, round, trial_round, date, counter) %>% 
+  ##    left_join(index_shape, by = "index") %>%
+  group_by(male) %>% mutate(y0_simple_est = mean(motif_count), phi_ind = var(motif_count)/y0_simple_est) %>% ## phi is overdispersion parameter
+  ungroup() %>% 
+  mutate()
 
 stats_ind <- motif_stats %>%
     filter(male %in% male_vector) 
 
 
-data_ind <- data_ind %>% filter(temp < 38) %>%
-    group_by(male) %>% mutate(y0_simple.est = mean(motif_count), phi_ind = var(motif_count)/y0_simple.est) %>% ## phi is overdispersion parameter
-    ungroup()
-
 summary(data_ind)
+
+y0_hist <- data_ind %>% select(y0_simple_est) %>% unique() %>% ggplot(aes(y0_simple_est)) + geom_histogram(bins = 10)
+print(y0_hist)
+
+temp_hist <- ggplot(data_ind, aes(temp)) + geom_histogram()
+print(temp_hist)
+
 n_male <- length(unique(data_ind$male))
 
 ## for calculation of 'theta_bar' (size in `rnbinom`) see note in `Set Up Simulate Data`
-summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_simple.est), y0_sd = sd(y0_simple.est), phi_bar = median(phi_ind), theta_bar = y0_bar^2/(y0_sd^2 - y0_bar))
+summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_simple_est), y0_sd = sd(y0_simple_est), phi_bar = median(phi_ind), theta_bar = y0_bar^2/(y0_sd^2 - y0_bar))
 comment(summary_stats) <- "summary stats for observed bird motifs"
 
 #save(summary_stats, file = file.path(output_dir, "obs_summary_stats.Rda"))
@@ -140,7 +145,7 @@ comment(summary_stats) <- "summary stats for observed bird motifs"
 ```{r}
 
 xmax <- 46
-x0max <- xmax - 0.5;
+x0max <- xmax - 0.1;
 x0min <- 20;
 
 y_xmax <- 0
@@ -177,7 +182,7 @@ thin <- 1
 
 #models <- c("brms")
 sampling_dists <- c("nb", "lognormal", "com_poisson") 
-flags_x <- c("individual", "uniform_1", "groups_1")
+flags_x <- c("uniform_1", "groups_1", "individual")
 flags_y <- c("individual")
 N <- length(data)
 
@@ -195,19 +200,14 @@ fit_tbl <- crossing(#model = models,
 
 ## Priors
 
-my_priors <- prior(
-  # uniform(10, 1000), nlpar = "y0", lb = 10) +
-  normal(150, 200), nlpar = "y0", lb = 10) +
-  prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
-
-
 ## Run Analysis
-for(x_flag in flags_x) {
+for(sampling in sampling_dists[[3]]) {
+    for(x_flag in flags_x) {
     for(y_flag in flags_y) {
 
         ## Set up variables for saving model and fit
         desc <- paste0(model, ": ", x_flag, ", ", y_flag)
-        curr_row <- which(#fit_tbl$model == model &
+        curr_row <- which(fit_tbl$sampling_dist == sampling &
                           fit_tbl$x0_flag == x_flag &
                           fit_tbl$y0_flag == y_flag)
         fit_tbl[ curr_row, ]$desc <- desc
@@ -246,28 +246,45 @@ for(x_flag in flags_x) {
                          groups_2 = formula(y0 ~ (1|| male) + y0_group),
                          individual = formula(y0 ~ -1 + male)
                          )
-        nlform <- bf(
-            y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
-            x_form,
-            y_form,
-            nl = TRUE)
-
-        family <- switch(sampling_dist,
+              
+        family <- switch(sampling,
                          "nb"= negbinomial(link = "identity", link_shape = "identity"),
                          "lognormal" = lognormal(link = "identity", link_sigma = "log"),
                          ## generalized poisson
                          ## quasipoisson
                          ## COM-Poisson: See https://discourse.mc-stan.org/t/brms-and-conway-maxwell-poisson-distribution/7368/17
                          ##   Also: str(brmsfamily("com_poisson"))
-                         "com_poisson"=com_poisson(link="identity", link_shape="log")
+                         "com_poisson"=brmsfamily("com_poisson", link="identity", link_shape="log") #com_poisson(link="identity", link_shape="log")
                          )
-        
+      prior_core <- prior(
+        # uniform(10, 1000), nlpar = "y0", lb = 10) +
+        normal(150, 200), nlpar = "y0", lb = 10) +
+        prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
+      
+      prior <- switch(sampling,
+                      "nb" = prior_core, #  + prior(exponential(1), dpar = "shape", class = "sd"),
+                      "lognormal" = prior_core,
+                      "com_poisson" = prior_core)
+      
+      hyper_form <- switch(sampling,
+                      "nb" = formula(shape ~ 1|male),
+                      "lognormal" = formula(sigma ~ 1|male),
+                      "com_poisson" = formula(shape ~ 1|male) )
+      hyper_form <- NA
+      
+      nlform <- bf(
+            y ~  0 - (46 - fmax(x0, x)) * (0 - y0)/(46 - x0),
+            x_form,
+            y_form,
+            hyper_form,
+            nl = TRUE)
+
         if(TRUE) print(get_prior(nlform,
                                  data = data,
                                  family = family
                                  ))
 
-        save_model <-paste0(paste("brms", sampling_dist, x_flag, y_flag, sep="_"), ".stan")
+        save_model <-paste0(paste("brms", sampling, x_flag, y_flag, sep="_"), ".stan")
         
         fit <- brm(nlform,
                    data = data,
@@ -277,7 +294,7 @@ for(x_flag in flags_x) {
                    ## Defining `phi = mu/theta` creates a quasipoisson
                    ## distribution with overdispersion parameter (1 +theta)
                    family = negbinomial(link = "identity", link_shape = "identity"),
-                   prior = my_priors,
+                   prior = prior,
                    iter = iter,
                    thin = thin,
                    silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
@@ -296,7 +313,7 @@ for(x_flag in flags_x) {
                                         #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
         print(fit)
         save(file = file.path(output_dir, paste0(save_model, ".Rda-tmp")), fit)
-    fit_tbl[ curr_row, ]$fit <- list(fit)
+        fit_tbl[ curr_row, ]$fit <- list(fit)
 
       ## Print current warnings
       warnings(summary)
@@ -305,8 +322,9 @@ for(x_flag in flags_x) {
 
     }
 }
+}
 
-save(file = file.path(output_dir, paste0("fit_tbl_data_", x_flag_data, "_", y_flag_data, "_n_reps_", n_reps, ".Rda")), fit_tbl)
+save(file = file.path(output_dir, paste0("fit_tbl_", format(Sys.time(), "%Y-%m-%d_%H-%M"), ".Rda")), fit_tbl)
 
 ```
 
