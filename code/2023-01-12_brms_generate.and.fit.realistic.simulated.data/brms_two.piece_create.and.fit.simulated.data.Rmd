@@ -473,9 +473,9 @@ data_base <- data_sim %>% filter(x_flag == x_flag_data,
 Working with `groups_2; nb` data
 
 ```{r}
-adapt_delta <- 0.9 #0.95
+adapt_delta <- 0.95 #0.95
 iter <- 2000
-thin <- 2
+thin <- 1
 
 ## could include "individual"
 flags <- c("uniform_1", "uniform_2", "groups_1", "groups_2")
