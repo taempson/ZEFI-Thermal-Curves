@@ -35,7 +35,8 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=5E1, ou
 
 - Code runs.
 - Have tried nb model as well as more exotic error models.
-- Having set `x0max` to 45.9, we get 95% PI that are below this point.
+- Having set `x0max` to 45.5, we get 95% PI that are right up to this point.
+  Have changed ub to 45.9, but haven't tested it yet.
 
 # Set up
 
@@ -263,7 +264,7 @@ for(sampling in sampling_dists[[3]]) {
       prior_core <- prior(
         # uniform(10, 1000), nlpar = "y0", lb = 10) +
         normal(150, 200), nlpar = "y0", lb = 10) +
-        prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
+        prior(uniform(30, 45.9), lb = 30, ub = 45.9, nlpar = "x0")
       
       prior <- switch(sampling,
                       "nb" = prior_core, #  + prior(exponential(1), dpar = "shape", class = "sd"),
