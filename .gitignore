@@ -9,3 +9,4 @@ tmp*.pdf
 *.aux
 \#*
 *.pdf
+*tmp
