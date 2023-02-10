@@ -36,7 +36,8 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=5E1, ou
 - Code runs.
 - Have tried nb model as well as more exotic error models.
 - Having set `x0max` to 45.5, we get 95% PI that are right up to this point.
-  Have changed ub to 45.9, but haven't tested it yet.
+Have changed ub to 45.9, but haven't tested it yet.
+- Considered modeling `y0 ~lognormal()`, but that doesn't appear to be a good approximation.
 
 # Set up
 
@@ -80,6 +81,8 @@ library(latex2exp)
 ## Load Data
 
 ```{r}
+resave_data <- FALSE # flag for saving data_stan and possibly others in future
+
 input_dir <- file.path("input")
 output_dir <- file.path("output")
 
@@ -89,7 +92,9 @@ load(file.path(input_dir, "data.processing_2022-12-15.Rda"),
 
 motif_data
 ```
+
 # Process Data
+
 ## Create Working Dataset
 
 ```{r}
@@ -128,8 +133,16 @@ stats_ind <- motif_stats %>%
 
 summary(data_ind)
 
-y0_hist <- data_ind %>% select(y0_simple_est) %>% unique() %>% ggplot(aes(y0_simple_est)) + geom_histogram(bins = 10)
+y0_hist <- data_ind %>%
+  select(y0_simple_est) %>%
+  unique() %>%
+  ggplot(aes(y0_simple_est)) + geom_histogram(bins = 8) 
 print(y0_hist)
+
+log_y0_hist <- y0_hist +
+  scale_x_log10()
+print(log_y0_hist)
+
 
 temp_hist <- ggplot(data_ind, aes(temp)) + geom_histogram()
 print(temp_hist)
@@ -137,7 +150,14 @@ print(temp_hist)
 n_male <- length(unique(data_ind$male))
 
 ## for calculation of 'theta_bar' (size in `rnbinom`) see note in `Set Up Simulate Data`
-summary_stats <- data_ind %>% ungroup() %>%  summarize(y0_bar = mean(y0_simple_est), y0_sd = sd(y0_simple_est), phi_bar = median(phi_ind), theta_bar = y0_bar^2/(y0_sd^2 - y0_bar))
+summary_stats <- data_ind %>%
+    ungroup() %>%
+    summarize(y0_bar = mean(y0_simple_est),
+              y0_sd = sd(y0_simple_est),
+              log_y0_bar = mean(log(y0_simple_est)),
+              log_y0_sd = sd(log(y0_simple_est)),
+              phi_bar = median(phi_ind), # qpoisson over dispersion
+              theta_bar = y0_bar^2/(y0_sd^2 - y0_bar)) # nb shape parameter
 comment(summary_stats) <- "summary stats for observed bird motifs"
 
 #save(summary_stats, file = file.path(output_dir, "obs_summary_stats.Rda"))
@@ -173,9 +193,11 @@ Set up Data
 
 ```{r}
 
-data_base <- data_ind %>%
+data_stan <- data_ind %>%
     mutate(x0_group = NA, y0_group = NA, male = factor(male)) %>%
-    rename(y = motif_count, x = temp) 
+    rename(y = motif_count, x = temp)
+
+if(resave_data) save(file = file.path(output_dir, paste0("data_stan_", format(Sys.time(), "%Y-%m-%d_%H-%M"), ".Rda")), data_stan)
 
 ```
 
@@ -203,8 +225,6 @@ fit_tbl <- crossing(#model = models,
                     loo = list(NA)
                     )
 
-## Priors
-
 ## Run Analysis
 for(sampling in sampling_dists[[3]]) {
     for(x_flag in flags_x) {
@@ -219,7 +239,7 @@ for(sampling in sampling_dists[[3]]) {
 
       print(desc)
       ## Refresh data in case x0_group or y0_group are all set to 1
-      data <- data_base
+      data <- data_stan
 
       ## Set flags based on fitted model structure
       if(x_flag %in% c("uniform_1", "groups_1")) data <- mutate(data, x0_group = 1)
@@ -261,9 +281,11 @@ for(sampling in sampling_dists[[3]]) {
                          ##   Also: str(brmsfamily("com_poisson"))
                          "com_poisson"=brmsfamily("com_poisson", link="identity", link_shape="log") #com_poisson(link="identity", link_shape="log")
                          )
+      ## Priors 
       prior_core <- prior(
         # uniform(10, 1000), nlpar = "y0", lb = 10) +
-        normal(150, 200), nlpar = "y0", lb = 10) +
+        normal(150, 200), nlpar = "y0", lb = 10) + ## 
+        # prior(lognormal(log_y0_mean, 4 * log_y0_sd) + ## Never used due to data not really looking ~ logN
         prior(uniform(30, 45.9), lb = 30, ub = 45.9, nlpar = "x0")
       
       prior <- switch(sampling,
@@ -317,7 +339,7 @@ for(sampling in sampling_dists[[3]]) {
                                         #fit_exp <- expose_functions(fit) , vectorize = TRUE)
                                         #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
         print(fit)
-        save(file = file.path(output_dir, paste0(save_model, ".Rda-tmp")), fit)
+        save(file = file.path(output_dir, paste0(save_model, ".Rdata-tmp")), fit)
         fit_tbl[ curr_row, ]$fit <- list(fit)
 
       ## Print current warnings
@@ -326,10 +348,10 @@ for(sampling in sampling_dists[[3]]) {
       ##warning(immediate. = FALSE)
 
     }
-}
+    }
 }
 
-save(file = file.path(output_dir, paste0("fit_tbl_", format(Sys.time(), "%Y-%m-%d_%H-%M"), ".Rda")), fit_tbl)
+save(file = file.path(output_dir, paste0("fit_tbl_", format(Sys.time(), "%Y-%m-%d_%H-%M"), ".Rdata")), fit_tbl)
 
 ```
 
