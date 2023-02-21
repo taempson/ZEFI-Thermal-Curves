@@ -1,0 +1,192 @@
+---
+title: "Evaluate, Visualize, and Compare Piecewise Regression using BRMS"
+author: "Michael Gilchrist"
+date: "Created: 2023-02-07; Code run on `r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE, }
+
+## Global options
+options(digits = 3)
+
+### Knitr specific
+knitr::opts_chunk$set(
+                      warning = TRUE, # show warnings
+                      message = FALSE, # show messages
+                      error = TRUE, # do not interrupt generation in case of errors,
+                      echo = TRUE,  # show R code
+                      fig.width = 8,
+                      fig.path = "Figures/"
+                  )
+
+options("warn" = 1) ## print warnings when they occur
+
+if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=5E1, output = TRUE)
+
+```
+# Goal
+
+- Visualize the `brms` fits of two piece linear regression model.
+- Fit code:  `../2023-02-07_brms_two.piece_focus.on.x0.fittings`
+
+
+## Recap
+
+# Set up
+
+## Install libraries
+
+```{r, message = FALSE}
+
+## load libraries
+library(stats)
+library(MASS) # provides negative binomial fitting:  glm.nb
+library(ggplot2)
+library(ggpubr)
+library(viridisLite)
+#options(ggplot2.continuous.colour="viridis",
+#        ggplot2.discrete.colour="viridis",
+#        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
+#        ggplot2.scale_fill_continuous = scale_fill_viridis_c)
+## Loading required package: viridisLite
+colourcodes <- c("#d4a665", "#d27fff", "#7fd9ff")
+colourpal <- c(NLS="#d4a665", NLME="#d27fff", MCMC="#7fd9ff")
+
+library(grid)
+library(gridExtra)
+library(GGally)
+library(broom)
+library(tidyverse)
+library(tidybayes)
+library(cmdstanr)
+library(rstan)
+options(mc.cores = 4) #(parallel::detectCores()-2))
+rstan_options(auto_write = TRUE)
+library(brms)
+library(loo)
+library(shinystan)
+library(reshape2)
+library(lme4)
+library(latex2exp)
+
+```
+# Load Fits
+
+```{r}
+
+load(file.path("input", "fit_tbl.Rdata"), verbose = TRUE)
+load(file.path("input", "data_stan.Rda"), verbose = TRUE)
+
+
+```
+
+# Evaluate Fits
+
+## Examine structure of `fit_tbl`
+
+```{r}
+
+head(fit_tbl)
+
+```
+
+## Tidybayes vignette
+
+```{r}
+
+
+
+fit_brms <- fit_tbl[[9, 7]][[1]]
+
+class(fit_tbl$fit)
+
+fits_brms <- fit_tbl[c(1,4,7), "fit"]
+
+    
+loo(fit_tbl[1, "fit"][[1]][[1]], fit_tbl[4, "fit"][[1]][[1]])
+
+fit_stan <- fit_brms$fit
+
+get_variables(fit_brms)  ## same results as for fit_stan
+
+plot(conditional_effects(fit_brms, effects = "x"), points = TRUE) 
+plot(conditional_effects(fit_brms, effects = "male"), points = TRUE)
+
+```
+## R-Bloggers: Evaluate single fit
+
+Code based on: [R-Bloggers: Nonlinear modeling using nls, nlme and brms](https://www.r-bloggers.com/2020/03/nonlinear-modelling-using-nls-nlme-and-brms/)
+
+
+```{r}
+
+sampling_dist <- "nb"
+x0_flag <- "uniform_1"
+y0_flag <- "individual"
+
+curr_row <- which(fit_tbl$sampling_dist == sampling_dist &
+                  fit_tbl$x0_flag == x0_flag &
+                  fit_tbl$y0_flag == y0_flag)
+
+fit_row <- fit_tbl[curr_row, ]
+
+fit <- fit_row$fit[[1]]
+
+male <- factor(levels(data_stan$male))
+
+pars_male <- paste0("b_y0_male", male)
+
+variable_plot <- c("b_x0_Intercept", "shape", pars_male[1:3])
+
+prior_summary(fit)
+summary(fit)
+
+## Look at samples
+plot(fit, variable = variable_plot)
+pairs(fit, variable = variable_plot)
+
+```
+
+
+## Generate model predictions
+
+This doesn't currently work
+
+```{r}
+
+## Define Stan function locally
+## Doesn't seem to work
+
+fmax <- function(x, y) max(x, y)
+
+# I don't think this is necessary since I don't have any 'user defined functions'
+expose_functions(fit, vectorize = TRUE)
+
+pred_x <- seq(20, 46, length.out = 20)
+
+newdata <- crossing(x = pred_x, male = droplevels(male[1:3]))
+
+                                        #newdata <- tibble(x = pred_x)
+fit_pred <- predict(fit, newdata) #, newdata = newdata) %>% tibble()
+
+fit_fitted <- fitted(fit, newdata = newdata) %>% tibble()
+
+
+fit_ribbons <- tibble(
+  x = pred_x,
+  parentFraction=fit_fitted$Estimate,
+  Estimate = fit_fitted$Estimate,
+  pred_lower = fit_pred$Q2.5,
+  pred_upper = fit_pred$Q97.5,
+  fitted_lower = fit_fitted$Q2.5,
+  fitted_upper = fit_fitted$Q97.5)
+
+ggplot(data_stan, aes(x=x, y=y)) +
+  geom_point(size=3) +
+  geom_ribbon(data=fit_ribbons, aes(ymin=pred_lower, ymax=pred_upper), 
+              alpha=0.2, fill=colourcodes[3]) +
+  geom_ribbon(data=fit_ribbons, aes(ymin=fitted_lower, ymax=fitted_upper), 
+              alpha=0.5, fill=colourcodes[3]) +
+  geom_line(data=fit_ribbons, aes(y=Estimate), colour=colourcodes[3], 
+            size=1)
