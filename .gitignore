@@ -1,7 +1,7 @@
 .Rproj.user
 .Rhistory
-.RData
-.Rdata
+*.RData
+*.Rdata
 .Ruserdata
 *-2x1.pdf
 tmp*.pdf
@@ -11,3 +11,4 @@ tmp*.pdf
 \#*
 *.pdf
 *tmp
+*.stan
