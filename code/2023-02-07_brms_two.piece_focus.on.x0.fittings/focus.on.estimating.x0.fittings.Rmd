@@ -183,8 +183,6 @@ beta_phi_prior <- 0.01 ## gamma dist rate parameter for nb. brms default is 0.01
 
 ## values to use for model predictions
 x_for_predictions = seq(25, xmax, length.out = 100)
-n_cores <- 4
-n_chains <- n_cores
 ```
 
 ### Analyze `x ~ uniform_1 | groups_1, y ~ individual`
@@ -203,17 +201,22 @@ if(resave_data) save(file = file.path(output_dir, paste0("data_stan_", format(Sy
 
 ```{r}
 
-adapt_delta <- 0.95 #0.95
-iter <- 4000
+adapt_delta <- 0.9998 #0.95
+iter <- 6000
 thin <- 1
+n_cores <- 1 ## set to 1 if getting errors from stan in order to see relevant message.
+n_chains <- n_cores
 
-#models <- c("brms")
-sampling_dists <- c("nb", "lognormal", "com_poisson") 
-flags_x <- c("uniform_1", "groups_1", "individual")
+models <- c("piecewise")
+sampling_dists <- c("nb", "com_poisson") ## lognormal doesn't work since the counts can be 0.
+flags_x <- c("uniform_1"
+             ##, "groups_1", ## this doesn't work with x0_Intercept prior, suggests error in priors
+             ##"individual"
+             )
 flags_y <- c("individual")
 N <- length(data)
 
-fit_tbl <- crossing(#model = models,
+fit_tbl <- crossing(model = models,
                     sampling_dist = sampling_dists,
                     x0_flag = flags_x, y0_flag = flags_y,
                     desc = "NA_character",
@@ -226,12 +229,14 @@ fit_tbl <- crossing(#model = models,
                     )
 
 ## Run Analysis
-for(sampling in sampling_dists[[3]]) {
+model = models[[1]]
+
+for(sampling in sampling_dists[[2]]) {
     for(x_flag in flags_x) {
     for(y_flag in flags_y) {
 
         ## Set up variables for saving model and fit
-        desc <- paste0(model, ": ", x_flag, ", ", y_flag)
+        desc <- paste0(model, ": ", sampling, ", " , x_flag, ", ", y_flag)
         curr_row <- which(fit_tbl$sampling_dist == sampling &
                           fit_tbl$x0_flag == x_flag &
                           fit_tbl$y0_flag == y_flag)
@@ -259,17 +264,23 @@ for(sampling in sampling_dists[[3]]) {
                          uniform_1 = formula(x0 ~ 1),
                          uniform_2 = formula(x0 ~ 1 + x0_group),
                          # Don't include x0_group info which is determined by the data set
-                         groups_1 = formula(x0 ~ (1||male)), 
+                         groups_1 = formula(x0 ~ -1 + (1||male)), 
                          groups_2 = formula(x0 ~ (1||male) + x0_group),
-                         individual = formula(x0 ~ -1 + male)
+                         individual = formula(x0 ~ 1 + male)
                          )
         
         y_form <- switch(y_flag,
                          uniform_1 = formula(y0 ~ 1),
-                         uniform_2 = formula(y0 ~ 1 + y0_group),
-                         groups_1 = formula(y0 ~ (1|| male)), 
-                         groups_2 = formula(y0 ~ (1|| male) + y0_group),
-                         individual = formula(y0 ~ -1 + male)
+                         uniform_2 = formula(y0 ~ -1 + y0_group),
+                         groups_1 = formula(y0 ~ -1 + (1|| male)), 
+                         groups_2 = formula(y0 ~ -1 + (1|| male) + y0_group),
+                         individual = formula(y0 ~ 1 + male)
+                         ## `-1 + ` gives me the error:
+                         ## Warning in parallel::mclapply(1:chains, FUN = callFun, mc.preschedule = FALSE,  :
+                         ##  4 function calls resulted in an error
+                         ## Error in FUN(X[[i]], ...) : 
+                         ##  trying to get slot "mode" from an object (class "try-error") that is not an S4 object
+                         ## should I use `0 +` or `-1 +` ?
                          )
               
         family <- switch(sampling,
@@ -281,18 +292,21 @@ for(sampling in sampling_dists[[3]]) {
                          ##   Also: str(brmsfamily("com_poisson"))
                          "com_poisson"=brmsfamily("com_poisson", link="identity", link_shape="log") #com_poisson(link="identity", link_shape="log")
                          )
+        print(family)
+        
       ## Priors 
       prior_core <- prior(
-        # uniform(10, 1000), nlpar = "y0", lb = 10) +
-        normal(150, 200), nlpar = "y0", lb = 10) + ## 
-        # prior(lognormal(log_y0_mean, 4 * log_y0_sd) + ## Never used due to data not really looking ~ logN
-        prior(uniform(30, 45.9), lb = 30, ub = 45.9, nlpar = "x0")
+        ## uniform(10, 1000), nlpar = "y0", lb = 10, ub = 1000) +
+        ##normal(150, 200), nlpar = "y0", lb = 10, ub = 1000) + ## Previously used          
+        ##lognormal(log_y0_mean, 4 * log_y0_sd) + ## Never used due to data not really looking ~ logN
+        gamma(0.1, 100), nlpar = "y0", lb = 10, ub = 1000) + 
+        prior(uniform(30, 45.5), lb = 30, ub = 45.5, nlpar = "x0")
       
       prior <- switch(sampling,
                       "nb" = prior_core, #  + prior(exponential(1), dpar = "shape", class = "sd"),
                       "lognormal" = prior_core,
                       "com_poisson" = prior_core)
-      
+      # Crazy parameter rich model where shape parameters vary by male
       hyper_form <- switch(sampling,
                       "nb" = formula(shape ~ 1|male),
                       "lognormal" = formula(sigma ~ 1|male),
@@ -311,7 +325,7 @@ for(sampling in sampling_dists[[3]]) {
                                  family = family
                                  ))
 
-        save_model <-paste0(paste("brms", sampling, x_flag, y_flag, sep="_"), ".stan")
+        save_model <-paste0(paste("brms", model, sampling, x_flag, y_flag, sep="_"), ".stan")
         
         fit <- brm(nlform,
                    data = data,
@@ -320,27 +334,31 @@ for(sampling in sampling_dists[[3]]) {
                    ## Negbinomial_2
                    ## Defining `phi = mu/theta` creates a quasipoisson
                    ## distribution with overdispersion parameter (1 +theta)
-                   family = negbinomial(link = "identity", link_shape = "identity"),
+                   family = family, #negbinomial(link = "identity", link_shape = "identity"),
                    prior = prior,
                    iter = iter,
+                   warmup = floor(4/5 * iter),
                    thin = thin,
                    silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
                    control = list(adapt_delta = adapt_delta,
-                                  max_treedepth = 12),
+                                  max_treedepth = 12
+                                  ##model_name = desc ## Incorrect way to set this.
+                                  ),
                        ## Only print out sampling progress if in interactive mode
                    refresh = ifelse(interactive(),max(iter/5, 1), 0),
         chains = n_chains,
         cores = n_cores,
-        save_model = save_model)
+        save_model = save_model
+        )
     ## Avoid having brms recompile model by defining
     ## model in global environment
-    stanfit <- fit
+        fit_tmp <- fit
 
                                         #fit_exp <- expose_functions(fit) , vectorize = TRUE)
                                         #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
         print(fit)
         save(file = file.path(output_dir, paste0(save_model, ".Rdata-tmp")), fit)
-        fit_tbl[ curr_row, ]$fit <- list(fit)
+        fit_tbl[[curr_row, "fit"]] <- list(fit)
 
       ## Print current warnings
       warnings(summary)
