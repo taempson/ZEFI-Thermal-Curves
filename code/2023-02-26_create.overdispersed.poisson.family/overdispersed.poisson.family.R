@@ -1,0 +1,37 @@
+#library(tidyverse)
+library(brms)
+
+# define custom family
+poisson_od <- custom_family(
+ name = "poisson_od", 
+ dpars = c("mu", "disp"), #expectd value and variance scale (>1)
+ links = c("identity", "identity"), # only used if parameters are predicted
+ lb = c(0, 1),
+ ub = c(NA, NA),
+ type = "int" #category of response variable
+ ## vars: name not arbitrary,
+ ##       used to pass additional data to model
+ ##       if loop = TRUE, include `[n]` index
+ ##vars = "vint1[n]",
+ #loop = TRUE,
+ #log_lik = NULL, # Not currently used
+ #posterior_predict = NULL, # Not currently used
+ #posterior_epred = NULL # Not currently used
+)
+
+## Define functions used in stan
+## lpmf returns the likelihood
+## rng returns a sample
+## Using `theta` as a variable gives me problems when trying to fit model, so using `disp` instead
+##
+stan_funs <- "
+  real poisson_od_lpmf(int y, real mu, real disp) {
+    return neg_binomial_2_lpmf(y | mu, mu/(disp-1));
+  }
+  int poisson_od_rng(real mu, real disp) {
+    return neg_binomial_2_rng(mu, mu/(disp-1));
+  }
+"
+## export stan_funs to stan
+stanvars <- stanvar(scode = stan_funs, block = "functions")
+
