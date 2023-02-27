@@ -4,8 +4,6 @@ library(tidyr) ## provides expand/crossing
 
 theta <- 3.5 # variance scale
 t_vec <- 0:5
-m_vec <- 1 + 10 * t_vec # expected values
-shape_vec <- m_vec/(theta - 1)
 n_vec <- 1:5; # samples/t
 
 ## Create data
@@ -19,10 +17,10 @@ source("overdispersed.poisson.family.R")
 
 get_prior(formula = s ~ 1 + t,
           data = data,
-          family = poisson_od)
+          family = qqpoisson)
 
 fit <- brm(s ~ 1 + t,
-           family = poisson_od,
+           family = qqpoisson(),
            data = data,
            stanvars = stanvars
 )
