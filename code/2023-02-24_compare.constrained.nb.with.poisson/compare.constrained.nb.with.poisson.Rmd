@@ -1,0 +1,76 @@
+---
+title: "Compare NegBinomial with Constrained Shape to Poisson"
+author: "Michael Gilchrist (mikeg@utk.edu)"
+date: "Created: 2023-02-24; Code run on `r Sys.Date()`"
+output: html_notebook
+---
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(purrr)
+library(ggplot2)
+
+```
+
+
+```{r}
+
+mu =c(1, 4, 64, 256)
+x <- 0:400
+theta <- c(1.000001,2,4,8)
+```
+
+## Shape (or `size` in R's `pnbinom()`) is function of mean and theta
+
+This approach ensures that the variance scales linearly with the expected value.
+
+```{r}
+tbl_1 <- crossing(
+  x,
+  theta, 
+  mu) %>%
+ mutate(size = mu/(theta-1), y = dnbinom(x = x, mu = mu, size = size), theta = factor(round(theta))) %>%
+  group_by(theta, mu) %>%
+  filter( (x < mu + 5*sqrt(mu)))
+
+ggplot(tbl_1, aes(x, y, color = theta, fill = theta)) + 
+   geom_line(alpha = 1) +#
+#  scale_y_log10() + 
+  facet_wrap(vars(mu), 
+             scales = "free",
+  #labeller = label_both
+  labeller = label_bquote(mu:.(mu))
+  ) +
+  labs(title = "shape = mu/(theta-1)",
+       subtitle = "var(y) = theta mu")
+```
+
+
+## Shape is constant
+
+This is the standard approach for negative binomial regression
+```{r}
+tbl_2 <- crossing(
+  x,
+  theta, 
+  mu) %>%
+  mutate(size = theta, y = dnbinom(x = x, mu = mu, size = size), size = factor(round(size))) %>%
+  group_by(size, mu) %>%
+  filter( (x < mu + 5*sqrt(mu)))
+
+ggplot(tbl_2, aes(x, y, color = size, fill = size)) + 
+   geom_line(alpha = 1) +#
+#  scale_y_log10() + 
+  facet_wrap(vars(mu), scales = "free",
+  labeller = label_bquote(mu:.(mu))
+  ) +
+  labs(title = "shape = Constant",
+       subtitle = expression("var(y) = "~mu+mu^2/shape))
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
