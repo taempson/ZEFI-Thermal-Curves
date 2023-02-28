@@ -202,9 +202,9 @@ if(resave_data) save(file = file.path(output_dir, paste0("data_stan_", format(Sy
 ```{r}
 
 models <- c("piecewise")
-sampling_dists <- c("nb", "com_poisson") ## lognormal doesn't work since the counts can be 0.
-flags_x <- c("uniform_1"
-             ##, "groups_1", ## this doesn't work with x0_Intercept prior, suggests error in priors
+sampling_dists <- c("nb") #, "com_poisson") ## lognormal doesn't work since the counts can be 0.
+flags_x <- c("uniform_1",
+             "groups_1" ## this doesn't work with x0_Intercept prior, suggests error in priors
              ##"individual"
              )
 flags_y <- c("individual")
@@ -221,17 +221,22 @@ fit_tbl <- crossing(model = models,
                     r_eff = list(NA),
                     loo = list(NA)
                     )
+```
+
 
 ## Run Analysis
+
+```{r}
+
 model = models[[1]]
 
-for(sampling in sampling_dists[[2]]) {
+for(sampling in sampling_dists) {
 
     switch(sampling,
            "nb"= {
              family <- negbinomial(link = "identity", link_shape = "identity")
              adapt_delta <- 0.9 #0.95
-             iter <- 2000
+             iter <- 4000
              warmup <- floor(1/2 * iter)
              thin <- 1
              n_cores <- 4 ## set to 1 if getting errors from stan in order to see relevant message.
@@ -267,7 +272,7 @@ for(sampling in sampling_dists[[2]]) {
         
 
     
-    for(x_flag in flags_x) {
+    for(x_flag in flags_x[[2]]) {
     for(y_flag in flags_y) {
 
         ## Set up variables for saving model and fit
@@ -299,7 +304,7 @@ for(sampling in sampling_dists[[2]]) {
                          uniform_1 = formula(x0 ~ 1),
                          uniform_2 = formula(x0 ~ x0_group),
                          # Don't include x0_group info which is determined by the data set
-                         groups_1 = formula(x0 ~ 0 + (1||male)), 
+                         groups_1 = formula(x0 ~ (1|male)), ## adding 0 + causes prior error
                          groups_2 = formula(x0 ~ 0 + (1||male) + x0_group),
                          individual = formula(x0 ~ 0 + male)
                          )
@@ -330,7 +335,7 @@ for(sampling in sampling_dists[[2]]) {
       prior <- switch(sampling,
                       "nb" = prior_core, #  + prior(exponential(1), dpar = "shape", class = "sd"),
                       "lognormal" = prior_core,
-                      "com_poisson" = prior_core  + prior(uniform(0.01, 100), class = "shape", lb = 1, ub = 20) ## adding lb and ub greatly speeds up model and improves fit
+                      "com_poisson" = prior_core  + prior(uniform(0.01, 100), class = "shape", lb = 1, ub = 20) ## adding 1 <= lb and ub greatly speeds up model and improves fit
                       )
       
       # Crazy parameter rich model where shape parameters vary by male
