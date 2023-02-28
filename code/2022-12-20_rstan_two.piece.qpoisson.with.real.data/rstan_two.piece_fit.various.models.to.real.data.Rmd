@@ -24,6 +24,16 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=2E2, ou
 
 ## Recap
 
+- My quasipoisson is actually not a quasipoisson model, but a constrained/modified negative binomial where the `shape = mu/(theta-1)` which ensures that `var(x| mu, shape) = theta mu`
+- Limitation of this work is the lack of a male index.
+  This prevents me from using male as a grouping variable for the data when I try and use 2 population level `y_0` or `x_0` values.
+  I can, however, use individual parameters.
+- I later began trying to add this capability, but then decided it would be a good excuse to try and use `brms`.
+  Unfortunately, it's not obvious how to implement this behavior in `brms` and the standard Nbin regression approach does not have the desired relationship between the mean and variance.
+- I either need to create my own `family` in `brms` or go back to my stan code.
+-  It might be possible to use `brms` to generate the starting stan code.
+
+
 # Set up
 
 ## Install libraries
