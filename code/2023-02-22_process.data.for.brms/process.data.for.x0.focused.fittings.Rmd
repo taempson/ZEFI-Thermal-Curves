@@ -1,0 +1,140 @@
+
+---
+title: "Prepare data for BRMS fits focusing on x0"
+author: "Michael Gilchrist"
+date: "Created: 2023-02-22; Code run on `r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE, }
+
+## Global options
+options(digits = 3)
+
+### Knitr specific
+knitr::opts_chunk$set(
+                      warning = TRUE, # show warnings
+                      message = FALSE, # show messages
+                      error = TRUE, # do not interrupt generation in case of errors,
+                      echo = TRUE,  # show R code
+                      fig.width = 8,
+                      fig.path = "Figures/"
+                  )
+
+options("warn" = 1) ## print warnings when they occur
+
+if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=5E1, output = TRUE)
+
+```
+# Goal
+
+- Process data as in `2023-02-07_brms_two.piece_focus.on.x0.fittings/` for other routines
+
+## Recap
+
+# Set up
+
+## Install libraries
+
+```{r, message = FALSE}
+
+# install packages user might not have by replacing FALSE with TRUE
+
+## load libraries
+library(stats)
+library(MASS) # provides negative binomial fitting:  glm.nb
+library(ggplot2)
+library(tidyverse)
+library(viridisLite)
+
+```
+
+## Load Data
+
+```{r}
+resave_data <- FALSE # flag for saving data_stan and possibly others in future
+
+input_dir <- file.path("input")
+output_dir <- file.path("output")
+
+load(file.path(input_dir, "data.processing_2022-12-15.Rda"),
+     verbose = TRUE)
+
+
+motif_data
+```
+
+# Process Data
+
+## Create Working Dataset
+
+```{r}
+
+filter_data <- TRUE
+
+if(filter_data) {
+    males_filtered_disp <- motif_stats_40C %>%
+        filter(dispersion < 50) %>%
+        pull(male)
+
+    males_filtered_mean <- motif_stats %>%
+        filter(mean > 10) %>% # changing from 10 to 40 removes previous male 7 (T258)
+        pull(male)
+
+    male_vector <- intersect(males_filtered_mean, males_filtered_disp)
+} else {
+    male_vector <- motif_data %>% select(male) %>% distinct()
+}
+
+data_ind <- motif_data %>%
+  filter(male %in% male_vector) %>%
+  mutate(male = droplevels(male)) %>%
+  mutate(index = as.integer(male)) %>%
+  mutate(male = as.character(male)) %>% 
+  arrange(index) %>%
+  select(male, index, motif_count, temp_target, temp, round, trial_round, date, counter) %>% 
+  ##    left_join(index_shape, by = "index") %>%
+  group_by(male) %>% mutate(y0_simple_est = mean(motif_count), phi_ind = var(motif_count)/y0_simple_est) %>% ## phi is overdispersion parameter
+  ungroup() %>% 
+  mutate()
+
+stats_ind <- motif_stats %>%
+    filter(male %in% male_vector) 
+
+save(stats_ind, file = file.path(output_dir, "stats_ind.Rda"))
+
+summary(data_ind)
+
+y0_hist <- data_ind %>%
+  select(y0_simple_est) %>%
+  unique() %>%
+  ggplot(aes(y0_simple_est)) + geom_histogram(bins = 8) 
+print(y0_hist)
+
+log_y0_hist <- y0_hist +
+  scale_x_log10()
+print(log_y0_hist)
+
+
+temp_hist <- ggplot(data_ind, aes(temp)) + geom_histogram()
+print(temp_hist)
+
+n_male <- length(unique(data_ind$male))
+
+## for calculation of 'theta_bar' (size in `rnbinom`) see note in `Set Up Simulate Data`
+summary_stats <- data_ind %>%
+    ungroup() %>%
+    summarize(y0_bar = mean(y0_simple_est),
+              y0_sd = sd(y0_simple_est),
+              log_y0_bar = mean(log(y0_simple_est)),
+              log_y0_sd = sd(log(y0_simple_est)),
+              phi_bar = median(phi_ind), # qpoisson over dispersion
+              theta_bar = y0_bar^2/(y0_sd^2 - y0_bar)) # nb shape parameter
+comment(summary_stats) <- "summary stats for observed bird motifs"
+
+save(summary_stats, file = file.path(output_dir, "obs_summary_stats.Rda"))
+
+```
+# Fit Models
+
+See other folders created on this day.
