@@ -1,7 +1,7 @@
 ---
 title: "Piecewise Regression QPoisson Error on Real Data using STAN Directly"
 author: "Michael Gilchrist"
-date: "date: 2022-12-22"
+date: "Created on 2022-12-22; Code run on `r Sys.Date()`"
 output: pdf_document
 ---
 
@@ -194,6 +194,7 @@ model <- stan(file = "two.piece_qpoisson.stan",
               iter = iter,
               warmup = floor(iter/2),
               verbose = TRUE)
+
 fit_qpoisson_pooled.x0_pooled_y0_pooled_theta <- model
 
 ## Examine output
@@ -202,12 +203,12 @@ pars_full <- c(pars, "lp__")
 
 title <- "Two piece Pooled Males"
 print(title)
-print(model, pars = pars)
+quietgg(print(model, pars = pars))
 #traceplot(model, pars = pars, inc_warmup = FALSE)
 
-plot(model, pars = pars, point_est = "mean") #, ggtitle(title)) 
-pairs(model, pars = pars_full)
-stan_hist(model)
+quietgg(plot(model, pars = pars, point_est = "mean")) #, ggtitle(title)) 
+quietgg(pairs(model, pars = pars_full))
+quietgg(stan_hist(model))
 
 summary(model, probs = c(0.025, 0.5, 0.975))$summary
 
@@ -217,7 +218,7 @@ summary(model, probs = c(0.025, 0.5, 0.975))$summary
 
 ```{r}
 
-iter <- 30000
+iter <- 4000
 tmax <- 46
 t0max <- tmax - 1;
 t0min <- 25;
@@ -263,13 +264,13 @@ print(model, pars = pars)
 #traceplot(model, pars = pars, inc_warmup = FALSE)
 #plot(model, pars = pars) #, ggtitle(title)) 
 
-stan_hist(model, pars = "x0")
+quietgg(stan_hist(model, pars = "x0"))
 
 ## Plot sampling for each male
 tmp_plot <- list()
 for(i in 1:n_male) {
-    tmp_pars <-  c(paste0("x0[", i, "]"), paste0("y0[", i, "]"), "lp__")
-    tmp_plot[[as.character(i)]] <- pairs(model, pars = tmp_pars)
+    tmp_pars <-  c(paste0("x0[", i, "]"), paste0("y0[", i, "]"), "theta")
+    tmp_plot[[as.character(i)]] <- quietgg(pairs(model, pars = tmp_pars))
 }
 gt <- arrangeGrob(grobs = tmp_plot)
 as_ggplot(gt)
@@ -280,7 +281,7 @@ as_ggplot(gt)
 ## Plot parameter estimate summaries
 tmp_plot <- list()
 for(par in pars) {
-    tmp_plot[[par]] <- stan_plot(model, pars = par)
+    tmp_plot[[par]] <- quietgg(stan_plot(model, pars = par))
 }
 gt <- arrangeGrob(grobs = tmp_plot)
 as_ggplot(gt)
@@ -291,12 +292,11 @@ as_ggplot(gt)
 ##    facet_wrap(vars(grepl("x0.*", params)),
 ##               scales = "free")
 
-                                        #pairs(model, pars = pars_full)
-stan_hist(model, pars = pars)
+                                        #quietgg(pairs(model, pars = pars_full))
+quietgg(stan_hist(model, pars = pars))
 
                
 # summary(fit_qpoisson.separate.y0.x0, probs = c(0.025, 0.5, 0.975))$summary
-
 
 ```
 - Histograms of `x0[]` suggest following groupings
@@ -369,7 +369,7 @@ print(model, pars = pars)
 tmp_plot <- list()
 for(i in 1:n_male) {
     tmp_pars <-  c(paste0("x0[", 1, "]"), paste0("y0[", i, "]"), "lp__")
-    tmp_plot[[as.character(i)]] <- pairs(model, pars = tmp_pars)
+    tmp_plot[[as.character(i)]] <- quietgg(pairs(model, pars = tmp_pars))
 }
 gt <- arrangeGrob(grobs = tmp_plot)
 as_ggplot(gt)
@@ -451,7 +451,7 @@ print(model, pars = pars)
 #traceplot(model, pars = pars, inc_warmup = FALSE)
 plot(model, pars = pars_full) #, ggtitle(title)) 
 
-pairs(model, pars = pars_full)
+quietgg(pairs(model, pars = pars_full))
 
 ## Plot sampling for each male
 tmp_plot <- list()
@@ -461,7 +461,7 @@ for(i in 1:2) {
     tmp_pars <-  c(paste0("x0[", y0_group[[i]], "]"),
                    paste0("y0[", i, "]"),
                    "lp__")
-    tmp_plot[[as.character(i)]] <- pairs(model, pars = tmp_pars)
+    tmp_plot[[as.character(i)]] <- quietgg(pairs(model, pars = tmp_pars))
 }
 gt <- arrangeGrob(grobs = tmp_plot)
 as_ggplot(gt)
@@ -543,7 +543,7 @@ print(model, pars = pars)
 tmp_plot <- list()
 for(i in 1:2) {
     tmp_pars <-  c(paste0("x0[", i, "]"), paste0("y0[", x0_group[[i]], "]"),  "lp__")
-    tmp_plot[[as.character(i)]] <- pairs(model, pars = tmp_pars)
+    tmp_plot[[as.character(i)]] <- quietgg(pairs(model, pars = tmp_pars))
 }
 
 gt <- arrangeGrob(grobs = tmp_plot)
@@ -627,7 +627,7 @@ print(model, pars = pars)
 #traceplot(model, pars = pars, inc_warmup = FALSE)
 #plot(model, pars = pars) #, ggtitle(title))
 
-pairs(model, pars = pars_full)
+quietgg(pairs(model, pars = pars_full))
 
 ## Plot parameter estimate summaries
 tmp_plot <- list()
