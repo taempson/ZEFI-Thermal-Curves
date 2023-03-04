@@ -161,7 +161,7 @@ flags_x0 <- c("uniform_1",
 
 flags_y0 <- c("uniform_1", "groups_1", "individual")
 
-disp_prior_list <- c(1, 2, 8, 16, 32, 64)
+disp_prior_list <- c(4, 8, 16, 32, 64, 128)
 
 N <- length(data)
 
@@ -208,6 +208,9 @@ switch(flag_category,
          }
        )
 
+flags_x0_used = c("individual", "uniform_1", "group_1")
+flags_y0_used = c("individual")
+
 for(model in models[[1]]) {
 
     switch(sampling,
@@ -230,7 +233,7 @@ for(model in models[[1]]) {
     
   for(x0_flag in flags_x0_used) {
     for(y0_flag in flags_y0_used) {
-      for(disp_prior in disp_prior_list[[5]]) {
+      for(disp_prior in disp_prior_list) {
         ## Set up variables for saving model and fit
         desc <- paste0(model, ": ", sampling, "; x0 " , x0_flag, "; y0 ", y0_flag, ", disp prior: ", disp_prior)
         curr_row <- which(fit_tbl$sampling_dist == sampling &
