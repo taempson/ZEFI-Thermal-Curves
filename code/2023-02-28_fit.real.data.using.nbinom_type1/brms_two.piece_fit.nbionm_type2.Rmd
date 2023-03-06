@@ -1,7 +1,7 @@
 ---
 title: "Piecewise Regression with Negative Binomial Type I Error on Real Data using `brms` Custom Family"
 author: "Michael Gilchrist"
-date: "date: 2022-12-22"
+date: "Created: 2023-02-28; Compiled: `r date()`"
 output: pdf_document
 ---
 
@@ -19,7 +19,7 @@ if(interactive()) {
   default::default(.ess.eval) <- list(max.deparse.length=2E2, output = TRUE)
   output_dir = "output"  
 } else { 
-  output_dir = "render"  
+  output_dir = "output/render"  
 }
 
 ```
@@ -181,7 +181,7 @@ N <- length(data)
 fit_tbl <- crossing(model = models,
                     sampling_dist = sampling_dists,
                     x0_flag = flags_x0, y0_flag = flags_y0,
-                    disp_prior = disp_prior_list, 
+                    disp_prior = disp_prior_list,
                     desc = "NA_character",
                     y0_group_list = list(NA), #tbl_tmp, #list(NA),
                     x0_group_list = list(NA),
@@ -223,8 +223,10 @@ switch(flag_category,
        }
        )
 
-flags_x0_used = c("individual", "uniform_1", "group_1")
+flags_x0_used = c("groups_1") #"individual", "uniform_1", 
 flags_y0_used = c("individual")
+
+fit_index <- 10;
 
 for(model in models[[1]]) {
 
@@ -249,8 +251,11 @@ for(model in models[[1]]) {
   for(x0_flag in flags_x0_used) {
     for(y0_flag in flags_y0_used) {
       for(disp_prior in disp_prior_list) {
+
+        ## used when loading fits
+        fit_index <- fit_index + 1;
         ## Set up variables for saving model and fit
-        desc <- paste0(model, ": ", sampling, "; x0 " , x0_flag, "; y0 ", y0_flag, ", disp prior: ", round(disp_prior,2))
+        desc <- paste0(model, "; ", sampling, "; x0 " , x0_flag, "; y0 ", y0_flag, ", disp prior: ", disp_prior)
         curr_row <- which(fit_tbl$sampling_dist == sampling &
                             fit_tbl$x0_flag == x0_flag &
                             fit_tbl$y0_flag == y0_flag &
@@ -258,6 +263,8 @@ for(model in models[[1]]) {
         fit_tbl[ curr_row, ]$desc <- desc
 
         print(desc)
+
+        outfile_tbl <- file.path(output_dir, paste0("fit_tbl_", Sys.Date() , ".Rda"))
         if(run_fits) {
         ## Refresh data in case x0_group or y0_group are all set to 1
         data <- data_stan
@@ -272,9 +279,12 @@ for(model in models[[1]]) {
 
         ## Note we need to put a tibble into a list because row updates, even if doing
         ## just one cell, require a list format.
-        fit_tbl[[curr_row, "x0_group_list"]] <- list(unique(data[, c("male", "x0_group")]))
-        fit_tbl[[curr_row, "y0_group_list"]] <- list(unique(data[, c("male", "y0_group")]))
-
+          ## Haven't defined "y0_group" or "x0_group" variables
+          if(FALSE) {
+            fit_tbl[[curr_row, "x0_group_list"]] <- list(unique(data[, c("male", "x0_group")]))
+            fit_tbl[[curr_row, "y0_group_list"]] <- list(unique(data[, c("male", "y0_group")]))
+          }
+          
         ## Parameter Structure
         x0_form <- switch(x0_flag,
                           uniform_1 = formula(x0 ~ 1),
@@ -343,12 +353,14 @@ for(model in models[[1]]) {
           y0_form
 
 
-        if(FALSE) print(get_prior(nlform,
-                                  data = data,
-                                  family = family
-                                  ))
+          if(TRUE) {
+            print(get_prior(nlform,
+                            data = data,
+                            family = family
+                            ))
+            }
 
-        save_model <-paste0(paste("stan/brms", model, sampling, x0_flag, y0_flag, disp_prior, "_"), ".stan")
+          save_model <-paste0(paste0(output_dir, "/stan/brms", model, sampling, x0_flag, y0_flag, disp_prior, "_"), ".stan")
         #make_stancode( .... save_model = save.model)
         fit <- brm(nlform,
                    data = data,
@@ -375,7 +387,12 @@ for(model in models[[1]]) {
                    save_model = save_model
                    )
 
-
+          print(desc)
+         # print("Prior Information")
+         # print(prior_summary(fit))
+          print("Fit Information")
+          print(fit)
+            
         #fit_exp <- expose_functions(fit) , vectorize = TRUE)
           #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
           fit_tbl[[curr_row, "fit"]] <- list(fit)
@@ -385,29 +402,32 @@ for(model in models[[1]]) {
 
           ## End if(run_fit)
         } else {
+          if(fit_index ==1)  load(file = outfile_tbl)
           #load from local memory.
-        fit <- fit_tbl[[curr_row, "fit"]]
-        }
+          fit <- fit_tbl[[curr_row, "fit"]][[1]]
         
-        print(desc)
-        print("Prior Information")
-        print(prior_summary(fit))
-        print("Fit Information")
-        print(fit)
-        fit_stan <- fit$fit        
-
-        ##warning(immediate. = FALSE)
-        hist <- stan_hist(fit_stan, pars = c("b_y0", "disp"), main = desc )
-        print(hist)
-        ## Save hist to file
-        hist <- stan_hist(fit_stan, pars = c("b_x0", "disp"), main = desc)
-        print(hist)
-        ## Save hist to file
         
+          print(desc)
+          print("Prior Information")
+          print(prior_summary(fit))
+          print("Fit Information")
+          print(fit)
+          fit_stan <- fit$fit        
+          
+          ##warning(immediate. = FALSE)
+          hist <- stan_hist(fit_stan, pars = c("b_y0", "disp"), main = desc )
+          print(hist)
+          ## Save hist to file
+          hist <- stan_hist(fit_stan, pars = c("b_x0", "disp"), main = desc)
+          print(hist)
+          ## Save hist to file
+        }  #end else for fitting
       }
-    }}
+    }
+  }
 }
 
-save(file.path(output_dir, paste0("fit_tbl_", Sys.Date() , ".Rda")), fit_tbl)
+print(outfile_tbl)
+if(run_fits) save(fit_tbl, file = outfile_tbl)
 
 ```
