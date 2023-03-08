@@ -49,12 +49,29 @@ if(interactive()) {
 
 ## Insights
 
-- When the `disp` (dispersal or `theta`) gets unrealistically large, we get the emergence of a bi modal distribution at both ends of `x0` values.  
+- When the `disp` (dispersal or `theta`) gets unrealistically large, we get the emergence of a bimodal distribution at both ends of `x0` values.  
 Even though we included this value, it is very unlikely to be 25C values.
 I interpret this to mean that when things are really noisy (high `theta`), one way to interpret the data is that one set of males has a very long (presumably slow) decline.
 It would be good to look at the correlations via `pairs()`.
 - To me this is consistent with the infomal knowledge that the 
 
+### Reconciling use of `b0` with `x0`
+
+In an effort to udnerstand hte difference between earlier work with `rstan` and this current work with `brms`, it seems that the key difference is both approaches use an implicit flat prior and, thus, result in inconsistency.
+
+To understand this, I want to transform the flat prior on `b0` into the corresponding prior on `x0`.
+In order to do so, I am following`Proposition B` on p. 60 of Rice (1995) stats book.
+
+Specifically, if `b0 = -1/(xmax - x0)` such that `y = y0 * b0 * (max(x, x0)- xmax)`
+
+Then,
+$f_{X0}(x0) = f_{B0}( g^{-1}(x0)) |\frac{d}{d x0} g^{-1}(x0)$ where
+
+- $g^{-1}(x0) = -1/(x_{\max} - x0) = b0$
+- $|\frac{d}{d x0} g^{-1}(x0)| = | \frac{d}{d x0}(-1/(x_{\max} - x0)$
+  $ = |-\frac{1}{(x_{\max} - x0)^2}| = \frac{1}{(x_{\max} - x0)^2}$
+- Assuming a flat prior means $f_{B0}(b0) = C$
+- Thus, given a flat prior on $b0$, the corresponding prior on $x0$ is $f(x0) = C \frac{1}{(x_{\max} - x0)^2}$
 
 # Set up
 
@@ -154,17 +171,20 @@ data_stan <- data_ind %>% rename(y = motif_count, x = temp) %>%
   mutate(male = factor(male))
 
 xmax <- 46
-stan_two_piece_func <- paste0(" real  two_piece(real x, real x0, real y0) {
- real xmax = ", xmax, "; ## paste in value for xmax
- ## return y0 * (xmax - fmax(x0, x))/(xmax - x0);
- real val1 = xmax  - x;
- real val2 = xmax - x0;
- real b0 = -y0/(xmax - x0);
- real y = y0 - fmin(val1, val2)*b0;
+stan_two_piece_x0_func <- paste0(" real  two_piece(real x, real x0, real y0) {
+ real xmax = ", xmax, "; ## paste in value for xmax\n
+ return(y0 * (xmax - fmax(x0, x))/(xmax - x0));
+ } ")
+
+stan_two_piece_b0_func <- paste0(" real  two_piece(real x, real b0, real y0) {
+ real xmax = ", xmax, "; ## paste in value for xmax\n
+ real x0 = y0/b + xmax;
+ real y = - b * (xmax - max(x, x0));
  return(y);
  } ")
 
-models <- c("piecewise") #, "asymptotic")
+
+models <- c("piecewise", "b0_piecewise") #, "asymptotic")
 sampling_dists <- c("nbinom_type1") ##, "com_poisson") ## lognormal doesn't work since the counts can be 0.
 flags_x0 <- c("uniform_1",
               "groups_1", ## this doesn't work with x0_Intercept prior, suggests error in priors
@@ -173,6 +193,7 @@ flags_x0 <- c("uniform_1",
               "individual")
 
 flags_y0 <- c("uniform_1", "groups_1", "individual")
+
 
 disp_prior_list <- c(0.5, 2, 4, 16, 64, 128)
 
@@ -196,9 +217,15 @@ fit_tbl <- crossing(model = models,
 
 ### Run fits
 
-```{r}
+```{r, message = FALSE }
 
 run_fits = TRUE
+force_load = FALSE  #reload fit_tbl even if it already exits
+save_fits = TRUE
+
+infile_tbl <- file.path(output_dir, paste0("fit_tbl_2023-03-07.Rda"))
+outfile_tbl <- file.path(output_dir, paste0("fit_tbl_", Sys.Date(), ".Rda"))
+
 
 sampling = "nbinom_type1"
 flag_category <- "individual_individual"
@@ -223,40 +250,38 @@ switch(flag_category,
        }
        )
 
-flags_x0_used = c("groups_1") #"individual", "uniform_1", 
-flags_y0_used = c("individual")
+flags_x0_used <- c("individual", "uniform_1", "groups_1") #
+flags_y0_used <- c("individual")
+disp_prior_used <- c(4)
+models_used <- "x0_piecewise"
 
-fit_index <- 10;
+warmup <- 15000 #floor(3/4 * iter)
+iter <- 25000
 
-for(model in models[[1]]) {
+fit_index <- 0;
 
-  switch(sampling,
-         "nbinom_type1"= {
-           family <- nbinom_type1(link = "identity", link_disp = "log")
-           adapt_delta <- 0.8 #0.95 ## will decreasing value increase ESS? Seems like it
-           iter <- 50000 # could try <100000
-           warmup <- floor(1/2 * iter)
-           thin <- 10
-           n_cores <- 4 ## set to 1 if getting errors from stan in order to see relevant message.
-           n_chains <- n_cores
-           nbinom_type1_vars <-
-             stanvar(scode = paste(
-               stan_two_piece_func,
-               stan_nbinom_type1, sep = "\n"),
-               block = "functions")
-         }
-         )
-  
-  
+for(model in models_used) {  
+    switch(model,
+           "piecewise" = {stan_func <- stan_two_piece_x0_func},
+           "x0_piecewise" = {stan_func <- stan_two_piece_x0_func},
+           "b0_piecewise" = {stan_func <- stan_two_piece_x0_func} ## don't use b0 code, instead use appropriate prior
+           )
+
+    print(model)
+    print(stan_func)
+    
   for(x0_flag in flags_x0_used) {
     for(y0_flag in flags_y0_used) {
-      for(disp_prior in disp_prior_list) {
+      for(disp_prior in disp_prior_used) {
 
         ## used when loading fits
         fit_index <- fit_index + 1;
         ## Set up variables for saving model and fit
-        desc <- paste0(model, "; ", sampling, "; x0 " , x0_flag, "; y0 ", y0_flag, ", disp prior: ", disp_prior)
-        curr_row <- which(fit_tbl$sampling_dist == sampling &
+
+        desc_short <- paste0("x0 " , x0_flag, "; y0 ", y0_flag, ", disp prior: ", disp_prior) 
+        desc <- paste0(model, "; ", sampling, "; ", desc_short)
+          curr_row <- which(fit_tbl$model == model &
+                            fit_tbl$sampling_dist == sampling &
                             fit_tbl$x0_flag == x0_flag &
                             fit_tbl$y0_flag == y0_flag &
                             fit_tbl$disp_prior == disp_prior)
@@ -266,91 +291,121 @@ for(model in models[[1]]) {
 
         outfile_tbl <- file.path(output_dir, paste0("fit_tbl_", Sys.Date() , ".Rda"))
         if(run_fits) {
-        ## Refresh data in case x0_group or y0_group are all set to 1
-        data <- data_stan
 
-        ## Set flags based on fitted model structure
-        if(x0_flag %in% c("uniform_1", "groups_1")) data <- mutate(data, x0_group = 1)
-        if(y0_flag %in% c("uniform_1", "groups_1")) data <-mutate(data, y0_group = 1)
-        if(x0_flag %in% c("individual")) data <- mutate(data, x0_group = male)
-        if(y0_flag %in% c("individual")) data <- mutate(data, y0_group = male)
+            
+            print("Fitting Models")
+              switch(sampling,
+                     "nbinom_type1"= {
+                         family <- nbinom_type1(link = "identity", link_disp = "log")
+                         adapt_delta <- 0.8 #0.95 ## will decreasing value increase ESS? Seems like it
+                         iter <- iter
+                         warmup <- warmup
+                         thin <- 1
+                         n_cores <- 4 ## set to 1 if getting errors from stan in order to see relevant message.
+                         n_chains <- n_cores
+                         nbinom_type1_vars <-
+                             stanvar(scode = paste(
+                                         stan_func,
+                                         stan_nbinom_type1, sep = "\n"),
+                                     block = "functions")
+                     }
+         )
+
+          ## Refresh data in case x0_group or y0_group are all set to 1
+          data <- data_stan
+
+          ## Set flags based on fitted model structure
+          if(x0_flag %in% c("uniform_1", "groups_1")) data <- mutate(data, x0_group = 1)
+          if(y0_flag %in% c("uniform_1", "groups_1")) data <-mutate(data, y0_group = 1)
+          if(x0_flag %in% c("individual")) data <- mutate(data, x0_group = male)
+          if(y0_flag %in% c("individual")) data <- mutate(data, y0_group = male)
 
 
 
-        ## Note we need to put a tibble into a list because row updates, even if doing
-        ## just one cell, require a list format.
+          ## Note we need to put a tibble into a list because row updates, even if doing
+          ## just one cell, require a list format.
           ## Haven't defined "y0_group" or "x0_group" variables
           if(FALSE) {
             fit_tbl[[curr_row, "x0_group_list"]] <- list(unique(data[, c("male", "x0_group")]))
             fit_tbl[[curr_row, "y0_group_list"]] <- list(unique(data[, c("male", "y0_group")]))
           }
           
-        ## Parameter Structure
-        x0_form <- switch(x0_flag,
-                          uniform_1 = formula(x0 ~ 1),
-                          uniform_2 = formula(x0 ~ x0_group),
-                          # Don't include x0_group info which is determined by the data set
-                          groups_1 = formula(x0 ~ 1 + (1|male)), 
-                          groups_2 = formula(x0 ~ 1 + (1|male) + x0_group),
-                          individual = formula(x0 ~ 0 + male) ## Do not use 1 + male!
-                          )
-        
-        y0_form <- switch(y0_flag,
-                          uniform_1 = formula(y0 ~ 1),
-                          uniform_2 = formula(y0 ~ 0 + 1 + y0_group),
-                          groups_1 = formula(y0 ~ 0 + 1 + (1| male)), 
-                          groups_2 = formula(y0 ~ 0 + 1 + (1| male) + y0_group),
-                          individual = formula(y0 ~ 0 + male)
-                          ## `-1 + ` gives me the error:
-                          ## Warning in parallel::mclapply(1:chains, FUN = callFun, mc.preschedule = FALSE,  :
-                          ##  4 function calls resulted in an error
-                          ## Error in FUN(X[[i]], ...) : 
-                          ##  trying to get slot "mode" from an object (class "try-error") that is not an S4 object
-                          ## should I use `0 +` or `-1 +` ?
-                          )
-
-        ## Priors
-        ## Strangely reducing the parameter of the exponential results in a higher estimate of 'disp' and increasing the parameter decreases the estimates of 'disp'
-        prior_core <- switch(1,
-                             set_prior( paste0("exponential(", disp_prior, ")"), class = "disp", lb = 0), ## Similar to one used in earlier work with stan
-                             normal(15, 2.8), ## Based on analysis of non-noisy 40C song data
-                             normal(6, 2.8), ## Based on analysis of non-noisy 40C song data
-                             exponential(0.667), ## 0.625 = 1/16  "
-                             constant(5) ## Making disp a constant oesn't really help.
-                             ) +  
-          prior(uniform(30, 45), lb = 30, ub = 45, nlpar = "x0") 
-
-
-
-
-        ## Parameter Structure
-        x0_priors <- switch(x0_flag,
-                            uniform_1 = ,
-                            uniform_2 = ,
+          ## Parameter Structure
+          x0_form <- switch(x0_flag,
+                            uniform_1 = formula(x0 ~ 1),
+                            uniform_2 = formula(x0 ~ x0_group),
                             # Don't include x0_group info which is determined by the data set
-                            groups_1 = ,
-                            groups_2 = ,
-                            individual = ,
+                            groups_1 = formula(x0 ~ 0 + (1|male)), 
+                            groups_2 = formula(x0 ~ (1|male) + x0_group),
+                            individual = formula(x0 ~ 0 + male) ## Do not use 1 + male!
                             )
-        
-        y0_priors <- switch(y0_flag,
-                            uniform_1 = prior(normal(150, 100), nlpar = "y0"),
-                            uniform_2 = ,
-                            groups_1 = ,
-                            groups_2 = ,
-                            individual = prior(normal(150, 1000), nlpar = "y0", lb = 10, ub = 1000)
+          
+          y0_form <- switch(y0_flag,
+                            uniform_1 = formula(y0 ~ 1),
+                            uniform_2 = formula(y0 ~ 0 + 1 + y0_group),
+                            groups_1 = formula(y0 ~ 0 + 1 + (1| male)), 
+                            groups_2 = formula(y0 ~ 0 + 1 + (1| male) + y0_group),
+                            individual = formula(y0 ~ 0 + male)
+                            ## `-1 + ` gives me the error:
+                            ## Warning in parallel::mclapply(1:chains, FUN = callFun, mc.preschedule = FALSE,  :
+                            ##  4 function calls resulted in an error
+                            ## Error in FUN(X[[i]], ...) : 
+                            ##  trying to get slot "mode" from an object (class "try-error") that is not an S4 object
+                            ## should I use `0 +` or `-1 +` ?
                             )
-        
-        prior <- switch(sampling,
-                        "nbinom_type1" = {
-                          prior_core +
-                            x0_priors + y0_priors
-                        })
-        
-        nlform <- bf(
-          y ~ two_piece(x, x0, y0), nl = TRUE) +
-          x0_form + 
-          y0_form
+
+          ## Priors
+          ## Strangely reducing the parameter of the exponential results in a higher estimate of 'disp' and increasing the parameter decreases the estimates of 'disp'
+          prior_core <- switch(5,
+                               set_prior( paste0("exponential(", disp_prior, ")"), class = "disp", lb = 0), ## Similar to one used in earlier work with stan
+                               normal(15, 2.8), ## Based on analysis of non-noisy 40C song data
+                               normal(6, 2.8), ## Based on analysis of non-noisy 40C song data
+                               exponential(0.667), ## 0.625 = 1/16  "
+                              set_prior(paste0("constant(", disp_prior, ")"), class = "disp") ## Making disp a constant oesn't really help.
+                               ) +
+              prior(uniform(25, 45), lb = 25, ub = 45, nlpar = "x0")
+            
+##              switch(model,
+##                     x0_piecewise = prior(uniform(25, 45), lb = 25, ub = 45, nlpar = "x0"),                   
+                     ## Priors for b0
+                     ## Smallest slope: if x0 = 25; then b0 = - 1/(20) < -1/20 = -0.05 
+                     ## Most extreme slope: if x0 = xmax-0.5; then b = -1/0.5 > -2
+                     # b0_piecewise = prior(uniform(-2, -0.05), lb = -2, ub = -0.05, nlpar = "b0")
+##                     b0_piecewise = NULL
+##                     )
+                     
+
+
+
+
+          ## Parameter Structure
+          x0_priors <- switch(x0_flag,
+                              uniform_1 = ,
+                              uniform_2 = ,
+                              # Don't include x0_group info which is determined by the data set
+                              groups_1 = ,
+                              groups_2 = ,
+                              individual = ,
+                              )
+          
+          y0_priors <- switch(y0_flag,
+                              uniform_1 = prior(normal(150, 100), nlpar = "y0"),
+                              uniform_2 = ,
+                              groups_1 = ,
+                              groups_2 = ,
+                              individual = prior(normal(150, 1000), nlpar = "y0", lb = 10, ub = 1000)
+                              )
+          
+          prior <- switch(sampling,
+                          "nbinom_type1" = {
+                            prior_core +
+                              x0_priors + y0_priors
+                          })
+          
+          nlform <- bf(
+            y ~ two_piece(x, x0, y0), nl = TRUE) +
+            x0_form + 
+            y0_form
 
 
           if(TRUE) {
@@ -358,42 +413,42 @@ for(model in models[[1]]) {
                             data = data,
                             family = family
                             ))
-            }
+          }
 
           save_model <-paste0(paste0(output_dir, "/stan/brms", model, sampling, x0_flag, y0_flag, disp_prior, "_"), ".stan")
-        #make_stancode( .... save_model = save.model)
-        fit <- brm(nlform,
-                   data = data,
-                   ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
-                   ## link_shape corresponds to `phi` of `stan`'s
-                   ## Negbinomial_2
-                   ## Defining `phi = mu/theta` creates a quasipoisson
-                   ## distribution with overdispersion parameter (1 +theta)
-                   family = family, #negbinomial(link = "identity", link_shape = "identity"),
-                   prior = prior,
-                   stanvars = nbinom_type1_vars,
-                   iter = iter,
-                   warmup = warmup,
-                   thin = thin,
-                   silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
-                   control = list(adapt_delta = adapt_delta,
-                                  max_treedepth = 12
-                                  ##model_name = desc ## Incorrect way to set this.
-                                  ),
-                   ## Only print out sampling progress if in interactive mode
-                   refresh = ifelse(interactive(),max(iter/5, 1), 0),
-                   chains = n_chains,
-                   cores = n_cores,
-                   save_model = save_model
-                   )
+          #make_stancode( .... save_model = save.model)
+          fit <- brm(nlform,
+                     data = data,
+                     ## `link` refers to the mapping of the expectation of the distribution: log, sqrt, identity, softplus
+                     ## link_shape corresponds to `phi` of `stan`'s
+                     ## Negbinomial_2
+                     ## Defining `phi = mu/theta` creates a quasipoisson
+                     ## distribution with overdispersion parameter (1 +theta)
+                     family = family, #negbinomial(link = "identity", link_shape = "identity"),
+                     prior = prior,
+                     stanvars = nbinom_type1_vars,
+                     iter = iter,
+                     warmup = warmup,
+                     thin = thin,
+                     silent = ifelse(interactive(), 1, 2), # 0, 1, or 2. 1 is default
+                     control = list(adapt_delta = adapt_delta,
+                                    max_treedepth = 12
+                                    ##model_name = desc ## Incorrect way to set this.
+                                    ),
+                     ## Only print out sampling progress if in interactive mode
+                     refresh = ifelse(interactive(),max(iter/5, 1), 0),
+                     chains = n_chains,
+                     cores = n_cores,
+                     save_model = save_model
+                     )
 
           print(desc)
-         # print("Prior Information")
-         # print(prior_summary(fit))
+          # print("Prior Information")
+          # print(prior_summary(fit))
           print("Fit Information")
           print(fit)
-            
-        #fit_exp <- expose_functions(fit) , vectorize = TRUE)
+          
+          #fit_exp <- expose_functions(fit) , vectorize = TRUE)
           #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
           fit_tbl[[curr_row, "fit"]] <- list(fit)
           ## Print current warnings
@@ -402,32 +457,54 @@ for(model in models[[1]]) {
 
           ## End if(run_fit)
         } else {
-          if(fit_index ==1)  load(file = outfile_tbl)
+          print("Working with Pre-existing Fits")
+
+          ## This if() needs to be revised since fit_tbl is defined (but empty)
+          ## Could test if fit_tbl[[curr_row, "fit"]][[1]] is NA
+          if(!exists("fit_tbl") | force_load) {
+            print("Loading Models")            
+            #if(fit_index ==1)
+            load(file = infile_tbl)
+          }
+          
           #load from local memory.
           fit <- fit_tbl[[curr_row, "fit"]][[1]]
-        
-        
-          print(desc)
-          print("Prior Information")
-          print(prior_summary(fit))
-          print("Fit Information")
-          print(fit)
-          fit_stan <- fit$fit        
           
+        }
+
+          ## Print and plot results, regardless of which fits one uses           
+          print(desc_short)
+          print("x0 Prior Information")
+          print(prior_summary(fit) %>% filter(nlpar!="y0")) 
+          print("Fit Information")
+          print(summary(fit)) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
+          fit_stan <- fit$fit 
+          
+
           ##warning(immediate. = FALSE)
-          hist <- stan_hist(fit_stan, pars = c("b_y0", "disp"), main = desc )
+          hist <- stan_hist(fit_stan, pars = c("b_y0", "disp"), bins = 25) +
+            ggtitle(desc_short)
           print(hist)
           ## Save hist to file
-          hist <- stan_hist(fit_stan, pars = c("b_x0", "disp"), main = desc)
+          hist <- stan_hist(fit_stan, pars = c("b_x0", "disp"), bins = 25)  +
+            ggtitle(desc_short)
           print(hist)
           ## Save hist to file
-        }  #end else for fitting
+         #end else for fitting
       }
     }
   }
 }
 
 print(outfile_tbl)
-if(run_fits) save(fit_tbl, file = outfile_tbl)
+
+if(save_fits) save(fit_tbl, file = outfile_tbl)
+```
+
+
+## Exit rendering
+```{r}
+
+knitr::knit_exit()
 
 ```
