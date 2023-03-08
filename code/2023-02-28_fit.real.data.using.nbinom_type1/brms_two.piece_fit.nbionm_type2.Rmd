@@ -71,7 +71,8 @@ $f_{X0}(x0) = f_{B0}( g^{-1}(x0)) |\frac{d}{d x0} g^{-1}(x0)$ where
 - $|\frac{d}{d x0} g^{-1}(x0)| = | \frac{d}{d x0}(-1/(x_{\max} - x0)$
   $ = |-\frac{1}{(x_{\max} - x0)^2}| = \frac{1}{(x_{\max} - x0)^2}$
 - Assuming a flat prior means $f_{B0}(b0) = C$
-- Thus, given a flat prior on $b0$, the corresponding prior on $x0$ is $f(x0) = C \frac{1}{(x_{\max} - x0)^2}$
+- Thus, given a flat prior on $b0$, the corresponding prior on $x0$ is $f(x0) = C \frac{1}{(x_{\max} - x0)^2}$ which is not what I expected since it favors higher values of $x0$
+- Structure of this prior is similar to a Cauchy distribution with $\gamma = 1$.
 
 # Set up
 
@@ -184,7 +185,7 @@ stan_two_piece_b0_func <- paste0(" real  two_piece(real x, real b0, real y0) {
  } ")
 
 
-models <- c("piecewise", "b0_piecewise") #, "asymptotic")
+models <- c("x0_piecewise", "b0_piecewise") #, "asymptotic")
 sampling_dists <- c("nbinom_type1") ##, "com_poisson") ## lognormal doesn't work since the counts can be 0.
 flags_x0 <- c("uniform_1",
               "groups_1", ## this doesn't work with x0_Intercept prior, suggests error in priors
@@ -195,7 +196,7 @@ flags_x0 <- c("uniform_1",
 flags_y0 <- c("uniform_1", "groups_1", "individual")
 
 
-disp_prior_list <- c(0.5, 2, 4, 16, 64, 128)
+disp_prior_list <- c(0.25, 0.5, 2, 4, 8, 16, 32)
 
 N <- length(data)
 
@@ -230,29 +231,9 @@ outfile_tbl <- file.path(output_dir, paste0("fit_tbl_", Sys.Date(), ".Rda"))
 sampling = "nbinom_type1"
 flag_category <- "individual_individual"
 
-
-switch(flag_category,
-       simple = { ## x0 and y0 have single, shared value
-         flags_x0_used = "uniform_1"
-         flags_y0_used = "uniform_1"
-       },
-       simple_individual = {
-         flags_x0_used = "uniform_1"
-         flags_y0_used = "individual"
-       },
-       group1_individual ={
-         flags_x0_used = "groups_1"
-         flags_y0_used = "individual"
-       },
-       individual_individual = { # values vary between males
-         flags_x0_used = "individual"
-         flags_y0_used = "individual"
-       }
-       )
-
 flags_x0_used <- c("individual", "uniform_1", "groups_1") #
 flags_y0_used <- c("individual")
-disp_prior_used <- c(4)
+disp_prior_used <- disp_prior_list
 models_used <- "x0_piecewise"
 
 warmup <- 15000 #floor(3/4 * iter)
@@ -274,12 +255,16 @@ for(model in models_used) {
     for(y0_flag in flags_y0_used) {
       for(disp_prior in disp_prior_used) {
 
-        ## used when loading fits
-        fit_index <- fit_index + 1;
-        ## Set up variables for saving model and fit
+          ## used when loading fits
+          fit_index <- fit_index + 1;
+          ## Set up variables for saving model and fit
 
-        desc_short <- paste0("x0 " , x0_flag, "; y0 ", y0_flag, ", disp prior: ", disp_prior) 
-        desc <- paste0(model, "; ", sampling, "; ", desc_short)
+          desc_short <- paste0("x0 " , x0_flag, "; y0 ", y0_flag, "; disp prior ", disp_prior) 
+          desc <- paste0(sampling, "; ", model, "; ", desc_short)
+
+          filename_desc <- gsub("_", "-", desc) %>%
+              gsub("; ", "_", .) %>%
+              gsub(" ", "-", .)
           curr_row <- which(fit_tbl$model == model &
                             fit_tbl$sampling_dist == sampling &
                             fit_tbl$x0_flag == x0_flag &
@@ -414,8 +399,8 @@ for(model in models_used) {
                             family = family
                             ))
           }
-
-          save_model <-paste0(paste0(output_dir, "/stan/brms", model, sampling, x0_flag, y0_flag, disp_prior, "_"), ".stan")
+            
+            save_model <-paste0(paste0(output_dir, "/stan/brms", model, sampling, x0_flag, y0_flag, disp_prior, "_"), ".stan")
           #make_stancode( .... save_model = save.model)
           fit <- brm(nlform,
                      data = data,
@@ -482,14 +467,12 @@ for(model in models_used) {
           
 
           ##warning(immediate. = FALSE)
-          hist <- stan_hist(fit_stan, pars = c("b_y0", "disp"), bins = 25) +
-            ggtitle(desc_short)
+          hist <-  stan_hist(fit_stan, pars = variables(fit), bins = 30) +
+                     ggtitle(desc_short)
           print(hist)
           ## Save hist to file
-          hist <- stan_hist(fit_stan, pars = c("b_x0", "disp"), bins = 25)  +
-            ggtitle(desc_short)
-          print(hist)
-          ## Save hist to file
+          ggsave(filename = paste0("histogram_", filename_desc, ".pdf"), path = file.path(output_dir, "figures"), dpi=300)
+
          #end else for fitting
       }
     }
