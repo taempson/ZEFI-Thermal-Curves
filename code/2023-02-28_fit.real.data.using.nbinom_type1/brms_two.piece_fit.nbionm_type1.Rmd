@@ -234,18 +234,27 @@ flag_category <- "individual_individual"
 flags_x0_used <- c("groups_1") #
 flags_y0_used <- c("individual")
 disp_prior_used <- disp_prior_list
-models_used <- "s0_piecewise"
-
-warmup <- 15000 #floor(3/4 * iter)
-iter <- 25000
+models_used <- c("s0_piecewise") #, "x0_piecewise")
 
 fit_index <- 0;
 
 for(model in models_used) {  
     switch(model,
-           "piecewise" = {stan_func <- stan_two_piece_x0_func},
-           "x0_piecewise" = {stan_func <- stan_two_piece_x0_func},
-           "s0_piecewise" = {stan_func <- stan_two_piece_s0_func} ## don't use s0 code, instead use appropriate prior
+#           "piecewise" = {stan_func <- stan_two_piece_x0_func},
+           "x0_piecewise" = {
+             stan_func <- stan_two_piece_x0_func
+             warmup <- 15000 #floor(3/4 * iter)
+             iter <- warmup + 10000
+             adapt_delta <- 0.8
+             thin <- 4
+           },
+           "s0_piecewise" = {
+             stan_func <- stan_two_piece_s0_func
+             warmup <- 15000
+             iter <- warmup + 10000
+             thin <- 4
+             adapt_delta <- 0.95             
+           }
            )
 
     print(model)
@@ -253,7 +262,12 @@ for(model in models_used) {
     
     for(x0_flag in flags_x0_used) {
       s0_flag <- x0_flag ## define synonym
-    for(y0_flag in flags_y0_used) {
+      
+      for(y0_flag in flags_y0_used) {
+
+        print_get_prior <- TRUE ## reset value
+        print_prior_summary <- TRUE
+        
       for(disp_prior in disp_prior_used) {
 
           ## used when loading fits
@@ -282,10 +296,10 @@ for(model in models_used) {
               switch(sampling,
                      "nbinom_type1"= {
                          family <- nbinom_type1(link = "identity", link_disp = "log")
-                         adapt_delta <- 0.8 #0.95 ## will decreasing value increase ESS? Seems like it
+                         adapt_delta <- adapt_delta #0.95 ## will decreasing value increase ESS? Seems like it
                          iter <- iter
                          warmup <- warmup
-                         thin <- 1
+                         thin <- thin
                          n_cores <- 4 ## set to 1 if getting errors from stan in order to see relevant message.
                          n_chains <- n_cores
                          nbinom_type1_vars <-
@@ -371,14 +385,17 @@ for(model in models_used) {
           x0_priors <- x0_prior +
             prior(uniform(25, 45), lb = 25, ub = 45, nlpar = "x0")
 
-          s0_prior <- prior(uniform(0.02, 1), lb = 0.02, ub = 1, nlpar = "s0")
+          s0_prior <- switch(s0_flag,
+                              uniform_1 = NULL,
+                              uniform_2 = NULL,
+                              # Don't include x0_group info which is determined by the data set
+                              groups_1 = prior(student_t(3, 0, 66.7), lb = 0, ub = 0.3333, class = "sd", nlpar = "s0"),
+                              groups_2 = NULL,
+                              individual = NULL
+                              )
 
-          s0_priors <- if(is.null(x0_prior)) {
-            s0_prior
-          } else {
-            x0_prior %>% mutate(nlpar = "s0") +
-              s0_prior
-          }
+          s0_priors <- s0_prior +
+            prior(uniform(0.02, 1), lb = 0.02, ub = 1, nlpar = "s0")
           
           y0_priors <- switch(y0_flag,
                               uniform_1 = prior(normal(150, 100), nlpar = "y0"),
@@ -407,11 +424,12 @@ for(model in models_used) {
            y0_form
 
 
-          if(TRUE) {
+          if(print_get_prior) {
             print(get_prior(nlform,
                             data = data,
                             family = family
                             ))
+            print_get_prior <- FALSE # will get reset
           }
             
           save_model <-paste0(paste0(output_dir, "/stan/brms", model, sampling, x0_flag, y0_flag, disp_prior, sep = "_"), ".stan")
@@ -476,8 +494,11 @@ for(model in models_used) {
         }else {
           ## Print and plot results, regardless of which fits one uses           
           print(desc)
-          print("Threshold Prior Information")
-          print(prior_summary(fit) %>% filter(nlpar!="y0")) 
+          if(print_prior_summary) {
+            print("Fit Prior Information")
+            print(prior_summary(fit)) # %>% filter(nlpar!="y0"))
+            print_prior_summary <- TRUE
+          }
           print("Fit Information")
           print(summary(fit)) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
           fit_stan <- fit$fit
