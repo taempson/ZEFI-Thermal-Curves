@@ -55,23 +55,23 @@ I interpret this to mean that when things are really noisy (high `theta`), one w
 It would be good to look at the correlations via `pairs()`.
 - To me this is consistent with the infomal knowledge that the 
 
-### Reconciling use of `b0` with `x0`
+### Reconciling use of `s0` with `x0`
 
 In an effort to udnerstand hte difference between earlier work with `rstan` and this current work with `brms`, it seems that the key difference is both approaches use an implicit flat prior and, thus, result in inconsistency.
 
-To understand this, I want to transform the flat prior on `b0` into the corresponding prior on `x0`.
+To understand this, I want to transform the flat prior on `s0` into the corresponding prior on `x0`.
 In order to do so, I am following`Proposition B` on p. 60 of Rice (1995) stats book.
 
-Specifically, if `b0 = -1/(xmax - x0)` such that `y = y0 * b0 * (max(x, x0)- xmax)`
+Specifically, if `s0 = 1/(xmax - x0)` such that `y = y0 * s0 * (xmax - max(x, x0))`
 
 Then,
-$f_{X0}(x0) = f_{B0}( g^{-1}(x0)) |\frac{d}{d x0} g^{-1}(x0)$ where
+$f_{X0}(x0) = f_{s0}( g^{-1}(x0)) |\frac{d}{d x0} g^{-1}(x0)$ where
 
-- $g^{-1}(x0) = -1/(x_{\max} - x0) = b0$
-- $|\frac{d}{d x0} g^{-1}(x0)| = | \frac{d}{d x0}(-1/(x_{\max} - x0)$
-  $ = |-\frac{1}{(x_{\max} - x0)^2}| = \frac{1}{(x_{\max} - x0)^2}$
-- Assuming a flat prior means $f_{B0}(b0) = C$
-- Thus, given a flat prior on $b0$, the corresponding prior on $x0$ is $f(x0) = C \frac{1}{(x_{\max} - x0)^2}$ which is not what I expected since it favors higher values of $x0$
+- $g^{-1}(x0) = 1/(x_{\max} - x0) = s0$
+- $|\frac{d}{d x0} g^{-1}(x0)| = | \frac{d}{d x0}(1/(x_{\max} - x0)$
+  $ = |\frac{1}{(x_{\max} - x0)^2}| = \frac{1}{(x_{\max} - x0)^2}$
+- Assuming a flat prior means $f_{S0}(s0) = C$
+- Thus, given a flat prior on $s0$, the corresponding prior on $x0$ is $f(x0) = C \frac{1}{(x_{\max} - x0)^2}$ which is not what I expected since it favors higher values of $x0$
 - Structure of this prior is similar to a Cauchy distribution with $\gamma = 1$.
 
 # Set up
@@ -177,15 +177,15 @@ stan_two_piece_x0_func <- paste0(" real  two_piece(real x, real x0, real y0) {
  return(y0 * (xmax - fmax(x0, x))/(xmax - x0));
  } ")
 
-stan_two_piece_b0_func <- paste0(" real  two_piece(real x, real b0, real y0) {
+stan_two_piece_s0_func <- paste0(" real  two_piece(real x, real s0, real y0) {
  real xmax = ", xmax, "; ## paste in value for xmax\n
- real x0 = y0/b + xmax;
- real y = - b * (xmax - max(x, x0));
+ real x0 = xmax - 1/s0;
+ real y = y0 * s0 * (xmax - fmax(x, x0));
  return(y);
  } ")
 
 
-models <- c("x0_piecewise", "b0_piecewise") #, "asymptotic")
+models <- c("x0_piecewise", "s0_piecewise") #, "asymptotic")
 sampling_dists <- c("nbinom_type1") ##, "com_poisson") ## lognormal doesn't work since the counts can be 0.
 flags_x0 <- c("uniform_1",
               "groups_1", ## this doesn't work with x0_Intercept prior, suggests error in priors
@@ -224,35 +224,50 @@ run_fits = TRUE
 force_load = FALSE  #reload fit_tbl even if it already exits
 save_fits = TRUE
 
-infile_tbl <- file.path(output_dir, paste0("fit_tbl_2023-03-07.Rda"))
-outfile_tbl <- file.path(output_dir, paste0("fit_tbl_", Sys.Date(), ".Rda"))
+infile_tbl <- file.path(output_dir, paste0("fit_tbl_2023-03-08.Rda"))
+outfile_tbl <- file.path(output_dir, paste0("fit_tbl_", Sys.Date(), "-b.Rda"))
 
 
 sampling = "nbinom_type1"
 flag_category <- "individual_individual"
 
-flags_x0_used <- c("individual", "uniform_1", "groups_1") #
+flags_x0_used <- c("groups_1") #
 flags_y0_used <- c("individual")
 disp_prior_used <- disp_prior_list
-models_used <- "x0_piecewise"
-
-warmup <- 15000 #floor(3/4 * iter)
-iter <- 25000
+models_used <- c("s0_piecewise") #, "x0_piecewise")
 
 fit_index <- 0;
 
 for(model in models_used) {  
     switch(model,
-           "piecewise" = {stan_func <- stan_two_piece_x0_func},
-           "x0_piecewise" = {stan_func <- stan_two_piece_x0_func},
-           "b0_piecewise" = {stan_func <- stan_two_piece_x0_func} ## don't use b0 code, instead use appropriate prior
+#           "piecewise" = {stan_func <- stan_two_piece_x0_func},
+           "x0_piecewise" = {
+             stan_func <- stan_two_piece_x0_func
+             warmup <- 15000 #floor(3/4 * iter)
+             iter <- warmup + 10000
+             adapt_delta <- 0.8
+             thin <- 4
+           },
+           "s0_piecewise" = {
+             stan_func <- stan_two_piece_s0_func
+             warmup <- 15000
+             iter <- warmup + 10000
+             thin <- 4
+             adapt_delta <- 0.95             
+           }
            )
 
     print(model)
     print(stan_func)
     
-  for(x0_flag in flags_x0_used) {
-    for(y0_flag in flags_y0_used) {
+    for(x0_flag in flags_x0_used) {
+      s0_flag <- x0_flag ## define synonym
+      
+      for(y0_flag in flags_y0_used) {
+
+        print_get_prior <- TRUE ## reset value
+        print_prior_summary <- TRUE
+        
       for(disp_prior in disp_prior_used) {
 
           ## used when loading fits
@@ -274,7 +289,6 @@ for(model in models_used) {
 
         print(desc)
 
-        outfile_tbl <- file.path(output_dir, paste0("fit_tbl_", Sys.Date() , ".Rda"))
         if(run_fits) {
 
             
@@ -282,10 +296,10 @@ for(model in models_used) {
               switch(sampling,
                      "nbinom_type1"= {
                          family <- nbinom_type1(link = "identity", link_disp = "log")
-                         adapt_delta <- 0.8 #0.95 ## will decreasing value increase ESS? Seems like it
+                         adapt_delta <- adapt_delta #0.95 ## will decreasing value increase ESS? Seems like it
                          iter <- iter
                          warmup <- warmup
-                         thin <- 1
+                         thin <- thin
                          n_cores <- 4 ## set to 1 if getting errors from stan in order to see relevant message.
                          n_chains <- n_cores
                          nbinom_type1_vars <-
@@ -299,7 +313,7 @@ for(model in models_used) {
           ## Refresh data in case x0_group or y0_group are all set to 1
           data <- data_stan
 
-          ## Set flags based on fitted model structure
+          print("Set flags based on fitted model structure")
           if(x0_flag %in% c("uniform_1", "groups_1")) data <- mutate(data, x0_group = 1)
           if(y0_flag %in% c("uniform_1", "groups_1")) data <-mutate(data, y0_group = 1)
           if(x0_flag %in% c("individual")) data <- mutate(data, x0_group = male)
@@ -315,21 +329,23 @@ for(model in models_used) {
             fit_tbl[[curr_row, "y0_group_list"]] <- list(unique(data[, c("male", "y0_group")]))
           }
           
-          ## Parameter Structure
+          print("Define parameter formulas")
           x0_form <- switch(x0_flag,
                             uniform_1 = formula(x0 ~ 1),
                             uniform_2 = formula(x0 ~ x0_group),
                             # Don't include x0_group info which is determined by the data set
-                            groups_1 = formula(x0 ~ (1|male)), 
+                            groups_1 = formula(x0 ~ 1 + (1|male)), 
                             groups_2 = formula(x0 ~ (1|male) + x0_group),
                             individual = formula(x0 ~ 0 + male) ## Do not use 1 + male!
                             )
+          s0_form <- formula(deparse(x0_form) %>% gsub("x0", "s0", .))
+
           
           y0_form <- switch(y0_flag,
                             uniform_1 = formula(y0 ~ 1),
                             uniform_2 = formula(y0 ~ 1 + y0_group),
-                            groups_1 = formula(y0 ~ 0 + 1 + (1| male)), 
-                            groups_2 = formula(y0 ~ 0 + 1 + (1| male) + y0_group),
+                            groups_1 = formula(y0 ~ 1 + (1| male)), 
+                            groups_2 = formula(y0 ~ 1 + (1| male) + y0_group),
                             individual = formula(y0 ~ 0 + male)
                             ## `-1 + ` gives me the error:
                             ## Warning in parallel::mclapply(1:chains, FUN = callFun, mc.preschedule = FALSE,  :
@@ -339,71 +355,87 @@ for(model in models_used) {
                             ## should I use `0 +` or `-1 +` ?
                             )
 
-          ## Priors
+
+          threshold_form <- switch(model,
+                                     x0_piecewise = x0_form,
+                                     s0_piecewise = s0_form
+                                     )
+
+
+          
+          print("Define priors")
           ## Strangely reducing the parameter of the exponential results in a higher estimate of 'disp' and increasing the parameter decreases the estimates of 'disp'
-          prior_core <- switch(5,
-                               set_prior( paste0("exponential(", disp_prior, ")"), class = "disp", lb = 0), ## Similar to one used in earlier work with stan
+          disp_priors <- set_prior(switch(5,
+                               paste0("exponential(", disp_prior, ")"), ## Similar to one used in earlier work with stan
                                normal(15, 2.8), ## Based on analysis of non-noisy 40C song data
                                normal(6, 2.8), ## Based on analysis of non-noisy 40C song data
                                exponential(0.667), ## 0.625 = 1/16  "
-                              set_prior(paste0("constant(", disp_prior, ")"), class = "disp") ## Making disp a constant oesn't really help.
-                               ) +
-              prior(uniform(25, 45), lb = 25, ub = 45, nlpar = "x0")
-            
-##              switch(model,
-##                     x0_piecewise = prior(uniform(25, 45), lb = 25, ub = 45, nlpar = "x0"),                   
-                     ## Priors for b0
-                     ## Smallest slope: if x0 = 25; then b0 = - 1/(20) < -1/20 = -0.05 
-                     ## Most extreme slope: if x0 = xmax-0.5; then b = -1/0.5 > -2
-                     # b0_piecewise = prior(uniform(-2, -0.05), lb = -2, ub = -0.05, nlpar = "b0")
-##                     b0_piecewise = NULL
-##                     )
-                     
+                               paste0("constant(", disp_prior, ")") ## Making disp a constant oesn't really help.
+                              ), class = "disp", lb = 0)
 
-
-
-
-          ## Parameter Structure
-          x0_priors <- switch(x0_flag,
-                              uniform_1 = ,
-                              uniform_2 = ,
+          x0_prior <- switch(x0_flag,
+                              uniform_1 = NULL,
+                              uniform_2 = NULL,
                               # Don't include x0_group info which is determined by the data set
-                              groups_1 = ,
-                              groups_2 = ,
-                              individual = ,
+                              groups_1 = prior(student_t(3, 0, 66.7), lb = 0, ub = 3, class = "sd", nlpar = "x0"),
+                              groups_2 = NULL,
+                              individual = NULL
                               )
+          
+          x0_priors <- x0_prior +
+            prior(uniform(25, 45), lb = 25, ub = 45, nlpar = "x0")
+
+          s0_prior <- switch(s0_flag,
+                              uniform_1 = NULL,
+                              uniform_2 = NULL,
+                              # Don't include x0_group info which is determined by the data set
+                              groups_1 = prior(student_t(3, 0, 66.7), lb = 0, ub = 0.3333, class = "sd", nlpar = "s0"),
+                              groups_2 = NULL,
+                              individual = NULL
+                              )
+
+          s0_priors <- s0_prior +
+            prior(uniform(0.02, 1), lb = 0.02, ub = 1, nlpar = "s0")
           
           y0_priors <- switch(y0_flag,
                               uniform_1 = prior(normal(150, 100), nlpar = "y0"),
-                              uniform_2 = ,
-                              groups_1 = ,
-                              groups_2 = ,
+                              uniform_2 = NULL,
+                              groups_1 = NULL,
+                              groups_2 = NULL,
                               individual = switch(2,
-                                                  prior(normal(150, 1000), nlpar = "y0", lb = 10, ub = 1000),
+                                                  prior(normal(150, 1000), nlpar = "y0", lb = 10, ub = 1000), ## save value as with origina rstan fits
                                                   prior(uniform(10, 1000), nlpar = "y0", lb = 10, ub = 1000)
                                                   )
                               )
-          
+
+          threshold_priors <- switch(model,
+                                     x0_piecewise = x0_priors,
+                                     s0_piecewise = s0_priors
+                                     )
+                 
           prior <- switch(sampling,
                           "nbinom_type1" = {
-                            prior_core +
-                              x0_priors + y0_priors
+                            disp_priors +
+                              threshold_priors + y0_priors
                           })
           
-          nlform <- bf(
-            y ~ two_piece(x, x0, y0), nl = TRUE) +
-            x0_form + 
-            y0_form
+          nlform <- switch(model,
+                           x0_piecewise = bf(y ~ two_piece(x, x0, y0), nl = TRUE),
+                           s0_piecewise = bf(y ~ two_piece(x, s0, y0), nl = TRUE)
+                           ) +
+           threshold_form + 
+           y0_form
 
 
-          if(TRUE) {
+          if(print_get_prior) {
             print(get_prior(nlform,
                             data = data,
                             family = family
                             ))
+            print_get_prior <- FALSE # will get reset
           }
             
-            save_model <-paste0(paste0(output_dir, "/stan/brms", model, sampling, x0_flag, y0_flag, disp_prior, "_"), ".stan")
+          save_model <-paste0(paste0(output_dir, "/stan/brms", model, sampling, x0_flag, y0_flag, disp_prior, sep = "_"), ".stan")
           #make_stancode( .... save_model = save.model)
           fit <- brm(nlform,
                      data = data,
@@ -447,35 +479,53 @@ for(model in models_used) {
         } else {
           print("Working with Pre-existing Fits")
 
-          ## This if() needs to be revised since fit_tbl is defined (but empty)
-          ## Could test if fit_tbl[[curr_row, "fit"]][[1]] is NA
-          if(!exists("fit_tbl") | force_load) {
+                    
+          ## Try to assign from local memory.
+          fit <- fit_tbl[[curr_row, "fit"]][[1]]
+
+          ## Load fit if undefined or desired
+          if(is.na(list(fit)) | force_load) {
             print("Loading Models")            
             #if(fit_index ==1)
             load(file = infile_tbl)
+            fit <- fit_tbl[[curr_row, "fit"]][[1]]
           }
-          
-          #load from local memory.
-          fit <- fit_tbl[[curr_row, "fit"]][[1]]
-          
         }
 
+        if(is.na(list(fit))) {
+          warning(paste0("model fit ", desc, "does not exist.\n Skipping."))
+        }else {
           ## Print and plot results, regardless of which fits one uses           
-          print(desc_short)
-          print("x0 Prior Information")
-          print(prior_summary(fit) %>% filter(nlpar!="y0")) 
+          print(desc)
+          if(print_prior_summary) {
+            print("Fit Prior Information")
+            print(prior_summary(fit)) # %>% filter(nlpar!="y0"))
+            print_prior_summary <- TRUE
+          }
           print("Fit Information")
           print(summary(fit)) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
-          fit_stan <- fit$fit 
-          
+          fit_stan <- fit$fit
+          #clean up variable names
+          fit_stan_rename <-
+            fit_stan %>%
+            setNames(gsub("b_", "", names(.)) %>%
+                       gsub("(x0|s0|y0)_male(T[0-9]{3})", "\\2_\\1", .) %>%
+                       gsub("__", "_", .) %>%
+                       gsub("r_male_(x0|s0|y0)\\[(T[0-9]{3}),Intercept\\]", "\\2_\\1_r", .) %>%
+                       gsub("\\.", " ", .))
 
-          ##warning(immediate. = FALSE)
-          hist <-  stan_hist(fit_stan, pars = variables(fit), bins = 30) +
-                     ggtitle(desc_short)
+          ##
+          vars_fit <- names(fit_stan_rename) %>% na.omit(.) %>% sort(., decreasing = TRUE)
+          ncol <- 4 
+          hist <-  stan_hist(fit_stan_rename,
+                             pars = vars_fit,
+                             bins = 30,
+                             ncol = ncol) +
+            ggtitle(desc_short)
           print(hist)
-          ## Save hist to file
-          ggsave(filename = paste0("histogram_", filename_desc, ".pdf"), path = file.path(output_dir, "figures"), dpi=300)
-
+          filename <- paste0("histogram_", filename_desc, ".pdf")
+          ggsave(filename = filename, path = file.path(output_dir, "figures"), dpi=300)
+        }
          #end else for fitting
       }
     }
