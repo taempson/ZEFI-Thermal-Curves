@@ -48,6 +48,8 @@ library(ggplot2)
 library(ggpubr)
 library(grid)
 library(gridExtra)
+library(ggExtra)
+library(cowplot)
 library(GGally)
 library(broom)
 library(tidyverse)
@@ -113,6 +115,9 @@ flags_y0_used <- c("individual")
 disp_prior_used <- disp_prior_vec[4:5]
 models_used <- c("x0_piecewise") #, "x0_piecewise")
 
+use_mcmc_pairs <- FALSE 
+use_mcmc_scatter <- TRUE
+
 fit_index <- 0;
 
 for(model in models_used) {  
@@ -129,7 +134,11 @@ for(model in models_used) {
         
         desc_short <- paste0("x0 " , x0_flag, "; y0 ", y0_flag, "; disp prior ", disp_prior) 
         desc <- paste0(sampling, "; ", model, "; ", desc_short)
+        filename_desc <- gsub("_", "-", desc) %>%
+          gsub("; ", "_", .) %>%
+          gsub(" ", "-", .)
         
+          
         curr_row <- which(fit_tbl$model == model &
                             fit_tbl$sampling_dist == sampling &
                             fit_tbl$x0_flag == x0_flag &
@@ -165,12 +174,110 @@ for(model in models_used) {
                        gsub("r_male_(x0|s0|y0)\\[(T[0-9]{3}),Intercept\\]", "\\2_\\1_r", .) %>%
                        gsub("\\.", " ", .))
 
-          ##
+          ## 
+
+          vars_clean <- names(fit_stan_rename) %>% na.omit(.)
+          male_vec <- unique(fit$data$male) %>% as.character(.)
+          ## get male specific vars (start with "T")
+          vars_T <- grep("^T[0-9]{3}", vars_clean, value = TRUE)
+          vars_Intercept <- grep("Intercept", vars_clean, value = TRUE)
+          vars_non_T <- vars_clean[!(vars_clean %in% c(vars_T, vars_Intercept))]
+
+          
+          ## Examine priors and exclude any constants from vars_non_T
+          priors_tmp <- prior_summary(fit)
+          constants_non_T <- ggdist::parse_dist(priors_tmp) %>% filter(grepl("constant", .dist)) %>% pull(class)
+          vars_non_T <- vars_non_T[!(vars_non_T %in% non_T_constants)]
+          
+          
+          ## Count occurence of each male in model fit
+          male_instance <- sapply(male_vec, function(x) {sum(str_detect(x, string=vars_clean))})
+
+          if(all(unique(male_instance) == 2)) {
+            
+            if(use_mcmc_pairs) {
+              ## Use mcmc_pairs
+              pairs_list <- list()            
+              ## Update font size for grid
+              ggplot2::theme_set(theme_default(base_size = 10))
+              ## update panel.boarder
+              ## Note brms uses 'variable' while stanfit uses 'pars'
+              for(male in male_vec) {
+                print(male)
+                vars_male <- grep(male, vars_T, value = TRUE)
+
+                ## Generate pairs() plot using mcmc_pairs()
+                ## Don't use pairs.stanfit which does not return an object
+                pairs_tmp <-  mcmc_pairs(
+                  fit_stan_rename,
+                  pars = vars_male,
+                  ## set point size and transparency
+                  off_diag_args = list(size = 1, alpha = 0.35)
+                )
+                # list of 4 ggplot objects, diagonal plots are 2 and 3
+                plots_tmp <- pairs_tmp$bayesplots 
+                
+                # add density curves
+                plots_tmp[[2]] <- plots_tmp[[2]] + stat_density_2d(color = "lightgray", size = .5)
+                # What is plot 3 anyway?
+                plots_tmp[[3]] <- plots_tmp[[3]] + stat_density_2d(color = "lightgray", size = .5)
+                # recreate the grid
+                pairs_tmp <-bayesplot_grid(plots = plots_tmp)
+                pairs_list[[male]] <- pairs_tmp
+
+              }
+              if(length(vars_Intercept) > 0) {
+                pairs_list[["Intercept"]] <- mcmc_pairs(
+                  fit_stan_rename, pars = vars_Intercept)
+              }
+              pairs_list[["non-T"]] <- stan_hist(fit_stan_rename, pars = vars_non_T)
+
+              ## Restore theme settings
+              ggplot2::theme_set(theme_default())
+
+
+              cowplot::plot_grid(plotlist = pairs_list,
+                                 ncol = 3)
+            }
+
+            if(use_mcmc_scatter) {
+
+              ggplot2::theme_set(theme_default(base_size = 10))
+              scatter_list <- list()
+              for(male in male_vec) {
+                print(male)
+                vars_male <- grep(male, vars_T, value = TRUE)
+                
+                scatter_tmp <-  mcmc_scatter(
+                  fit_stan_rename,
+                  pars = vars_male,
+                  size = 1, alpha = 0.35
+                )
+
+                +
+                  stat_density_2d(color = "lightgray", size = .5, bins = 5)
+
+                scatter_list[[male]] <- ggExtra::ggMarginal(scatter_tmp, type = "histogram")
+                
+              }
+              scatter_list[["non-T"]] <- stan_hist(fit_stan_rename, pars = vars_non_T)
+
+              cowplot::plot_grid(plotlist = scatter_list,
+                                 ncol = 3)
+              ## Restore theme settings
+              ggplot2::theme_set(theme_default())
+            }
+          }
+          
+          
+
+          
+          
           vars_fit <- names(fit_stan_rename) %>% na.omit(.) %>% sort(., decreasing = TRUE)
           ncol <- 4 
           hist <-  stan_hist(fit_stan_rename,
                              pars = vars_fit,
-                             bins = 30,
+                             bins = 25,
                              ncol = ncol) +
             ggtitle(desc_short)
           print(hist)
