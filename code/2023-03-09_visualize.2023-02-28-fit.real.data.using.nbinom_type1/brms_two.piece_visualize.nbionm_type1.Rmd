@@ -115,8 +115,9 @@ flags_y0_used <- c("individual")
 disp_prior_used <- disp_prior_vec[4:5]
 models_used <- c("x0_piecewise") #, "x0_piecewise")
 
-use_mcmc_pairs <- FALSE 
-use_mcmc_scatter <- TRUE
+print_mcmc_pairs <- FALSE 
+print_mcmc_scatter <- TRUE
+print_stan_hist <- FALSE
 
 fit_index <- 0;
 
@@ -154,7 +155,7 @@ for(model in models_used) {
 
         if(is.na(list(fit))) {
           warning(paste0("model fit ", desc, "does not exist.\n Skipping."))
-        }else {
+        } else {
           ## Print and plot results, regardless of which fits one uses           
           print(desc)
           if(print_prior_summary) {
@@ -195,7 +196,7 @@ for(model in models_used) {
 
           if(all(unique(male_instance) == 2)) {
             
-            if(use_mcmc_pairs) {
+            if(print_mcmc_pairs) {
               ## Use mcmc_pairs
               pairs_list <- list()            
               ## Update font size for grid
@@ -240,7 +241,7 @@ for(model in models_used) {
                                  ncol = 3)
             }
 
-            if(use_mcmc_scatter) {
+            if(print_mcmc_scatter) {
 
               ggplot2::theme_set(theme_default(base_size = 10))
               scatter_list <- list()
@@ -269,22 +270,18 @@ for(model in models_used) {
             }
           }
           
-          
-
-          
-          
-          vars_fit <- names(fit_stan_rename) %>% na.omit(.) %>% sort(., decreasing = TRUE)
-          ncol <- 4 
-          hist <-  stan_hist(fit_stan_rename,
-                             pars = vars_fit,
-                             bins = 25,
-                             ncol = ncol) +
-            ggtitle(desc_short)
-          print(hist)
-          filename <- paste0("histogram_", filename_desc, ".pdf")
-          ggsave(filename = filename, path = file.path(output_dir, "figures"), dpi=300)
+          if(print_stan_hist) {
+            ncol <- 4 
+            hist <-  stan_hist(fit_stan_rename,
+                               pars = vars_fit,
+                               bins = 25,
+                               ncol = ncol) +
+              ggtitle(desc_short)
+            print(hist)
+            filename <- paste0("histogram_", filename_desc, ".pdf")
+            ggsave(filename = filename, path = file.path(output_dir, "figures"), dpi=300)
+          }
         }
-        #end else for fitting
       }
     }
   }
