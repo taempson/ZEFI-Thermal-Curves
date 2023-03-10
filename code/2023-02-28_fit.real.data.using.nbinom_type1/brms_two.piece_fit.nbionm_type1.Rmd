@@ -280,6 +280,7 @@ for(model in models_used) {
           filename_desc <- gsub("_", "-", desc) %>%
               gsub("; ", "_", .) %>%
               gsub(" ", "-", .)
+          
           curr_row <- which(fit_tbl$model == model &
                             fit_tbl$sampling_dist == sampling &
                             fit_tbl$x0_flag == x0_flag &
