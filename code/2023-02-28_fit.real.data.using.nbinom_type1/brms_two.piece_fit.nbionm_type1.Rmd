@@ -403,7 +403,10 @@ for(model in models_used) {
                               uniform_2 = NULL,
                               groups_1 = NULL,
                               groups_2 = NULL,
-                              individual = prior(normal(150, 1000), nlpar = "y0", lb = 10, ub = 1000)
+                              individual = switch(2,
+                                                  prior(normal(150, 1000), nlpar = "y0", lb = 10, ub = 1000), ## save value as with origina rstan fits
+                                                  prior(uniform(10, 1000), nlpar = "y0", lb = 10, ub = 1000)
+                                                  )
                               )
 
           threshold_priors <- switch(model,
