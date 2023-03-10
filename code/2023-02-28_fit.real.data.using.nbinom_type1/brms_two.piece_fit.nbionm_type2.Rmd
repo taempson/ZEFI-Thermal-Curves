@@ -320,14 +320,14 @@ for(model in models_used) {
                             uniform_1 = formula(x0 ~ 1),
                             uniform_2 = formula(x0 ~ x0_group),
                             # Don't include x0_group info which is determined by the data set
-                            groups_1 = formula(x0 ~ 0 + (1|male)), 
+                            groups_1 = formula(x0 ~ (1|male)), 
                             groups_2 = formula(x0 ~ (1|male) + x0_group),
                             individual = formula(x0 ~ 0 + male) ## Do not use 1 + male!
                             )
           
           y0_form <- switch(y0_flag,
                             uniform_1 = formula(y0 ~ 1),
-                            uniform_2 = formula(y0 ~ 0 + 1 + y0_group),
+                            uniform_2 = formula(y0 ~ 1 + y0_group),
                             groups_1 = formula(y0 ~ 0 + 1 + (1| male)), 
                             groups_2 = formula(y0 ~ 0 + 1 + (1| male) + y0_group),
                             individual = formula(y0 ~ 0 + male)
@@ -378,7 +378,10 @@ for(model in models_used) {
                               uniform_2 = ,
                               groups_1 = ,
                               groups_2 = ,
-                              individual = prior(normal(150, 1000), nlpar = "y0", lb = 10, ub = 1000)
+                              individual = switch(2,
+                                                  prior(normal(150, 1000), nlpar = "y0", lb = 10, ub = 1000),
+                                                  prior(uniform(10, 1000), nlpar = "y0", lb = 10, ub = 1000)
+                                                  )
                               )
           
           prior <- switch(sampling,
