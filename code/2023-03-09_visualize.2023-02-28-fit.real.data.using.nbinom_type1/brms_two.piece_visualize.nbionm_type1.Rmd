@@ -59,8 +59,10 @@ library(rstan)
 options(mc.cores = (parallel::detectCores()-2))
 rstan_options(auto_write = TRUE)
 library(brms)
+library(bayesplot)
+library(tidybayes)
 library(loo)
-
+library(modelr)
 
 ## options(ggplot2.continuous.colour="viridis",
 ##        ggplot2.discrete.colour="viridis",
@@ -71,6 +73,20 @@ library(reshape2)
 library(latex2exp)
 
 ```
+
+## Source family
+
+```{r}
+
+source("../../../custom-brms-families/families/nbinom_type1.R")
+
+## Define fmax() om case expose_functions()
+
+fmax <- function(x, x0) max(x, x0)
+
+```
+## Load custom family
+
 
 ## Load All Files in `input`
 
@@ -99,6 +115,8 @@ for(name in names(fit_tbl)[1:5]) {
   print(paste0(var, ": ", paste0(get(var), collapse = ", ")))
 }
 
+flags_y0 <- y0_flag_vec
+flags_x0 <- x0_flag_vec 
 flags_s0 <- flags_x0
 
 
@@ -110,9 +128,9 @@ flags_s0 <- flags_x0
 
 sampling = "nbinom_type1"
 
-flags_x0_used <- c("groups_1") #
+flags_x0_used <- c("individual")
 flags_y0_used <- c("individual")
-disp_prior_used <- disp_prior_vec[4:5]
+disp_prior_used <- disp_prior_vec[6 ]
 models_used <- c("x0_piecewise") #, "x0_piecewise")
 
 print_mcmc_pairs <- FALSE 
@@ -188,7 +206,7 @@ for(model in models_used) {
           ## Examine priors and exclude any constants from vars_non_T
           priors_tmp <- prior_summary(fit)
           constants_non_T <- ggdist::parse_dist(priors_tmp) %>% filter(grepl("constant", .dist)) %>% pull(class)
-          vars_non_T <- vars_non_T[!(vars_non_T %in% non_T_constants)]
+          vars_non_T <- vars_non_T[!(vars_non_T %in% constants_non_T)]
           
           
           ## Count occurence of each male in model fit
@@ -253,9 +271,7 @@ for(model in models_used) {
                   fit_stan_rename,
                   pars = vars_male,
                   size = 1, alpha = 0.35
-                )
-
-                +
+                )  +
                   stat_density_2d(color = "lightgray", size = .5, bins = 5)
 
                 scatter_list[[male]] <- ggExtra::ggMarginal(scatter_tmp, type = "histogram")
@@ -289,6 +305,85 @@ for(model in models_used) {
 
 ```
 
+# Plot Data and Predictions
+
+```{r}
+
+tmp <- mtcars %>%
+  group_by(cyl) %>%
+  data_grid(hp = seq_range(hp, n = 51)) %>%
+  add_epred_draws(m_mpg)
+
+
+## add .epred and other colums
+
+data_epred <- data_fit %>%
+    group_by(male) %>%
+    data_grid(x = seq_range(c(20, 47), n = 51)) %>%
+    add_epred_draws(object = fit, ndraws = 2000)
+
+data_y <- data_fit$y
+
+## Plot all results
+ggplot(data = data_epred, aes(x = x, y = data_y, color = factor(male))) +
+    stat_lineribbon(aes(y = .epred)) +
+    geom_point(data = data_fit) +
+    scale_fill_brewer(palette = "Greys") +
+    scale_color_brewer(palette = "Set2") +
+    ylim(0, max(tmp_y)*1.1)
+
+plot_model_list <- list()
+
+for(male in male_vec) {
+    
+    tmp_data <- data_fit %>% filter(male == !!male)
+    tmp_y <- tmp_data$y
+    tmp_epred <- data_epred %>% filter(male == !!male)
+    
+    plot_tmp <- ggplot(data = tmp_epred,
+                       aes(x = x, y = tmp_y)) +
+        ylim(0, max(tmp_y)*1.1) +
+        stat_lineribbon(aes(y = .epred)) +
+        scale_fill_brewer(palette = "Greys") +
+        scale_color_brewer(palette = "Set2") +
+        geom_point(data = tmp_data, aes(x = x, y = y), color = "Red") +
+        labs(title=male) +
+        theme(legend.position="none")
+    print(plot_tmp)
+    plot_model_list[[male]] <- plot_tmp
+}
+
+gridExtra::grid.arrange(grobs = plot_model_list)
+
+cowplot::plot_grid(plotlist = plot_model_list,
+                   ncol = 3)
+```
+
+## Combine Scatter Plots and Model Predictions
+
+```{r}
+combo_list <- list()
+
+for(male in male_vec) {
+    combo_list[[male]] <-
+            cowplot::plot_grid(
+                         plotlist = list(
+                             scatter_list[[male]],
+                             plot_model_list[[male]] +
+                             labs(title = NULL) +
+                             xlab(NULL) +
+                             ylab(NULL)
+                         )
+                     )  + labs(title = male)
+}
+
+cowplot::plot_grid(
+             plotlist = combo_list,
+                   ncol = 2)
+
+
+
+```
 
 ## Exit rendering
 ```{r}
