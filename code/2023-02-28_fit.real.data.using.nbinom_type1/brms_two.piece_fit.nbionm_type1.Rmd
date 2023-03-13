@@ -185,18 +185,23 @@ stan_two_piece_s0_func <- paste0(" real  two_piece(real x, real s0, real y0) {
  } ")
 
 
-models <- c("x0_piecewise", "s0_piecewise") #, "asymptotic")
+models <- c("x0_piecewise") #, "s0_piecewise") #, "asymptotic")
 sampling_dists <- c("nbinom_type1") ##, "com_poisson") ## lognormal doesn't work since the counts can be 0.
 flags_x0 <- c("uniform_1",
               "groups_1", ## this doesn't work with x0_Intercept prior, suggests error in priors
-              "groups_2a",
-              "groups_2b",
+              #"groups_2a",
+              #"groups_2b",
               "individual")
 
-flags_y0 <- c("uniform_1", "groups_1", "individual")
+flags_y0 <- switch(1,
+                   c("individual"),
+                   c("uniform_1", "groups_1", "individual")
+                   )
 
-
-disp_prior_list <- c(0.25, 0.5, 2, 4, 8, 16, 32)
+disp_prior_list <- switch(1,
+                          c(9), # matches rstan runs
+                          c(0.25, 0.5, 2, 4, 8, 16, 32) # used in exploring model behavior
+                          )
 
 N <- length(data)
 
@@ -224,12 +229,11 @@ run_fits = TRUE
 force_load = FALSE  #reload fit_tbl even if it already exits
 save_fits = TRUE
 
-infile_tbl <- file.path(output_dir, paste0("fit_tbl_2023-03-08.Rda"))
+infile_tbl <- file.path(output_dir, paste0("fit_tbl_", Sys.Date(), ".Rda"))
 outfile_tbl <- file.path(output_dir, paste0("fit_tbl_", Sys.Date(), "-b.Rda"))
 
 
 sampling = "nbinom_type1"
-flag_category <- "individual_individual"
 
 flags_x0_used <- c("groups_1") #
 flags_y0_used <- c("individual")
@@ -366,8 +370,8 @@ for(model in models_used) {
           
           print("Define priors")
           ## Strangely reducing the parameter of the exponential results in a higher estimate of 'disp' and increasing the parameter decreases the estimates of 'disp'
-          disp_priors <- set_prior(switch(5,
-                               paste0("exponential(", disp_prior, ")"), ## Similar to one used in earlier work with stan
+          disp_priors <- set_prior(switch(1,
+                               paste0("exponential(", disp_prior, ")"), ## Similar to one used in earlier work with rstan
                                normal(15, 2.8), ## Based on analysis of non-noisy 40C song data
                                normal(6, 2.8), ## Based on analysis of non-noisy 40C song data
                                exponential(0.667), ## 0.625 = 1/16  "
@@ -403,7 +407,7 @@ for(model in models_used) {
                               uniform_2 = NULL,
                               groups_1 = NULL,
                               groups_2 = NULL,
-                              individual = switch(2,
+                              individual = switch(1,
                                                   prior(normal(150, 1000), nlpar = "y0", lb = 10, ub = 1000), ## save value as with origina rstan fits
                                                   prior(uniform(10, 1000), nlpar = "y0", lb = 10, ub = 1000)
                                                   )
