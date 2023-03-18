@@ -169,21 +169,21 @@ for(model in models_used) {
 
         
         ## Try to assign from local memory.
-        fit <- fit_tbl[[curr_row, "fit"]][[1]]
+        fit_brms <- fit_tbl[[curr_row, "fit"]][[1]]
 
-        if(is.na(list(fit))) {
-          warning(paste0("model fit ", desc, "does not exist.\n Skipping."))
+        if(is.na(list(fit_brms))) {
+          warning(paste0("model fit_brms ", desc, "does not exist.\n Skipping."))
         } else {
           ## Print and plot results, regardless of which fits one uses           
           print(desc)
           if(print_prior_summary) {
             print("Fit Prior Information")
-            print(prior_summary(fit)) # %>% filter(nlpar!="y0"))
+            print(prior_summary(fit_brms)) # %>% filter(nlpar!="y0"))
             print_prior_summary <- TRUE
           }
           print("Fit Information")
-          print(summary(fit)) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
-          fit_stan <- fit$fit
+          print(summary(fit_brms)) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
+          fit_stan <- fit_brms$fit
           #clean up variable names
           fit_stan_rename <-
             fit_stan %>%
@@ -196,7 +196,7 @@ for(model in models_used) {
           ## 
 
           vars_clean <- names(fit_stan_rename) %>% na.omit(.)
-          male_vec <- unique(fit$data$male) %>% as.character(.)
+          male_vec <- unique(fit_stan$data$male) %>% as.character(.)
           ## get male specific vars (start with "T")
           vars_T <- grep("^T[0-9]{3}", vars_clean, value = TRUE)
           vars_Intercept <- grep("Intercept", vars_clean, value = TRUE)
@@ -204,12 +204,12 @@ for(model in models_used) {
 
           
           ## Examine priors and exclude any constants from vars_non_T
-          priors_tmp <- prior_summary(fit)
+          priors_tmp <- prior_summary(fit_brms)
           constants_non_T <- ggdist::parse_dist(priors_tmp) %>% filter(grepl("constant", .dist)) %>% pull(class)
           vars_non_T <- vars_non_T[!(vars_non_T %in% constants_non_T)]
           
           
-          ## Count occurence of each male in model fit
+          ## Count occurence of each male in model fit_brms
           male_instance <- sapply(male_vec, function(x) {sum(str_detect(x, string=vars_clean))})
 
           if(all(unique(male_instance) == 2)) {
@@ -307,81 +307,180 @@ for(model in models_used) {
 
 # Plot Data and Predictions
 
+Data suggests that disp should vary between males
+
 ```{r}
 
-tmp <- mtcars %>%
-  group_by(cyl) %>%
-  data_grid(hp = seq_range(hp, n = 51)) %>%
-  add_epred_draws(m_mpg)
+curr_row <- 181 
+curr_desc <- fit_tbl[[curr_row, "desc"]]
+fit_brms <- fit_tbl[[curr_row, "fit"]][[1]]
+
+expose_functions(fit_brms, vectorize = TRUE, show_compiler_warnings=FALSE)
+data_fit_brms <- fit_brms$data
 
 
-## add .epred and other colums
+## Create grid of x values for epred/predictions
 
-data_epred <- data_fit %>%
-    group_by(male) %>%
-    data_grid(x = seq_range(c(20, 47), n = 51)) %>%
-    add_epred_draws(object = fit, ndraws = 2000)
+data_grid <- data_fit_brms %>%
+  group_by(male) %>%
+  data_grid(x = seq_range(c(20, 40), n = 51))
 
-data_y <- data_fit$y
+
+## add expected values
+data_epred <- data_grid %>%
+  add_epred_draws(object = fit_brms, ndraws = 1000)
+
+## Running into issues with predictions
+## Only returns 1 draw per value in data_grid
+## I believe this may have to do with the generation of NaN values
+## HOwever, avoiding NaN by limiting x range doesn't seem to work.
+
+## add predicted values
+tmp_pp <- posterior_predict(fit_brms, newdata = data_grid)
+
+## Using tidybayes
+## DOesn't work as expected
+
+## this seems to remove the .xy
+data_pred <- add_predicted_draws(object = fit_brms, newdata = data_grid) # %>% filter(male == "T257"))
+
+data_y <- data_fit_brms$y
 
 ## Plot all results
-ggplot(data = data_epred, aes(x = x, y = data_y, color = factor(male))) +
+## Gets a bit crowded and takes a while; best to skip
+
+if(FALSE) {
+  ggplot(data = data_epred, aes(x = x, y = data_y, color = factor(male))) +
+## Combine Scatter Plots and Model vs Data Plots
     stat_lineribbon(aes(y = .epred)) +
-    geom_point(data = data_fit) +
+    geom_point(data = data_fit_brms) +
     scale_fill_brewer(palette = "Greys") +
     scale_color_brewer(palette = "Set2") +
     ylim(0, max(tmp_y)*1.1)
-
-plot_model_list <- list()
-
-for(male in male_vec) {
-    
-    tmp_data <- data_fit %>% filter(male == !!male)
-    tmp_y <- tmp_data$y
-    tmp_epred <- data_epred %>% filter(male == !!male)
-    
-    plot_tmp <- ggplot(data = tmp_epred,
-                       aes(x = x, y = tmp_y)) +
-        ylim(0, max(tmp_y)*1.1) +
-        stat_lineribbon(aes(y = .epred)) +
-        scale_fill_brewer(palette = "Greys") +
-        scale_color_brewer(palette = "Set2") +
-        geom_point(data = tmp_data, aes(x = x, y = y), color = "Red") +
-        labs(title=male) +
-        theme(legend.position="none")
-    print(plot_tmp)
-    plot_model_list[[male]] <- plot_tmp
 }
-
-gridExtra::grid.arrange(grobs = plot_model_list)
-
-cowplot::plot_grid(plotlist = plot_model_list,
-                   ncol = 3)
 ```
 
-## Combine Scatter Plots and Model Predictions
+## Create Model vs. Data Plots
 
 ```{r}
-combo_list <- list()
 
+plot_model <- list()
+
+list_plot_mean <- list()
+  
 for(male in male_vec) {
-    combo_list[[male]] <-
-            cowplot::plot_grid(
-                         plotlist = list(
-                             scatter_list[[male]],
-                             plot_model_list[[male]] +
-                             labs(title = NULL) +
-                             xlab(NULL) +
-                             ylab(NULL)
-                         )
-                     )  + labs(title = male)
+    
+  tmp_data <- data_fit_brms %>% filter(male == !!male)
+  tmp_y <- tmp_data$y
+  tmp_mean <- data_epred %>% filter(male == !!male)
+
+  tmp_plot_mean <- ggplot(data = tmp_mean,
+                            aes(x = x, y = tmp_y)) +
+    ylim(0, max(tmp_y)*1.1) +
+    stat_lineribbon(aes(y = .epred)) +
+    scale_fill_brewer(palette = "Greys") +
+    scale_color_brewer(palette = "Set2") +
+    geom_point(data = tmp_data, aes(x = x, y = y), color = "Red") +
+    labs(title=male) +
+    theme(legend.position="none")
+  #print(tmp)
+  list_plot_mean[[male]] <- tmp_plot_mean
+  
 }
 
+tmp_plot <- cowplot::plot_grid(
+  plotlist = list_plot_mean,
+  ncol = 4,
+  title = "mean"
+)
+
+data_grid <- data_fit_brms %>%
+  group_by(male) %>%
+  data_grid(x = seq_range(c(20, 40), n = 51))
+
+plot_model[["mean"]] <- tmp_plot
+
+tmp_plot
+
+```
+
+```{r}
+
+list_plot_data <- list()
+
+for(male in male_vec) {
+
+
+  tmp_data <- data_fit_brms %>% filter(male == !!male)
+  tmp_y <- tmp_data$y
+  tmp_pred  <- data_pred %>% filter(male ==!!male)
+  tmp_plot_data <- ggplot(data = tmp_pred,
+                          aes(x = x, y = tmp_y)) +
+    ylim(0, max(tmp_y)*1.1) +
+    stat_lineribbon(aes(y = .prediction),
+                    .width = c(.95, .80, .50),
+                    alpha = 1/4) +
+    geom_point(data = tmp_data, aes(x = x, y = y), color = "Red") +
+    scale_fill_brewer(palette = "Greys") +
+    #scale_color_brewer(palette = "Set2") +
+    labs(title=male) +
+    theme(legend.position="none")
+  print(tmp_plot_data)
+  list_plot_data[[male]] <- tmp_plot_data
+}
+
+  
+  #gridExtra::grid.arrange(grobs = plot_model_list)
+  #
+  #plot_tmp <- cowplot::plot_grid(plotlist = plot_model_list,
+  #                  ncol = 3)
+
+
 cowplot::plot_grid(
-             plotlist = combo_list,
-                   ncol = 2)
+  plotlist = list_plot_data,
+  ncol = 4,
+  title = "data"
+)
 
 
+plot_model[["data"]] <- tmp_plot_data
+
+
+
+
+```
+
+## Combine Scatter Plots and Model vs Data Plots
+
+```{r}
+
+plot_combo <- list()
+
+for(prediction in c("data")) {
+
+    list_tmp <- list()
+    for(male in male_vec) {
+      list_tmp[[male]] <-
+        cowplot::plot_grid(
+          plotlist = list(
+            scatter_list[[male]],
+            plot_model[[prediction]][[male]] +
+              labs(title = NULL) +
+              xlab(NULL) +
+              ylab(NULL)
+          )
+        )  + labs(title = male)
+    }
+
+  plot_tmp <- cowplot::plot_grid(
+      plotlist = list_tmp,
+      ncol = 2,
+      title = prediction
+    )
+    print(plot_tmp)
+    plot_combo[[prediction]] <- plot_tmp
+
+}
 
 ```
 
