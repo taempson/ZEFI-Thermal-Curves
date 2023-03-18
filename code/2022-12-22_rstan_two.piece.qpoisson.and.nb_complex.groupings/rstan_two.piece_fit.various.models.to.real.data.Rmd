@@ -1,7 +1,7 @@
 ---
 title: "Piecewise Regression QPoisson Error on Real Data using STAN Directly"
 author: "Michael Gilchrist"
-date: "date: 2022-12-22"
+date: "Created: 2022-12-22; Complied: `r date()` "
 output: pdf_document
 ---
 
@@ -24,6 +24,22 @@ if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=2E2, ou
 
 ## Recap
 
+- The code uses two different models
+  - `two.piece_qpoisson.stan`
+    - Not actually a `quasi-poisson`.
+      Instead, they are Negative Binomial Type I as used in the econometrics literature.
+    - The results give better behaved estimates of `x0` than later fits using `brms`.
+    - I suspect this is because I'm fitting the transformed parameter `b0` rather than `x0` directly and I use a flat prior for `b0`.
+    - However, I'm not 100\% sure this is actually the case.
+      This thread suggests it is not the case: (https://discourse.mc-stan.org/t/putting-priors-on-transformed-parameters/2488/6)
+      If I do need to do this, then I need to either
+      - Calculate the corresponding equivalent prior for `x0` or
+      - Modify my `custom_family` definition for `brms`
+    - I use a rather strong prior for `theta` of `Exponential(10)` or `Exponential(40)` which seems rather strong, but gives theta estimates consistent with my estimates based solely on 40C data where there are multiple replicates/bird.
+  - `two.piece_nb_2.0.stan`
+    - More traditional NB approach where `var(x) ~ mu^2`
+
+  
 # Set up
 
 ## Install libraries
@@ -98,12 +114,14 @@ data_ind <- motif_data %>%
     filter(male %in% male_vector) %>%
     mutate(male = droplevels(male)) %>%
     mutate(index = as.integer(male)) %>%
-    mutate(male = as.character(male)) %>% 
+  ##  mutate(male = as.character(male)) %>% 
     arrange(index) %>%
     select(male, index, motif_count, temp, round, trial_round, date, counter) %>% 
   ##    left_join(index_shape, by = "index") %>%
   mutate()
 
+print(data_ind[ ,c("male", "index")] %>% unique())
+      
 stats_ind <- motif_stats %>%
     filter(male %in% male_vector) 
 
@@ -137,8 +155,13 @@ pars_full <- c(pars, "lp__")
 ```
 
 # Fit Models
-## QPoisson
- 
+
+## Negative Binomial Type I: `var(x) = theta mu` 
+
+
+- First Model Version: `two.piece_qpoisson.stan`
+- Not really a qpoisson
+
 ```{r}
 
 iter <- 15000
@@ -249,8 +272,8 @@ for(x_flag in flags_x) {
                                 x0_max = t0max,
                                 y_xmax = 0,
                                 y0_min = 10,
-                                sd_y0_prior = 200,
-                                alpha_theta_prior = 10,
+                                sd_y0_prior = 100,
+                                alpha_theta_prior = 40,
                                 ##tp = tp,
                                 ## max threshold value.
                                 ## having it too close to xmax *sometimes* leads to sampling
@@ -276,7 +299,7 @@ qpoisson_fit_tbl <- fit_tbl
 ```
 - Models fit without any warnings.
 
-## Negative Binomial
+## Negative Binomial: `var(x) ~ mu + mu^2/phi`
  
 ```{r}
 
