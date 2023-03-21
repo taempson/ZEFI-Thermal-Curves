@@ -230,7 +230,7 @@ males_keep <- c("T234", "T236", "T237", "T244", "T247", "T257", "T260")
 
 fit_index <- 0
 
-for(filter_male in c(FALSE, TRUE) {
+for(filter_male in c(FALSE, TRUE)) {
   for(model in models_used) {
 
     print(model)
