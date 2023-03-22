@@ -98,10 +98,14 @@ data_ind <- motif_data %>%
   ungroup() %>% 
   mutate()
 
+save(data_ind, file = file.path(output_dir, "data_ind.Rda"))
+write_csv(data_ind, file = file.path(output_dir, "data_ind.csv"))
+          
 stats_ind <- motif_stats %>%
     filter(male %in% male_vector) 
 
 save(stats_ind, file = file.path(output_dir, "stats_ind.Rda"))
+write_csv(stats_ind, file = file.path(output_dir, "stats_ind.csv"))
 
 summary(data_ind)
 
