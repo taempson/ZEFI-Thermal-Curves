@@ -171,7 +171,7 @@ x0_groups_2b$high <- c(x0_groups_2_base$high, 9) %>% sort()
 data_stan <- data_ind %>% rename(y = motif_count, x = temp) %>%
   mutate(male = factor(male))
 
-xmax <- 4
+xmax <- 46
 stan_two_piece_x0_func <- paste0(" real  two_piece(real x, real x0, real y0) {
  real xmax = ", xmax, "; ## paste in value for xmax\n
  return(y0 * (xmax - fmax(x0, x))/(xmax - x0));
@@ -199,8 +199,8 @@ flags_y0 <- switch(1,
                    )
 
 disp_prior_list <- switch(2,
-                          c(9), # 9 matches rstan runs
-                          c(0.125, 0.25, 2, 8), # used in exploring model behavior
+                          c(0.125), # This works well and is sane
+                          c(0.0675, 0.125, 0.25), # used in exploring model behavior
                           c("flat") # not used
                           )
 
@@ -468,11 +468,11 @@ for(model in models_used) {
                      save_model = save_model
                      )
 
-          print(desc)
+          # print(desc)
           # print("Prior Information")
           # print(prior_summary(fit))
-          print("Fit Information")
-          print(fit)
+          # print("Fit Information")
+          # print(fit)
           
           #fit_exp <- expose_functions(fit) , vectorize = TRUE)
           #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
@@ -500,7 +500,7 @@ for(model in models_used) {
 
         if(is.na(list(fit))) {
           warning(paste0("model fit ", desc, "does not exist.\n Skipping."))
-        }else {
+        } else {
           ## Print and plot results, regardless of which fits one uses           
           print(desc)
           if(print_prior_summary) {
