@@ -69,7 +69,8 @@ Even though we included this value, it is very unlikely to be 25C values.
 I interpret this to mean that when things are really noisy (high `theta`), one way to interpret the data is that one set of males has a very long (presumably slow) decline.
 It would be good to look at the correlations via `pairs()`.
 - To me this is consistent with the infomal knowledge that the 
-
+- Two males have fitting issues, "T235" and "T236".
+  This appears to be due to a bimodal posterior surface where one region has low 'x0' (< 40C), but low 'y0', ane the other has a high `x0` and low `y0` 
 
 # Set up
 
@@ -98,7 +99,6 @@ rstan_options(auto_write = TRUE)
 library(brms)
 library(loo)
 
-
 ## options(ggplot2.continuous.colour="viridis",
 ##        ggplot2.discrete.colour="viridis",
 ##        ggplot2.scale_fill_discrete = scale_fill_viridis_d,
@@ -113,7 +113,6 @@ library(latex2exp)
 ## Source family
 
 ```{r}
-
 source("../../../custom-brms-families/families/nbinom_type1.R")
 ```
 ## Load Data
@@ -128,8 +127,34 @@ names(stats_ind)
 head(data_ind)
 names(data_ind)
 
+```
+
+## Determine reasonable priors for y0
+
+```{r}
+
+cumulative_count_vs_temp <- list()
+
+for(temp_threshold in 26:45) {
+  tmp <- data_ind %>% group_by(male) %>% filter(temp < temp_threshold) %>% summarize(mean = mean(motif_count), sd = sd(motif_count), cv = sd(motif_count)/mean(motif_count))
+  mean <- mean(tmp$mean)
+  sd <- sd(tmp$mean)
+  cumulative_count_vs_temp[[temp_threshold]] <- tmp
+  print(paste0("Temp: ", temp_threshold, ", mean: ", mean, ", sd: ", sd))
+}
+
+pairs(cumulative_count_vs_temp[[39]] %>% select(- male))
+
+hist <- ggplot(cumulative_count_vs_temp[[39]], aes(mean)) +
+  geom_histogram(bins = 6)
+
+hist_log <- hist + scale_x_log10()
+
+cowplot::plot_grid(plotlist = list(hist, hist_log))
 
 ```
+
+Go with `mean = 125` and `sd = 125 * 4 = 500`
 
 
 
@@ -166,7 +191,7 @@ stan_asymptotic_func <- paste0(" real  asymp(real x, real phi, real y0) {
 
 
 
-models <- c("one_piece", "two_piece", "asymptotic") #, "one_piece") #, "asymptotic")
+models <- c("one_piece", "two_piece") #, "asymptotic") #, "one_piece") #, "asymptotic")
 sampling_dists <- c("nbinom_type1") ##, "com_poisson") ## lognormal doesn't work since the counts can be 0.
 flags_x0 <- c("uniform_1",
               "groups_1", ## this doesn't work with x0_Intercept prior, suggests error in priors
@@ -179,10 +204,10 @@ flags_y0 <- switch(1,
                    c("uniform_1", "groups_1", "individual")
                    )
 
-values_disp <- switch(1,
-                      c(0.125), # a good value
-                      c(0.01, 0.1, 0.25), # used in exploring model behavior
-                      c(0.1, "flat"), #, 0.1, 1)
+values_disp <- switch(2,
+                      c(0.1), # 0.125 is a good value
+                      c(0.01, 0.1), #, 0.25), # used in exploring model behavior
+                      list(0.1, "flat"), #, 0.1, 1) # doesn't work yet
                       c("flat"))
 
 flags_disp <- switch(2,
@@ -191,7 +216,7 @@ flags_disp <- switch(2,
                    )
 
 ## whether to filter males with large disp values estimated using one piece model
-filter_male <- c(FALSE, TRUE)
+#filter_male <- c(FALSE) #, TRUE)
 
 N <- length(data)
 
@@ -201,7 +226,7 @@ fit_tbl <- crossing(model = models,
                     disp_value = values_disp,
                     disp_flag = flags_disp,
                     desc = "NA_character",
-                    filter_male = filter_male,
+ #                   filter_male = filter_male,
                     y0_group_list = list(NA), #tbl_tmp, #list(NA),
                     x0_group_list = list(NA),
                     fit = list(NA),
@@ -232,12 +257,14 @@ if(run_fits) {
 
 
 sampling = "nbinom_type1"
+prior_shape_y0 = "flat"
 
 flags_x0_used <- c("individual") #, "groups_1", "uniform_1") #
 flags_y0_used <- c("individual")
 values_disp_used <- values_disp
-flags_disp_used <- c("individual", "groups_1", "uniform_1")  |> rev() |> first()
-models_used <- c("two_piece") #, "asymptotic") #c("one_piece", "two_piece") #, "two_piece")
+flags_disp_used <- c("individual", "groups_1", "uniform_1") #  |> rev() |> first()
+models_used <- c("one_piece", "two_piece") #, "asymptotic") #c("one_piece", "two_piece") #, "two_piece")
+shape_y0_prior <- "flat" # flat or normal
 
 ## Should remove this since males were identified with wrong llik function
 ## males whose E(disp) in one_piece is < 4
@@ -245,15 +272,16 @@ males_keep <- c("T234", "T236", "T237", "T244", "T247", "T257", "T260")
 
 fit_index <- 0
 
-for(filter_male in c(FALSE)) {
+#for(filter_male in c(FALSE)) {
   for(model in models_used) {
 
     print(model)
     switch(model,           
            two_piece = {
+             ## Note issues in non-convergence are related to bimodality of posterior surface.
              stan_func <- stan_two_piece_func
-             warmup <- 6000 #floor(3/4 * iter)
-             iter <- warmup + 6000
+             warmup <- 2000 # floor(3/4 * iter)
+             iter <- warmup + 2000
              adapt_delta <- 0.8
              thin <- 4
            },
@@ -278,6 +306,7 @@ for(filter_male in c(FALSE)) {
       print(stan_func)
       
       for(x0_flag in flags_x0_used) {
+        
         ## define variable for labeling figures
         x0_label <- ifelse(model == "one_piece", "NA", x0_flag)
         
@@ -292,22 +321,25 @@ for(filter_male in c(FALSE)) {
             fit_index <- fit_index + 1
             ## Set up variables for saving model and fit
 
-            desc_short <- paste0("x0: " , x0_label, "; y0: ", y0_flag, "; disp_flag: ", disp_flag, "; disp prior: ", disp_value, "; filter: ", filter_male)
+            desc_short <- paste0("x0: " , x0_label, "; y0: ", y0_flag, "; disp_flag: ", disp_flag, "; disp prior: ", disp_value) #, "; filter: ", filter_male)
             desc <- paste0(sampling, "; ", model, "; ", desc_short)
 
             filename_desc <- gsub("_", "-", desc) %>%
               gsub("; ", "_", .) %>%
               gsub(":? ", "-", .)
 
-            stan_model_name <- sub(filename_desc, "_disp-prior-[0-9.]+_filter", "_filter")
+            #stan_model_name <- sub(filename_desc, "_disp-prior-[0-9.]+_filter", "_filter")
+            stan_model_name <- sub(filename_desc, "_disp-prior-[0-9.]+_", "_")
             
             curr_row <- which(fit_tbl$model == model &
                                 fit_tbl$sampling_dist == sampling &
                                 fit_tbl$x0_flag == x0_flag &
                                 fit_tbl$y0_flag == y0_flag &
                                 fit_tbl$disp_value == disp_value &
-                                fit_tbl$disp_flag == disp_flag &
-                                fit_tbl$filter_male == filter_male)
+                                # fit_tbl$filter_male == filter_male &
+                                fit_tbl$disp_flag == disp_flag
+                                )
+            
             fit_tbl[ curr_row, ]$desc <- desc
 
             print(desc)
@@ -430,20 +462,18 @@ for(filter_male in c(FALSE)) {
                                  individual = NULL
                                  )
               
-              x0_priors <- prior(uniform(25, 45), lb = 25, ub = 45, nlpar = "x0") + x0_prior
+              x0_priors <- prior(uniform(25, 43), lb = 25, ub = 43, nlpar = "x0") + x0_prior
 
               phi_priors <- prior(uniform(0.1, 100), lb = 0.01, ub = 17, nlpar = "phi")
               
-              y0_priors <- switch(y0_flag,
-                                  uniform_1 = prior(normal(150, 100), nlpar = "y0"),
-                                  uniform_2 = NULL,
-                                  groups_1 = NULL,
-                                  groups_2 = NULL,
-                                  individual = switch(1,
-                                                      prior(normal(150, 1000), nlpar = "y0", lb = 10, ub = 1000), 
-                                                      prior(uniform(10, 1000), nlpar = "y0", lb = 10, ub = 1000) # flat prior (10,500) and (10, 1000) lead to sampling issues with T235 and 236
-                                                      ),
-                                  other = NULL
+              y0_priors <- switch(prior_shape_y0,
+                                  ## Values based on calculations at top of file using `temp_threshold`,
+                                  normal = prior(normal(125, 500), nlpar = "y0", lb = 10, ub = 1000), 
+                                  # flat prior
+                                  # - consistent with fact we're working with motifs, not songs
+                                  # - avoids bimodal posterior sampling issues with T235 and 236
+                                  flat =  prior(uniform(10, 1000), nlpar = "y0", lb = 10, ub = 1000) 
+                                  
                                   )
 
               threshold_priors <- switch(model,
@@ -456,7 +486,8 @@ for(filter_male in c(FALSE)) {
                                     uniform_1 = set_prior(prior_string, class = "disp", lb = 0, ub = 20), # Form when disp ~ 1: set_prior(prior_string, class = "Intercept", dpar = "disp", lb = 0, ub = 20), Model runs slow, likely need disp ~ 0 + Intercept
                                     uniform_2 = NULL,
                                     groups_1 = set_prior(prior_string,
-                                                         class = "Intercept", dpar = "disp", lb = 0, ub = 20),
+                                                         class = "b", dpar = "disp", lb = 0, ub = 20) +
+                                      prior(normal(10, 20), class = "sd", dpar = "disp", lb = 0, ub = 20),
                                     groups_2a = NULL,
                                     groups_2b = NULL,
                                     individual = set_prior(prior_string,
@@ -464,10 +495,12 @@ for(filter_male in c(FALSE)) {
                                     
                                     )
 
-              prior <- switch(sampling,
-                              "nbinom_type1" = {
-                                threshold_priors + y0_priors + disp_priors
-                              })
+              prior <- switch(model,
+                              one_piece = {
+                                y0_priors + disp_priors
+                              },
+                              threshold_priors + y0_priors + disp_priors
+                              )
 
               if(print_get_prior) {
                 tmp <- get_prior(nlform,
@@ -513,10 +546,11 @@ for(filter_male in c(FALSE)) {
                          save_model = stan_code
                          )
 
-              print(desc)
-              # print("Prior Information")
-              # print(prior_summary(fit))
+
+              print("Prior Summary")
+              print(prior_summary(fit))
               print("Fit Information")
+              print(desc)
               print(fit)
               
               #fit_exp <- expose_functions(fit) , vectorize = TRUE)
@@ -582,16 +616,19 @@ for(filter_male in c(FALSE)) {
                 ## each male only appears once in the one piece models
                 splitby <- 3
                 nsplits <- max(nmales %/% splitby, 1)
-                tmp_start <- 1:nsplits
-                tmp_stop <- tmp_start * splitby
+                tmp_stop <- (1:nsplits) * splitby
+                tmp_start <- tmp_stop - (splitby - 1)
                 for(i in 1:nsplits) {
                   tmp_range <- tmp_start[[i]]:tmp_stop[[i]]
                   list_plot[[i]] <- pairs(fit,
-                                          variable = c(males[[tmp_range]],
-                                                       "disp", "lprior"),
+                                          variable = c(as.character(males[tmp_range]),
+                                                       "disp"),
                                           regex = TRUE)
                 }
-              }else {
+                list_plot[[i+1]] <- pairs(fit,
+                                          variable = c("disp", "lprior", "lp__")
+                                          )
+              } else {
                 for(male in males) {
                   ##print(male);
                   list_plot[[male]] <- pairs(fit, variable = male, regex = TRUE)
@@ -622,7 +659,7 @@ for(filter_male in c(FALSE)) {
       }
     }
   }
-}
+#}
 print(outfile_tbl)
 
 if(save_fits) save(fit_tbl, file = outfile_tbl)
