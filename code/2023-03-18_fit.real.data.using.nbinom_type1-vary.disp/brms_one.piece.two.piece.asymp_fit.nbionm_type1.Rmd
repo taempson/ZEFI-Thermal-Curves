@@ -200,7 +200,7 @@ stan_asymptotic_func <- paste0(" real  asymp(real x, real phi, real y0) {
 
 ## Function to find row(s) in tbl that match criteria
 
-match_tbl_row <- function(filter_male = FALSE, x0_flag = "individual", y0_flag = "individual", disp_flag = "uniform_1", disp_value = 0.01, model = "two_piece", tbl = fit_tbl) {
+which_tbl_row <- function(filter_male = FALSE, x0_flag = "individual", y0_flag = "individual", disp_flag = "uniform_1", disp_value = 0.01, model = "two_piece", tbl = fit_tbl) {
   which( tbl$filter_male %in% filter_male & 
           tbl$x0_flag %in% x0_flag &
           tbl$y0_flag %in% y0_flag &
@@ -283,7 +283,7 @@ if(run_fits) {
 sampling = "nbinom_type1"
 prior_shape_y0 = "flat"
 
-flags_x0_used <- c("individual", "groups_1", "uniform_1")[2] #
+flags_x0_used <- c("individual", "groups_1", "uniform_1")[c(1, 3)] # %>% rev()#
 flags_y0_used <- c("individual")
 values_disp_used <- values_disp
 flags_disp_used <- c("individual", "groups_1", "uniform_1")[3] #  |> rev() |> first()
@@ -297,7 +297,7 @@ male_exclude = c("T235", "T236")
 
 fit_index <- 0
 
-for(male_filter in c(FALSE)) {
+for(male_filter in c(TRUE)) {
   for(model in models_used) {
 
     print(model)
@@ -358,7 +358,7 @@ for(male_filter in c(FALSE)) {
             #stan_model_name <- sub(filename_desc, "_disp-prior-[0-9.]+_filter", "_filter")
             stan_model_name <- filename_desc #sub("_disp-prior-[0-9.]+_", "_", filename_desc)
             
-            curr_row <- match_tbl_row(male_filter,
+            curr_row <- which_tbl_row(male_filter,
                                       x0_flag,
                                       y0_flag,
                                       disp_flag,
