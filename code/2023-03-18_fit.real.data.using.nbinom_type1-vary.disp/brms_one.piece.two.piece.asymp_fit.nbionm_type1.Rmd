@@ -154,7 +154,9 @@ cowplot::plot_grid(plotlist = list(hist, hist_log))
 
 ```
 
-Go with `mean = 125` and `sd = 125 * 4 = 500`
+If using a normal prior, go with `mean = 125` and `sd = 125 * 4 = 500`.
+However, the data doesn't seem to follow any real distribution and its at the motif rather than song scale, as a result each male has its own, unknown scaling factor between motifs and songs (i.e. 1/E(# motifs/song) so a flat prior is justifiable.
+
 
 
 
@@ -177,7 +179,14 @@ xignore <- 39 # x value above which data is ignored in one_piece model
     
 stan_two_piece_func <- paste0(" real  two_piece(real x, real x0, real y0) {
  real xmax = ", xmax, "; ## paste in value for xmax\n
- return(y0 * (xmax - fmax(x0, x))/(xmax - x0));
+ real y;
+
+ if(x0 > xmax) {
+    y = log(0);
+ } else {
+    y = y0 * (xmax - fmax(x0, x))/(xmax - x0);
+ }
+ return(y);
  } ")
 
 stan_one_piece_func <- paste0(" real  one_piece(real y0) {
@@ -189,45 +198,59 @@ stan_asymptotic_func <- paste0(" real  asymp(real x, real phi, real y0) {
  return(y0 * (1 - exp( - phi * (xmax - x))) );
  } ")
 
+## Function to find row(s) in tbl that match criteria
+
+match_tbl_row <- function(filter_male = FALSE, x0_flag = "individual", y0_flag = "individual", disp_flag = "uniform_1", disp_value = 0.01, model = "two_piece", tbl = fit_tbl) {
+  which( tbl$filter_male %in% filter_male & 
+          tbl$x0_flag %in% x0_flag &
+          tbl$y0_flag %in% y0_flag &
+          tbl$disp_flag %in% disp_flag &
+          tbl$disp_value %in% disp_value &
+          tbl$model %in% model
+          # tbl$sampling_dist %in% sampling &
+        )
+}
+
+```
 
 
-models <- c("one_piece", "two_piece") #, "asymptotic") #, "one_piece") #, "asymptotic")
+## Set up Dataframe for fit results
+```{r}
+
+
+models <- c("one_piece", "two_piece", "asymptotic")[2:3] #, "one_piece") #, "asymptotic")
 sampling_dists <- c("nbinom_type1") ##, "com_poisson") ## lognormal doesn't work since the counts can be 0.
 flags_x0 <- c("uniform_1",
               "groups_1", ## this doesn't work with x0_Intercept prior, suggests error in priors
-              "groups_2a",
-              "groups_2b",
+#              "groups_2a",
+#              "groups_2b",
               "individual")
 
-flags_y0 <- switch(1,
-                   c("individual"),
-                   c("uniform_1", "groups_1", "individual")
-                   )
+flags_y0 <- c("uniform_1", "groups_1", "individual")[3]
 
-values_disp <- switch(2,
-                      c(0.1), # 0.125 is a good value
+values_disp <- switch(1,
+                      c(0.01), # 0.125 is a good value
                       c(0.01, 0.1), #, 0.25), # used in exploring model behavior
                       list(0.1, "flat"), #, 0.1, 1) # doesn't work yet
                       c("flat"))
 
-flags_disp <- switch(2,
-                   c("individual"),
-                   c("uniform_1", "groups_1", "individual")
-                   )
+flags_disp <- c("uniform_1", "groups_1", "individual")
+
 
 ## whether to filter males with large disp values estimated using one piece model
-#filter_male <- c(FALSE) #, TRUE)
+filter_male <- c(TRUE, FALSE)
 
 N <- length(data)
 
 fit_tbl <- crossing(model = models,
-                    sampling_dist = sampling_dists,
-                    x0_flag = flags_x0, y0_flag = flags_y0,
+                    #sampling_dist = sampling_dists,
+                    x0_flag = flags_x0,
+                    y0_flag = flags_y0,
                     disp_value = values_disp,
                     disp_flag = flags_disp,
                     desc = "NA_character",
- #                   filter_male = filter_male,
-                    y0_group_list = list(NA), #tbl_tmp, #list(NA),
+                    filter_male = filter_male,
+                    #y0_group_list = list(NA), #tbl_tmp, #list(NA),
                     x0_group_list = list(NA),
                     fit = list(NA),
                     llik = list(NA),
@@ -242,14 +265,15 @@ fit_tbl <- crossing(model = models,
 
 ```{r, message = FALSE }
 
-run_fits = TRUE
-force_load = FALSE  #reload fit_tbl even if it already exits
-save_fits = run_fits
+run_fits <- TRUE
+force_load <- FALSE  #reload fit_tbl even if it already exits
+save_fits <- TRUE
 
 
 if(run_fits) {
   infile_tbl <- NULL
-  outfile_tbl <- file.path(output_dir, paste0("fit_tbl_", Sys.Date(), ".Rda"))
+  cur_time <- gsub(" ", "_", Sys.time()) %>% gsub(":", ".", .)
+  outfile_tbl <- file.path(output_dir, paste0("fit_tbl_", cur_time, ".Rda"))
 } else {
   infile_tbl <- file.path(output_dir, paste0("fit_tbl_", Sys.Date(), ".Rda"))
   outfile_tbl <- NULL
@@ -259,20 +283,21 @@ if(run_fits) {
 sampling = "nbinom_type1"
 prior_shape_y0 = "flat"
 
-flags_x0_used <- c("individual") #, "groups_1", "uniform_1") #
+flags_x0_used <- c("individual", "groups_1", "uniform_1")[2] #
 flags_y0_used <- c("individual")
 values_disp_used <- values_disp
-flags_disp_used <- c("individual", "groups_1", "uniform_1") #  |> rev() |> first()
-models_used <- c("one_piece", "two_piece") #, "asymptotic") #c("one_piece", "two_piece") #, "two_piece")
+flags_disp_used <- c("individual", "groups_1", "uniform_1")[3] #  |> rev() |> first()
+models_used <- c("one_piece", "two_piece", "asymptotic")[2] #c("one_piece", "two_piece") #, "two_piece")
 shape_y0_prior <- "flat" # flat or normal
 
-## Should remove this since males were identified with wrong llik function
-## males whose E(disp) in one_piece is < 4
-males_keep <- c("T234", "T236", "T237", "T244", "T247", "T257", "T260")
+## These males produce bimodial posteriors and interfere with model fitting
+## Ideally, we'd do a preliminary analysis without them and then include them later.
+
+male_exclude = c("T235", "T236")
 
 fit_index <- 0
 
-#for(filter_male in c(FALSE)) {
+for(male_filter in c(FALSE)) {
   for(model in models_used) {
 
     print(model)
@@ -280,9 +305,9 @@ fit_index <- 0
            two_piece = {
              ## Note issues in non-convergence are related to bimodality of posterior surface.
              stan_func <- stan_two_piece_func
-             warmup <- 2000 # floor(3/4 * iter)
-             iter <- warmup + 2000
-             adapt_delta <- 0.8
+             warmup <- 10000 # floor(3/4 * iter)
+             iter <- warmup + 8000
+             adapt_delta <- 0.99
              thin <- 4
            },
            one_piece = {
@@ -290,7 +315,7 @@ fit_index <- 0
              warmup <- 2000 
              iter <- warmup + 2000
              thin <- 4
-             adapt_delta <- 0.85
+             adapt_delta <- 0.7
            },
            asymptotic = {
              stan_func <- stan_asymptotic_func
@@ -307,10 +332,12 @@ fit_index <- 0
       
       for(x0_flag in flags_x0_used) {
         
-        ## define variable for labeling figures
+        for(y0_flag in flags_y0_used) {
+
+                  ## define variable for labeling figures
         x0_label <- ifelse(model == "one_piece", "NA", x0_flag)
         
-        for(y0_flag in flags_y0_used) {
+
 
           print_get_prior <- TRUE ## reset value
           print_prior_summary <- TRUE
@@ -321,7 +348,7 @@ fit_index <- 0
             fit_index <- fit_index + 1
             ## Set up variables for saving model and fit
 
-            desc_short <- paste0("x0: " , x0_label, "; y0: ", y0_flag, "; disp_flag: ", disp_flag, "; disp prior: ", disp_value) #, "; filter: ", filter_male)
+            desc_short <- paste0("x0: " , x0_label, "; y0: ", y0_flag, "; disp_flag: ", disp_flag, "; disp prior: ", disp_value, "; filter: ", male_filter)
             desc <- paste0(sampling, "; ", model, "; ", desc_short)
 
             filename_desc <- gsub("_", "-", desc) %>%
@@ -329,17 +356,16 @@ fit_index <- 0
               gsub(":? ", "-", .)
 
             #stan_model_name <- sub(filename_desc, "_disp-prior-[0-9.]+_filter", "_filter")
-            stan_model_name <- sub(filename_desc, "_disp-prior-[0-9.]+_", "_")
+            stan_model_name <- filename_desc #sub("_disp-prior-[0-9.]+_", "_", filename_desc)
             
-            curr_row <- which(fit_tbl$model == model &
-                                fit_tbl$sampling_dist == sampling &
-                                fit_tbl$x0_flag == x0_flag &
-                                fit_tbl$y0_flag == y0_flag &
-                                fit_tbl$disp_value == disp_value &
-                                # fit_tbl$filter_male == filter_male &
-                                fit_tbl$disp_flag == disp_flag
-                                )
-            
+            curr_row <- match_tbl_row(male_filter,
+                                      x0_flag,
+                                      y0_flag,
+                                      disp_flag,
+                                      disp_value,
+                                      model,
+                                      fit_tbl)
+                       
             fit_tbl[ curr_row, ]$desc <- desc
 
             print(desc)
@@ -366,10 +392,12 @@ fit_index <- 0
 
               ## Refresh data in case x0_group or y0_group are all set to 1
               data <- data_stan
+              if(male_filter) data <- data %>% filter(!(male %in% male_exclude))
 
-              if(model == "one_piece") data <- data %>% filter(x < xignore)
-              if(filter_male) data <- data %>% filter(male %in% males_keep)
+              males_used <- unique(data$male)
               
+              if(model == "one_piece") data <- data %>% filter(x < xignore)
+
 
               print("Set flags based on fitted model structure")
               if(x0_flag %in% c("uniform_1", "groups_1")) data <- mutate(data, x0_group = 1)
@@ -389,21 +417,21 @@ fit_index <- 0
               
               print("Define parameter formulas")
               x0_form <- switch(x0_flag,
-                                uniform_1 = formula(x0 ~ 1),
+                                uniform_1 = formula(x0 ~ 0 + Intercept),
                                 uniform_2 = formula(x0 ~ 0 + x0_group),
                                 ## `0 + Intercept` avoids prior being defined on centered data
-                                groups_1 = formula(x0 ~ 1 + (1|male)), 
-                                groups_2 = formula(x0 ~ 1 + (1|male) + x0_group),
+                                groups_1 = formula(x0 ~ 0 + Intercept + (1|male)), 
+                                groups_2 = formula(x0 ~ 0 + Intercept + (1|male) + x0_group),
                                 individual = formula(x0 ~ 0 + male) ## Do not use 1 + male!
                                 )
 
               phi_form <- formula(deparse(x0_form) %>% gsub("x0", "phi", .))
 
               y0_form <- switch(y0_flag,
-                                uniform_1 = formula(y0 ~ 1),
+                                uniform_1 = formula(y0 ~ 0 + Intercept),
                                 ## `0 + Intercept` avoids prior being defined on centered data
                                 uniform_2 = formula(y0 ~ 0 + y0_group),
-                                groups_1 = formula(y0 ~ 0 + (1| male)), 
+                                groups_1 = formula(y0 ~ 0 + Intercept + (1| male)), 
                                 groups_2 = formula(y0 ~ 0 + (1| male) + y0_group),
                                 individual = formula(y0 ~ 0 + male)
                                 ## `-1 + ` gives me the error:
@@ -457,12 +485,12 @@ fit_index <- 0
               x0_prior <- switch(x0_flag,
                                  uniform_1 = NULL,
                                  uniform_2 = NULL,
-                                 groups_1 = prior(student_t(3, 0, 66.7), lb = 0, ub = 3, class = "sd", nlpar = "x0"),
+                                 groups_1 = prior(student_t(3, 0, 66.7), lb = 0, ub = 10, class = "sd", nlpar = "x0"),
                                  groups_2 = NULL,
                                  individual = NULL
                                  )
               
-              x0_priors <- prior(uniform(25, 43), lb = 25, ub = 43, nlpar = "x0") + x0_prior
+              x0_priors <- prior(uniform(32, 44.5), lb = 32, ub = 44.5, nlpar = "x0") + x0_prior
 
               phi_priors <- prior(uniform(0.1, 100), lb = 0.01, ub = 17, nlpar = "phi")
               
@@ -487,7 +515,7 @@ fit_index <- 0
                                     uniform_2 = NULL,
                                     groups_1 = set_prior(prior_string,
                                                          class = "b", dpar = "disp", lb = 0, ub = 20) +
-                                      prior(normal(10, 20), class = "sd", dpar = "disp", lb = 0, ub = 20),
+                                      set_prior("uniform(0.1, 5)", class = "sd", dpar = "disp", lb = 0.4, ub = 5),
                                     groups_2a = NULL,
                                     groups_2b = NULL,
                                     individual = set_prior(prior_string,
@@ -513,7 +541,7 @@ fit_index <- 0
               }
               
               stan_code <- file.path(output_dir,
-                                     "stan", paste0(stan_model_name, ".stan"))
+                                     "stan", "code", paste0(stan_model_name, ".stan"))
               #make_stancode( .... save_model = stan_code)
               
               fit <- brm(nlform,
@@ -535,9 +563,9 @@ fit_index <- 0
                                         ##model_name = desc ## Incorrect way to set this.
                                         ),
                          ## Ideally save model to avoid need to recompile
-                         #stan_model_args = list(
-                         #  model_name = stan_model_name
-                         #),
+                         stan_model_args = list(
+                           model_name = file.path(output_dir, "stan", "binary", stan_model_name)
+                         ),
                          #sample_prior =  "no", ## note improper priors not sampled
                          ## Only print out sampling progress if in interactive mode
                          refresh = ifelse(interactive(),max(iter/5, 1), 0),
@@ -625,15 +653,15 @@ fit_index <- 0
                                                        "disp"),
                                           regex = TRUE)
                 }
-                list_plot[[i+1]] <- pairs(fit,
+                list_plot[[nsplits+1]] <- pairs(fit,
                                           variable = c("disp", "lprior", "lp__")
                                           )
               } else {
-                for(male in males) {
+                for(male in males_used) {
                   ##print(male);
-                  list_plot[[male]] <- pairs(fit, variable = male, regex = TRUE)
-                  #                                           cex = 1,
-                  #                                           pch = ".") #+
+                  list_plot[[male]] <- pairs(fit, variable = c(male, "lp__"), regex = TRUE) 
+                                                            # cex = 1,
+                                                            # pch = ".") #+
                   #theme(plot.background = element_rect(
                   #  color = "black"))
                 }
@@ -659,7 +687,8 @@ fit_index <- 0
       }
     }
   }
-#}
+}
+
 print(outfile_tbl)
 
 if(save_fits) save(fit_tbl, file = outfile_tbl)
