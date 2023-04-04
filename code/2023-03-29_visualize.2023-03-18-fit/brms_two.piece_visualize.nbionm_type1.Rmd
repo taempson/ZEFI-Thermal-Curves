@@ -57,6 +57,7 @@ library(gridExtra)
 library(ggExtra)
 library(cowplot)
 library(GGally)
+library(RColorBrewer) ## needed to have more than 8 colors with `palette="Set2"
 library(broom)
 library(tidyverse)
 library(viridisLite)
@@ -77,6 +78,10 @@ library(modelr)
 
 library(reshape2)
 library(latex2exp)
+
+ggplot2::theme_set(theme_default(base_size = 10))
+## Restore theme settings
+## ggplot2::theme_set(theme_default())
 
 ```
 
@@ -143,7 +148,7 @@ for(name in names(fit_tbl)[1:8]) {
   var <- paste0(name, "_vec")
   assign(var, pull(fit_tbl, name) %>% unique(.))
   # access via get()
-  print(paste0(var, ": ", paste0(get(var), collapse = ", ")))
+  print(paste0(var, ": ", paste0(get(var), sep = "\n\t")))
 }
 
 ```
@@ -152,17 +157,22 @@ for(name in names(fit_tbl)[1:8]) {
 
 ```{r, message = FALSE }
 
+pairs_include_lp = TRUE
+
 for(row_index in 1:nrow(fit_tbl)) {
 
   print(paste("Row: ", row_index))
   
   row_values <- fit_tbl[row_index, ]
   desc <- row_values$desc
+  filename_desc <- gsub("_", "-", desc) %>%
+                            gsub("; ", "_", .) %>%
+                            gsub(":? ", "-", .)
   fit_brms <- row_values$fit[[1]]
   data <- fit_brms[["data"]]
   fit_stan <- fit_brms$fit
 
-  print_mcmc_pairs <- FALSE # individual level parameters
+  print_mcmc_pairs <- TRUE # individual level parameters
   print_mcmc_pairs_group <- TRUE # lp and group level parameters
   print_mcmc_scatter <- TRUE # individual level parameters, histograms printed on margins
   print_stan_hist <- FALSE
@@ -224,50 +234,60 @@ for(row_index in 1:nrow(fit_tbl)) {
     if(print_mcmc_pairs) {
       ## Use mcmc_pairs
       pairs_list <- list()
-      ## Update font size for grid
-      ggplot2::theme_set(theme_default(base_size = 10))
       ## update panel.boarder
       ## Note brms uses 'variable' while stanfit uses 'pars'
       for(male in male_vec) {
-        print(male)
+        # print(male)
         vars_male <- grep(male, vars_T, value = TRUE)
 
         ## Generate pairs() plot using mcmc_pairs()
         ## Don't use pairs.stanfit which does not return an object
+        pairs_pars <- vars_male
+        if(pairs_include_lp) {
+         pairs_pars <- c(pairs_pars, "lp_")
+        }
+
         pairs_tmp <-  mcmc_pairs(
           fit_stan_rename,
-          pars = vars_male,
+          pars = pairs_pars,
           ## set point size and transparency
           off_diag_args = list(size = 1, alpha = 0.35)
         )
-        # list of 4 ggplot objects, diagonal plots are 2 and 3
         plots_tmp <- pairs_tmp$bayesplots 
-        
+
         # add density curves
-        plots_tmp[[2]] <- plots_tmp[[2]] + stat_density_2d(color = "lightgray", size = .5)
-        # What is plot 3 anyway?
-        plots_tmp[[3]] <- plots_tmp[[3]] + stat_density_2d(color = "lightgray", size = .5)
-        # recreate the grid
+        if(length(plots_tmp) == 4) {
+          plot_index <- c(2,3)
+        }
+        if(length(plots_tmp) == 9) {
+          plot_index <- c(2, 3, 4, 6, 7, 8)
+        }
+
+        for(i in plot_index) {
+          # pars = c(vars_male): list of 4 ggplot objects diagonal plots are 2 and 3
+          plots_tmp[[i]] <- plots_tmp[[2]] + stat_density_2d(color = "lightgray", size = .5)
+        }
+        
         pairs_tmp <-bayesplot_grid(plots = plots_tmp)
         pairs_list[[male]] <- pairs_tmp
+      }  
 
-      }
-
-      
       p <- plot_grid(plotlist = pairs_list,
-                     ncol = 3)
-      plot_pairs_list <- plot_grid(title_row, p,  ncol = 1, rel_heights=c(0.1, 1))
-      ## Restore theme settings
-      ggplot2::theme_set(theme_default())
+                     ncol = 2)
+      plot_pairs_list <- plot_grid(title_row, p,  ncol = 1,
+                                   rel_heights=c(0.1, 1))
 
       print(plot_pairs_list)
-
+      filename <- paste0("plot-pairs_", filename_desc, ".png")
+      ggsave(filename = filename, path = file.path(output_dir, "figures"),
+             width = 8, height = 11, units = "in",
+             scale = 0.4,
+             dpi=300)
     }
   
 
   if(print_mcmc_scatter) {
 
-    ggplot2::theme_set(theme_default(base_size = 10))
     scatter_list <- list()
     for(male in male_vec) {
       # print(male)
@@ -275,7 +295,7 @@ for(row_index in 1:nrow(fit_tbl)) {
       
       scatter_tmp <-  mcmc_scatter( #was mcmc_scatter
         fit_stan_rename,
-        pars = c(vars_male), #, vars_Intercept),
+        pars = c(vars_male) #, vars_Intercept),
         #off_diag_args = list(size = 1, alpha = 0.35), # only used if `off_diag_fun = "scatter"`
         #off_diag_fun = c("hex")
         )  #+
@@ -297,17 +317,19 @@ for(row_index in 1:nrow(fit_tbl)) {
 
     print(plot_scatter_list)
     
-    ## Restore theme settings
-    ggplot2::theme_set(theme_default())
-  }
+    filename <- paste0("plot-scatter_", filename_desc, ".png")
+    ggsave(filename = filename, path = file.path(output_dir, "figures"),
+           width = 8, height = 11, units = "in",
+           scale = 0.4,
+           dpi=300)
+
+    
+  } # end if(print_mcmc_scatter)
   } else {} # end if males == 2
 
   if(print_mcmc_pairs_group) {
     pairs_list2 <- list()
     
-    ## Update font size for grid
-    ggplot2::theme_set(theme_default(base_size = 10))
-   
     if(length(vars_Intercept) > 0) {
       pairs_list2[["Intercept"]] <- mcmc_pairs(
         fit_stan_rename, pars = c(vars_Intercept, "lp_"),
@@ -325,6 +347,13 @@ for(row_index in 1:nrow(fit_tbl)) {
     plot_pairs_list2 <- plot_grid(title_row, p,  ncol = 1, rel_heights=c(0.1, 1))
       
     print(plot_pairs_list2)
+
+        filename <- paste0("plot-pairs2_", filename_desc, ".png")
+    ggsave(filename = filename, path = file.path(output_dir, "figures"),
+           width = 8, height = 11, units = "in",
+           scale = 0.4,
+           dpi=300)
+    
   }
 
 
@@ -335,9 +364,13 @@ for(row_index in 1:nrow(fit_tbl)) {
     ggtitle("Initial Motif Counts", subtitle = desc)
 
   vars_tmp <- vars_clean %>% str_subset("T[0-9]+_x0")
-  if(length(vars_tmp) > 0 ) stan_plot(fit_stan_rename, pars = vars_tmp) +
-    ggtitle("Thresholds", subtitle = desc)
-  
+  if(length(vars_tmp) > 0) {
+    fit_stan <- stan_plot(fit_stan_rename, pars = vars_tmp) +
+      ggtitle("Thresholds", subtitle = desc_short)
+    
+    filename <- paste0("fit-stan_", filename_desc, ".pdf")
+    ggsave(filename = filename, path = file.path(output_dir, "figures"), dpi=300)
+  }
   
   if(print_stan_hist) {
     ncol <- 4 
@@ -346,7 +379,6 @@ for(row_index in 1:nrow(fit_tbl)) {
                        bins = 25,
                        ncol = ncol) +
       ggtitle(desc_short)
-    print(hist)
     filename <- paste0("histogram_", filename_desc, ".pdf")
     ggsave(filename = filename, path = file.path(output_dir, "figures"), dpi=300)
   }
@@ -365,12 +397,25 @@ knitr::knit_exit()
 
 # Plot Data and Predictions
 
-Data suggests that disp should vary between males
+## Set up colors
 
 ```{r}
 
-curr_row <- 181 
+## "Set2" only has 8 colors by default.
+## This code expands that ability, based on: https://www.datanovia.com/en/blog/easy-way-to-expand-color-palettes-in-r/
+n_colors <- length(male_vec)
+colors_male <- colorRampPalette(brewer.pal(8, "Set2"))(n_colors)
+
+```
+
+Data suggests that disp should vary between males?
+
+
+```{r}
+
+curr_row <- 1
 curr_desc <- fit_tbl[[curr_row, "desc"]]
+curr_desc_short <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
 fit_brms <- fit_tbl[[curr_row, "fit"]][[1]]
 
 expose_functions(fit_brms, vectorize = TRUE, show_compiler_warnings=FALSE)
@@ -381,12 +426,48 @@ data_fit_brms <- fit_brms$data
 
 data_grid <- data_fit_brms %>%
   group_by(male) %>%
-  data_grid(x = seq_range(c(20, 40), n = 51))
+  data_grid(x = seq_range(c(20, 46), n = 51))
 
 
 ## add expected values
 data_epred <- data_grid %>%
-  add_epred_draws(object = fit_brms, ndraws = 1000)
+  add_epred_draws(object = fit_brms, ndraws = 500)
+
+```
+
+```{r}
+
+## Plot all results
+## Split up using facets
+if(TRUE) {
+
+  male_vec_tmp <- male_vec #[c(1, 5, 8)]
+  ## Only plot a few males due to large size of `data_epred`
+  data_epred_tmp <- data_epred %>%
+    filter(male %in% male_vec_tmp)
+
+  data_fit_brms_tmp <- data_fit_brms %>% filter(male %in% male_vec_tmp)
+  y_max <- max(data_epred_tmp$.epred)*1.1
+
+  plot_tmp <- ggplot(data = data_epred_tmp, aes(x = x, y = .epred, color = male)) +
+    ## Combine Scatter Plots and Model vs Data Plots
+    stat_lineribbon(aes(y=.epred)) +
+    scale_fill_brewer(palette = "Greys") +
+    scale_color_manual(values = colors_male) +
+    #scale_color_brewer(palette = "Set2") +
+    geom_point(data = data_fit_brms_tmp,
+               aes(x = x, y = y), color = "red") + 
+    ylim(0, y_max)
+
+  plot_data_vs_epred <- plot_tmp + facet_wrap(vars(male)) +
+    labs(title = "Data vs. Expected Values", subtitle = curr_desc_short) 
+  last_plot()
+  filename <- paste0("data.and.epred-vs-x_", filename_desc, ".png")
+  ggsave(filename = filename, path = file.path(output_dir, "figures"),
+         width = 8, height = 11, units = "in",
+         scale = 0.4,
+         dpi=300)
+}
 
 ## Running into issues with predictions
 ## Only returns 1 draw per value in data_grid
@@ -402,20 +483,8 @@ tmp_pp <- posterior_predict(fit_brms, newdata = data_grid)
 ## this seems to remove the .xy
 data_pred <- add_predicted_draws(object = fit_brms, newdata = data_grid) # %>% filter(male == "T257"))
 
-data_y <- data_fit_brms$y
 
-## Plot all results
-## Gets a bit crowded and takes a while; best to skip
 
-if(FALSE) {
-  ggplot(data = data_epred, aes(x = x, y = data_y, color = factor(male))) +
-## Combine Scatter Plots and Model vs Data Plots
-    stat_lineribbon(aes(y = .epred)) +
-    geom_point(data = data_fit_brms) +
-    scale_fill_brewer(palette = "Greys") +
-    scale_color_brewer(palette = "Set2") +
-    ylim(0, max(tmp_y)*1.1)
-}
 ```
 
 ## Create Model vs. Data Plots
