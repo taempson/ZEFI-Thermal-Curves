@@ -1,0 +1,114 @@
+
+---
+title: "Examine dispersal values for males"
+author: "Michael Gilchrist"
+date: "Created: 2023-04-05; Code run on `r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE, }
+
+## Global options
+options(digits = 3)
+
+### Knitr specific
+knitr::opts_chunk$set(
+                      warning = TRUE, # show warnings
+                      message = FALSE, # show messages
+                      error = TRUE, # do not interrupt generation in case of errors,
+                      echo = TRUE,  # show R code
+                      fig.width = 8,
+                      fig.path = "Figures/"
+                  )
+
+options("warn" = 1) ## print warnings when they occur
+
+if(interactive()) default::default(.ess.eval) <- list(max.deparse.length=5E1, output = TRUE)
+
+```
+# Goal
+
+- Try to identify which males should share a common `disp_value` uisnt the `disp_flag == uniform_2.
+
+## Recap
+
+# Set up
+
+## Install libraries
+
+```{r, message = FALSE}
+
+# install packages user might not have by replacing FALSE with TRUE
+
+## load libraries
+library(stats)
+library(MASS) # provides negative binomial fitting:  glm.nb
+library(ggplot2)
+library(tidyverse)
+library(viridisLite)
+
+```
+
+## Load Data
+
+```{r}
+input_dir <- file.path("input")
+output_dir <- file.path("output")
+
+
+## This data includes `motif_data_full`, which is unfiltered by males
+
+load(file.path(input_dir, "data.processing_2023-04-05.Rda"),
+     verbose = TRUE)
+
+summary(motif_data_full)
+
+
+data_working <- motif_data_full %>% relocate(male, temp, motif_count)
+
+
+temp_stats_wide <- tibble(
+    male = factor(0),
+    mean = numeric(0),
+    median = numeric(0),
+    var = numeric(0),
+    cv = numeric(0),
+    disp = integer(0)
+    )
+
+temp_stats_wide <- tibble()
+
+for(threshold in 30:41) {
+
+    data_tmp <- filter(data_working, temp <= threshold)
+
+    stats_tmp <- data_tmp %>%
+        group_by(male) %>%
+        summarize(mean = mean(motif_count),
+                  median = median(motif_count),
+                  var = var(motif_count),
+                  cv = mean/sqrt(var),
+                  disp = var/mean,
+                  count = n()) %>%
+        mutate(threshold = threshold)
+    temp_stats_wide <- bind_rows(temp_stats_wide, stats_tmp, .id = NULL)
+}
+
+
+temp_stats_long <- pivot_longer(temp_stats_wide,
+                                cols = -c(male, threshold),
+                                names_to = "statistic"
+                                )
+
+ggplot(data = temp_stats_long) + 
+    geom_line(aes(x = threshold, y = value, color = male)) +
+    facet_wrap(facets = vars(statistic), scales = "free")
+
+
+```
+
+
+```
+# Fit Models
+
+See other folders created on this day.
