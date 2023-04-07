@@ -19,13 +19,12 @@ knitr::opts_chunk$set(
 
 if(interactive()) {
   default::default(.ess.eval) <- list(max.deparse.length=2E2, output = TRUE)
-  output_dir = "output"  
+  output_dir <- "output"  
 } else { 
-  file.path("output", "render")
-  infile <- last(dir(file.path("input", "tibbles"), "fit_tbl.*"))
-  infile_tbl <- file.path("input", "tibbles", infile)
+  output_dir <- file.path("output", "render")
 }
 
+input_dir <- file.path("input")
 ```
 # Goal
 
@@ -102,14 +101,13 @@ source("../../../custom-brms-families/families/nbinom_type1.R")
 fmax <- function(x, x0) max(x, x0)
 
 ```
-## Load custom family
-
-
 ## Load `input`
 
 ```{r}
 
-load(file.path("input", "fit_tbl.Rda"), verbose = TRUE)
+infile <- last(dir(file.path(input_dir, "tibbles"), "fit_tbl.*"))
+infile_tbl <- file.path(input_dir, "tibbles", infile)
+load(infile_tbl, verbose = TRUE)
 fit_tbl_orig <- fit_tbl
 
 fit_tbl <- fit_tbl %>% filter(!(is.na(fit))) 
@@ -200,22 +198,23 @@ for(row_index in 1:nrow(fit_tbl)) {
 
   if(print_prior_summary) {
     print("Fit Prior Information")
-    if(FALSE) { 
-      print(head(prior_summary(fit_brms)) # %>% filter(nlpar!="y0"))
-      } else {
-        n_rows_half <- 4
-        tmp_prior <- prior_summary(fit_brms)
-        #class(tmp_prior) <- "data.frame"
-        #tmp_prior <- tmp_prior %>% select(-source)
-        rows_print <- unique(c(1:n_rows_half, nrow(tmp) - (n_rows_half):0))
-        tmp_top <- tmp_prior[1:n_rows_print_half, ] 
-        tmp_bottom <- tmp_prior[rows_print[-(1:n_rows_print_half)], ]
-        tmp_join <- bind_rows(tmp_top, tmp_bottom)
-        tmp_join[ n_rows_half + 1, ] <- "..."
-        ## remove brms class so we can select
-        class(tmp_join) <- "data.frame"
-        print(tmp_join %>% select(-source)
-      }
+    if(FALSE) {
+      print(prior_summary(fit_brms)) # %>% filter(nlpar!="y0"))
+    } else {
+      ## Condensed version
+      n_rows_half <- 4
+      tmp_prior <- prior_summary(fit_brms)
+      #class(tmp_prior) <- "data.frame"
+      #tmp_prior <- tmp_prior %>% select(-source)
+      rows_print <- unique(c(1:n_rows_half, nrow(tmp) - (n_rows_half):0))
+      tmp_top <- tmp_prior[1:n_rows_print_half, ] 
+      tmp_bottom <- tmp_prior[rows_print[-(1:n_rows_print_half)], ]
+      tmp_join <- bind_rows(tmp_top, tmp_bottom)
+      tmp_join[ n_rows_half + 1, ] <- "..."
+      ## remove brms class so we can select
+      class(tmp_join) <- "data.frame"
+      print(tmp_join %>% select(-source))
+    }
     print_prior_summary <- TRUE
   }
 
@@ -284,22 +283,33 @@ for(row_index in 1:nrow(fit_tbl)) {
         # add density curves to off diagonal
         plots_tmp <- pairs_tmp$bayesplots 
         if(length(plots_tmp) == 4) {
-          plot_index <- c(2,3)
+          plot_index <- c(2)
         }
         if(length(plots_tmp) == 9) {
-          plot_index <- c(2, 3, 4, 6, 7, 8)
+          plot_index <- c(2, 3, 4)
         }
 
-        for(i in plot_index) {
+        plots_row <- list()
+        for(j in 1:length(plot_index)) {
+          i = plot_index[[j]]
           # pars = c(vars_male): list of 4 ggplot objects diagonal plots are 2 and 3
-          plots_tmp[[i]] <- plots_tmp[[2]] +
+          plots_tmp[[i]] <- plots_tmp[[i]] +
             stat_density_2d(color = "black",
                             size = .25,
                             bins = 5)
+          plots_row[[j]] <- ggExtra::ggMarginal(plots_tmp[[i]] +
+                                                    geom_point(col="transparent") +
+                                                    geom_hex() +
+                                                    theme(legend.position = "none"), type = "histogram")
         }
-        
+
+        if(print_pairs_grid) {
         pairs_tmp <-bayesplot_grid(plots = plots_tmp) ## Change font size
         pairs_list[[male]] <- pairs_tmp
+        } else { ## Print a row
+
+          pairs_list[[male]] <- 
+        }
       } 
 
       p <- plot_grid(plotlist = pairs_list,
