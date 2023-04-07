@@ -11,7 +11,9 @@ knitr::opts_chunk$set(
   warning = TRUE, # show warnings
   message = TRUE, # show messages
   error = TRUE, # do not interrupt generation in case of errors,
-  echo = TRUE  # show R code
+  echo = TRUE,  # show R code
+  fig.width = 7.5,
+  fig.height = 10
 )
 
 
@@ -82,6 +84,8 @@ library(latex2exp)
 ggplot2::theme_set(theme_default(base_size = 10))
 ## Restore theme settings
 ## ggplot2::theme_set(theme_default())
+
+n_cores <- 4
 
 ```
 
@@ -247,15 +251,21 @@ for(row_index in 1:nrow(fit_tbl)) {
          pairs_pars <- c(pairs_pars, "lp_")
         }
 
+        ## Change text size
+        bayesplot_theme_update(text = element_text(size = 6)) #, family = "sans"))
         pairs_tmp <-  mcmc_pairs(
           fit_stan_rename,
           pars = pairs_pars,
           ## set point size and transparency
-          off_diag_args = list(size = 1, alpha = 0.35)
-        )
-        plots_tmp <- pairs_tmp$bayesplots 
+          # grid_args = list(text = element_text(size = 20)),
+          ## Try to use hex densities
+          off_diag_fun = "hex"          
+          ) 
 
-        # add density curves
+        bayesplot_theme_set() # same as bayesplot_theme_set(theme_default())
+
+        # add density curves to off diagonal
+        plots_tmp <- pairs_tmp$bayesplots 
         if(length(plots_tmp) == 4) {
           plot_index <- c(2,3)
         }
@@ -265,24 +275,29 @@ for(row_index in 1:nrow(fit_tbl)) {
 
         for(i in plot_index) {
           # pars = c(vars_male): list of 4 ggplot objects diagonal plots are 2 and 3
-          plots_tmp[[i]] <- plots_tmp[[2]] + stat_density_2d(color = "lightgray", size = .5)
+          plots_tmp[[i]] <- plots_tmp[[2]] +
+            stat_density_2d(color = "black",
+                            size = .25,
+                            bins = 5)
         }
         
-        pairs_tmp <-bayesplot_grid(plots = plots_tmp)
+        pairs_tmp <-bayesplot_grid(plots = plots_tmp) ## Change font size
         pairs_list[[male]] <- pairs_tmp
-      }  
+      } 
 
       p <- plot_grid(plotlist = pairs_list,
                      ncol = 2)
       plot_pairs_list <- plot_grid(title_row, p,  ncol = 1,
-                                   rel_heights=c(0.1, 1))
+                                   rel_heights=c(0.06, 1))
+
 
       print(plot_pairs_list)
       filename <- paste0("plot-pairs_", filename_desc, ".png")
       ggsave(filename = filename, path = file.path(output_dir, "figures"),
              width = 8, height = 11, units = "in",
-             scale = 0.4,
-             dpi=300)
+             scale = 1,
+             dpi=300,
+             bg = "white")
     }
   
 
@@ -320,8 +335,9 @@ for(row_index in 1:nrow(fit_tbl)) {
     filename <- paste0("plot-scatter_", filename_desc, ".png")
     ggsave(filename = filename, path = file.path(output_dir, "figures"),
            width = 8, height = 11, units = "in",
-           scale = 0.4,
-           dpi=300)
+           scale = 1,
+           dpi=300,
+           bg = "white")
 
     
   } # end if(print_mcmc_scatter)
@@ -351,8 +367,9 @@ for(row_index in 1:nrow(fit_tbl)) {
         filename <- paste0("plot-pairs2_", filename_desc, ".png")
     ggsave(filename = filename, path = file.path(output_dir, "figures"),
            width = 8, height = 11, units = "in",
-           scale = 0.4,
-           dpi=300)
+           scale = 1,
+           dpi=300,
+           bg = "white")
     
   }
 
@@ -386,14 +403,6 @@ for(row_index in 1:nrow(fit_tbl)) {
 
 ```
 
-## Exit rendering
-```{r}
-
-knitr::knit_exit()
-
-```
-
-```
 
 # Plot Data and Predictions
 
@@ -405,41 +414,40 @@ knitr::knit_exit()
 ## This code expands that ability, based on: https://www.datanovia.com/en/blog/easy-way-to-expand-color-palettes-in-r/
 n_colors <- length(male_vec)
 colors_male <- colorRampPalette(brewer.pal(8, "Set2"))(n_colors)
-
 ```
 
 Data suggests that disp should vary between males?
 
 
-```{r}
-
-curr_row <- 1
-curr_desc <- fit_tbl[[curr_row, "desc"]]
-curr_desc_short <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
-fit_brms <- fit_tbl[[curr_row, "fit"]][[1]]
-
-expose_functions(fit_brms, vectorize = TRUE, show_compiler_warnings=FALSE)
-data_fit_brms <- fit_brms$data
-
-
-## Create grid of x values for epred/predictions
-
-data_grid <- data_fit_brms %>%
-  group_by(male) %>%
-  data_grid(x = seq_range(c(20, 46), n = 51))
-
-
-## add expected values
-data_epred <- data_grid %>%
-  add_epred_draws(object = fit_brms, ndraws = 500)
-
-```
+## Plot Data and Expected Values vs. Temperature
 
 ```{r}
 
-## Plot all results
-## Split up using facets
-if(TRUE) {
+curr_row_max <- switch(2,
+                       2,
+                       length(fit_tbl)
+                       )
+
+for(curr_row in 1:curr_row_max) {
+  
+  curr_desc <- fit_tbl[[curr_row, "desc"]]
+  curr_desc_short <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
+  fit_brms <- fit_tbl[[curr_row, "fit"]][[1]]
+
+  expose_functions(fit_brms, vectorize = TRUE, show_compiler_warnings = FALSE)
+  data_fit_brms <- fit_brms$data
+
+
+  ## Create grid of x values for epred/predictions
+
+  data_grid <- data_fit_brms %>%
+    group_by(male) %>%
+    data_grid(x = seq_range(c(20, 46), n = 51))
+
+
+  ## add expected values
+  data_epred <- data_grid %>%
+    add_epred_draws(object = fit_brms, ndraws = 500, cores = n_cores)
 
   male_vec_tmp <- male_vec #[c(1, 5, 8)]
   ## Only plot a few males due to large size of `data_epred`
@@ -465,27 +473,88 @@ if(TRUE) {
   filename <- paste0("data.and.epred-vs-x_", filename_desc, ".png")
   ggsave(filename = filename, path = file.path(output_dir, "figures"),
          width = 8, height = 11, units = "in",
-         scale = 0.4,
-         dpi=300)
+         scale = 1,
+         dpi=300,
+         bg = "white")
 }
-
-## Running into issues with predictions
-## Only returns 1 draw per value in data_grid
-## I believe this may have to do with the generation of NaN values
-## HOwever, avoiding NaN by limiting x range doesn't seem to work.
-
-## add predicted values
-tmp_pp <- posterior_predict(fit_brms, newdata = data_grid)
-
-## Using tidybayes
-## DOesn't work as expected
-
-## this seems to remove the .xy
-data_pred <- add_predicted_draws(object = fit_brms, newdata = data_grid) # %>% filter(male == "T257"))
+```
 
 
+## Plot Data and Simulated Values vs. Temperature
+
+```{r}
+
+
+for(curr_row in 1:curr_row_max) {
+  
+  curr_desc <- fit_tbl[[curr_row, "desc"]]
+  curr_desc_short <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
+  fit_brms <- fit_tbl[[curr_row, "fit"]][[1]]
+
+  if(FALSE) {
+    object.size(fit_brms)
+    ## Unclear where function information is stored
+    ## Fit object does not seem to change in size
+    expose_functions(fit_brms, vectorize = TRUE, show_compiler_warnings=FALSE)
+    object.size(fit_brms)
+  }
+  
+  data_fit_brms <- fit_brms$data
+
+
+  ## Create grid of x values for epred/predictions
+
+  #dataframe_tmp <- crossing(x = seq_range(c(20, 30), n = 51), draw = 1:3, male = male_vec)
+  
+  data_grid <- data_fit_brms %>%
+    group_by(male) %>%
+    data_grid(x = seq_range(c(20, 45.9), n = 51)) %>%  #, .model = fit_brms) %>% 
+    ungroup() 
+
+  
+  
+
+  ## add simulated values
+  ## Only getting 1 draw/(male temp)
+  data_pred <- data_grid %>%
+    add_predicted_draws(object = fit_brms)
+
+  
+  y_max <- max(data_pred$.prediction, na_rm = TRUE)*1.1
+
+  plot_tmp <- ggplot(data = data_pred, aes(x = x, y = .prediction, color = male)) +
+    ## Combine Scatter Plots and Model vs Data Plots
+    stat_lineribbon(aes(y=.prediction), .width = c(.95), color = "#08519C") +
+    scale_fill_brewer(palette = "Greys") +
+    scale_color_manual(values = colors_male) +
+    #scale_color_brewer(palette = "Set2") +
+    geom_point(data = data_fit_brms,
+               aes(x = x, y = y), color = "red") + 
+    ylim(0, y_max)
+
+  plot_data_vs_pred <- plot_tmp + facet_wrap(vars(male)) +
+    labs(title = "Data vs. Simulated Values", subtitle = curr_desc_short) 
+  last_plot()
+
+  filename <- paste0("data-simulated-vs-x_", filename_desc, ".png")
+  ggsave(filename = filename, path = file.path(output_dir, "figures"),
+         width = 8, height = 11, units = "in",
+         scale = 1,
+         dpi=300,
+         bg = "white")
+}
+```
+
+
+## Exit rendering
+```{r}
+
+knitr::knit_exit()
 
 ```
+
+
+
 
 ## Create Model vs. Data Plots
 
@@ -498,12 +567,12 @@ list_plot_mean <- list()
 for(male in male_vec) {
     
   tmp_data <- data_fit_brms %>% filter(male == !!male)
-  tmp_y <- tmp_data$y
+  motif_count <- tmp_data$y
   tmp_mean <- data_epred %>% filter(male == !!male)
 
   tmp_plot_mean <- ggplot(data = tmp_mean,
-                            aes(x = x, y = tmp_y)) +
-    ylim(0, max(tmp_y)*1.1) +
+                            aes(x = x, y = motif_count)) +
+    ylim(0, max(motif_count)*1.1) +
     stat_lineribbon(aes(y = .epred)) +
     scale_fill_brewer(palette = "Greys") +
     scale_color_brewer(palette = "Set2") +
@@ -528,6 +597,12 @@ plot_model[["mean"]] <- tmp_plot
 
 tmp_plot
 
+filename <- paste0("data-epred-vs-temp_", filename_desc, ".png")
+ggsave(filename = filename, path = file.path(output_dir, "figures"),
+       width = 8, height = 11, units = "in",
+       scale = 1,
+       dpi=300,
+       bg = "white")
 ```
 
 ```{r}
@@ -538,11 +613,11 @@ for(male in male_vec) {
 
 
   tmp_data <- data_fit_brms %>% filter(male == !!male)
-  tmp_y <- tmp_data$y
+  motif_count <- tmp_data$y
   tmp_pred  <- data_pred %>% filter(male ==!!male)
   tmp_plot_data <- ggplot(data = tmp_pred,
-                          aes(x = x, y = tmp_y)) +
-    ylim(0, max(tmp_y)*1.1) +
+                          aes(x = x, y = motif_count)) +
+    ylim(0, max(motif_count)*1.1) +
     stat_lineribbon(aes(y = .prediction),
                     .width = c(.95, .80, .50),
                     alpha = 1/4) +
