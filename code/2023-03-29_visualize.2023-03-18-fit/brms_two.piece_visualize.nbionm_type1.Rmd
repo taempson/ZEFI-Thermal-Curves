@@ -9,6 +9,7 @@ output: pdf_document
 
 knitr::opts_chunk$set(
   warning = TRUE, # show warnings
+  
   message = TRUE, # show messages
   error = TRUE, # do not interrupt generation in case of errors,
   echo = TRUE,  # show R code
@@ -130,9 +131,9 @@ which_tbl_row <- function(filter_male = FALSE, x0_flag = "individual", y0_flag =
 
 clean_var_names <- function(fit) {
   fit %>% setNames(gsub("b_", "", names(.)) %>%
-             gsub("(x0|s0|y0)_male(T[0-9]{3})", "\\2_\\1", .) %>%
+             gsub("(x0|s0|y0|disp)_male(T[0-9]{3})", "\\2_\\1", .) %>%
              gsub("__", "_", .) %>%
-             gsub("r_male_(x0|s0|y0)\\[(T[0-9]{3}),Intercept\\]", "\\2_\\1_r", .) %>%
+             gsub("r_male_(x0|s0|y0|disp)\\[(T[0-9]{3}),Intercept\\]", "\\2_\\1_r", .) %>%
              gsub("\\.", " ", .))
 }
 ```
@@ -162,16 +163,19 @@ for(name in names(fit_tbl)[1:8]) {
 ```{r, message = FALSE }
 
 pairs_include_lp = TRUE
+n_rows_print_half <- 4 ## 1/2 of rows to print of prior
+print_pairs_grid <- FALSE ## if true print grid, if false print row
+print_full_prior <- FALSE
 
-for(row_index in 1:nrow(fit_tbl)) {
+for(row_index in 3:3) { #nrow(fit_tbl)) {
 
   print(paste("Row: ", row_index))
   
   row_values <- fit_tbl[row_index, ]
   desc <- row_values$desc
   filename_desc <- gsub("_", "-", desc) %>%
-                            gsub("; ", "_", .) %>%
-                            gsub(":? ", "-", .)
+    gsub("; ", "_", .) %>%
+    gsub(":? ", "-", .)
   fit_brms <- row_values$fit[[1]]
   data <- fit_brms[["data"]]
   fit_stan <- fit_brms$fit
@@ -198,19 +202,18 @@ for(row_index in 1:nrow(fit_tbl)) {
 
   if(print_prior_summary) {
     print("Fit Prior Information")
-    if(FALSE) {
+    if(print_full_prior) {
       print(prior_summary(fit_brms)) # %>% filter(nlpar!="y0"))
     } else {
       ## Condensed version
-      n_rows_half <- 4
       tmp_prior <- prior_summary(fit_brms)
       #class(tmp_prior) <- "data.frame"
       #tmp_prior <- tmp_prior %>% select(-source)
-      rows_print <- unique(c(1:n_rows_half, nrow(tmp) - (n_rows_half):0))
+      rows_print <- unique(c(1:n_rows_print_half, nrow(tmp_prior) - (n_rows_print_half):0))
       tmp_top <- tmp_prior[1:n_rows_print_half, ] 
       tmp_bottom <- tmp_prior[rows_print[-(1:n_rows_print_half)], ]
       tmp_join <- bind_rows(tmp_top, tmp_bottom)
-      tmp_join[ n_rows_half + 1, ] <- "..."
+      tmp_join[ n_rows_print_half + 1, ] <- "..."
       ## remove brms class so we can select
       class(tmp_join) <- "data.frame"
       print(tmp_join %>% select(-source))
@@ -219,7 +222,7 @@ for(row_index in 1:nrow(fit_tbl)) {
   }
 
   print("Fit Information")
-    print(summary(fit_brms) ) # %>% gsub("disp_value", row_values[["disp_value"]]), .) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
+  print(summary(fit_brms) ) # %>% gsub("disp_value", row_values[["disp_value"]]), .) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
 
 
   #clean up variable names
@@ -248,84 +251,93 @@ for(row_index in 1:nrow(fit_tbl)) {
   ## Count occurence of each male in model fit_brms
   male_instance <- sapply(male_vec, function(x) {sum(str_detect(x, string=vars_clean))})
 
-  ## ensure we can make a pairs plot for each male 
-  if(all(unique(male_instance) == 2)) {
-    
-    if(print_mcmc_pairs) {
-      ## Use mcmc_pairs
-      pairs_list <- list()
-      ## update panel.boarder
-      ## Note brms uses 'variable' while stanfit uses 'pars'
-      for(male in male_vec) {
-        # print(male)
-        vars_male <- grep(male, vars_T, value = TRUE)
+  if(print_mcmc_pairs) {
+    ## Use mcmc_pairs
+    pairs_list <- list()
+    ## update panel.boarder
+    ## Note brms uses 'variable' while stanfit uses 'pars'
+    for(male in male_vec) {
+      # print(male)
+      vars_male <- grep(male, vars_T, value = TRUE)
 
-        ## Generate pairs() plot using mcmc_pairs()
-        ## Don't use pairs.stanfit which does not return an object
-        pairs_pars <- vars_male
-        if(pairs_include_lp) {
-         pairs_pars <- c(pairs_pars, "lp_")
-        }
+      ## Generate pairs() plot using mcmc_pairs()
+      ## Don't use pairs.stanfit which does not return an object
+      pairs_pars <- vars_male
+      if(pairs_include_lp) {
+        pairs_pars <- c(pairs_pars, "lp_")
+      }
 
-        ## Change text size
-        bayesplot_theme_update(text = element_text(size = 6)) #, family = "sans"))
-        pairs_tmp <-  mcmc_pairs(
-          fit_stan_rename,
-          pars = pairs_pars,
-          ## set point size and transparency
-          # grid_args = list(text = element_text(size = 20)),
-          ## Try to use hex densities
-          off_diag_fun = "hex"          
-          ) 
+      ## Change text size
+      #        bayesplot_theme_update(text = element_text(size = 6)) #, family = "sans"))
+      pairs_tmp <-  mcmc_pairs(
+        fit_stan_rename,
+        pars = pairs_pars,
+        ## set point size and transparency
+        # grid_args = list(text = element_text(size = 20)),
+        ## Try to use hex densities
+        off_diag_fun = "hex"          
+      )
 
-        bayesplot_theme_set() # same as bayesplot_theme_set(theme_default())
+      #        bayesplot_theme_set() # same as bayesplot_theme_set(theme_default())
 
-        # add density curves to off diagonal
-        plots_tmp <- pairs_tmp$bayesplots 
-        if(length(plots_tmp) == 4) {
-          plot_index <- c(2)
-        }
-        if(length(plots_tmp) == 9) {
-          plot_index <- c(2, 3, 4)
-        }
+      # add density curves to off diagonal
+      plots_tmp <- pairs_tmp$bayesplots
 
-        plots_row <- list()
-        for(j in 1:length(plot_index)) {
-          i = plot_index[[j]]
-          # pars = c(vars_male): list of 4 ggplot objects diagonal plots are 2 and 3
-          plots_tmp[[i]] <- plots_tmp[[i]] +
-            stat_density_2d(color = "black",
-                            size = .25,
-                            bins = 5)
-          plots_row[[j]] <- ggExtra::ggMarginal(plots_tmp[[i]] +
-                                                    geom_point(col="transparent") +
-                                                    geom_hex() +
-                                                    theme(legend.position = "none"), type = "histogram")
-        }
+      ## get list of off diagonal positions
+      tmp_n <- sqrt(length(plots_tmp))
+      plot_index <- 1:tmp_n
+      ## drop terms on the diagonal
+      drop_list = matrix(x = plot_index, y = plot_index)
+      plot_index <- plot_index[-(drop_list)]
 
-        if(print_pairs_grid) {
-        pairs_tmp <-bayesplot_grid(plots = plots_tmp) ## Change font size
-        pairs_list[[male]] <- pairs_tmp
-        } else { ## Print a row
+      plots_row <- list()
 
-          pairs_list[[male]] <- 
-        }
-      } 
-
-      p <- plot_grid(plotlist = pairs_list,
-                     ncol = 2)
-      plot_pairs_list <- plot_grid(title_row, p,  ncol = 1,
-                                   rel_heights=c(0.06, 1))
+      ## add contour lines
+      for(j in 1:length(plot_index)) {
+        i = plot_index[[j]]
+        # pars = c(vars_male): list of 4 ggplot objects diagonal plots are 2 and 3
+        plots_tmp[[i]] <- plots_tmp[[i]] +
+          stat_density_2d(color = "black",
+                          size = .25,
+                          bins = 5)
+        
+        plots_row[[j]] <- plots_tmp[[i]]
+        #ggExtra::ggMarginal(plots_tmp[[i]] +
+        #                                        geom_point(col="transparent") +
+        #                                        geom_hex() +
+        #                                        theme(legend.position = "none"), type = "histogram")
+      }
 
 
-      print(plot_pairs_list)
-      filename <- paste0("plot-pairs_", filename_desc, ".png")
-      ggsave(filename = filename, path = file.path(output_dir, "figures"),
-             width = 8, height = 11, units = "in",
-             scale = 1,
-             dpi=300,
-             bg = "white")
+      text_axes <- str_remove(pairs_pars, "T[0-9]+_")
+      labels_subfig <- str_extract(pairs_pars, "T[0-9]+")[[1]]
+      
+#      title_subfig <- ggdraw() + draw_label(text_subfig, fontface='bold')
+
+      if(print_pairs_grid) {
+        pairs_male <-bayesplot_grid(plots = plots_tmp) ## Change font size
+      } else { ## Print summaries as a row
+        pairs_male <- plot_grid(
+          plotlist = plots_row,
+          labels = labels_subfig,
+          nrow = 1)
+      }
+      pairs_list[[male]] <- pairs_male
     }
+    p <- plot_grid(plotlist = pairs_list,
+                   ncol = 2)
+    plot_pairs_list <- plot_grid(title_row, p,  ncol = 1,
+                                 rel_heights=c(0.06, 1))
+
+
+    print(plot_pairs_list)
+    filename <- paste0("plot-pairs_", filename_desc, ".png")
+    ggsave(filename = filename, path = file.path(output_dir, "figures"),
+           width = 8, height = 11, units = "in",
+           scale = 1,
+           dpi=300,
+           bg = "white")
+  }
   
 
   if(print_mcmc_scatter) {
@@ -368,8 +380,11 @@ for(row_index in 1:nrow(fit_tbl)) {
 
     
   } # end if(print_mcmc_scatter)
-  } else {} # end if males == 2
+}
 
+## end
+```
+```{r}
   if(print_mcmc_pairs_group) {
     pairs_list2 <- list()
     
