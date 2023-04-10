@@ -153,7 +153,7 @@ for(name in names(fit_tbl)[1:8]) {
   var <- paste0(name, "_vec")
   assign(var, pull(fit_tbl, name) %>% unique(.))
   # access via get()
-  print(paste0(var, ": ", paste0(get(var), sep = "\n\t")))
+  cat(paste0(var, ": ", paste0(get(var), sep = "\n\t")))
 }
 
 ```
@@ -167,9 +167,9 @@ n_rows_print_half <- 4 ## 1/2 of rows to print of prior
 print_pairs_grid <- FALSE ## if true print grid, if false print row
 print_full_prior <- FALSE
 
-for(row_index in 3:3) { #nrow(fit_tbl)) {
+for(row_index in 1:nrow(fit_tbl)) {
 
-  print(paste("Row: ", row_index))
+  cat(paste("Row: ", row_index))
   
   row_values <- fit_tbl[row_index, ]
   desc <- row_values$desc
@@ -179,6 +179,7 @@ for(row_index in 3:3) { #nrow(fit_tbl)) {
   fit_brms <- row_values$fit[[1]]
   data <- fit_brms[["data"]]
   fit_stan <- fit_brms$fit
+  chains_n <- length(dimnames(fit_stan)$chains)
 
   print_mcmc_pairs <- TRUE # individual level parameters
   print_mcmc_pairs_group <- TRUE # lp and group level parameters
@@ -194,8 +195,10 @@ for(row_index in 3:3) { #nrow(fit_tbl)) {
     gsub(":? ", "-", .)
   desc_short <- desc %>% str_replace("nbinom_type1; two_piece; ","")
 
-  title_row <- ggdraw() + draw_label(desc_short, fontface='bold', size = 12)
-  
+  ## two ways of specifying a title
+  ## Second is more 'automatic'
+    title_row <- ggdraw() + draw_label(desc_short, fontface='bold', size = 12)
+
   ## Print and plot results, regardless of which fits one uses           
   print(desc)
   # print(filename_desc)
@@ -267,15 +270,25 @@ for(row_index in 3:3) { #nrow(fit_tbl)) {
         pairs_pars <- c(pairs_pars, "lp_")
       }
 
+
       ## Change text size
-      #        bayesplot_theme_update(text = element_text(size = 6)) #, family = "sans"))
+      # bayesplot_theme_update(text = element_text(size = 6)) #, family = "sans"))
       pairs_tmp <-  mcmc_pairs(
         fit_stan_rename,
         pars = pairs_pars,
+        condition = pairs_condition(
+          # plot all chains on lower diagonal
+          # Could also split by draws
+          chains <- list(top = 1:(chains_n), bottom = NULL)
+        )
+        ## I believe div_color means color of divergent samples
+        ##np_style = pairs_style_np(div_color = chain)
         ## set point size and transparency
         # grid_args = list(text = element_text(size = 20)),
-        ## Try to use hex densities
-        off_diag_fun = "hex"          
+        # off_diag_args are passed to mcmc_scatter() or mcmc_hex
+        # off_diag_args = list(color = chain)        
+        ## Try to use hex densities        
+        #off_diag_fun = "hex"
       )
 
       #        bayesplot_theme_set() # same as bayesplot_theme_set(theme_default())
@@ -284,11 +297,9 @@ for(row_index in 3:3) { #nrow(fit_tbl)) {
       plots_tmp <- pairs_tmp$bayesplots
 
       ## get list of off diagonal positions
-      tmp_n <- sqrt(length(plots_tmp))
-      plot_index <- 1:tmp_n
-      ## drop terms on the diagonal
-      drop_list = matrix(x = plot_index, y = plot_index)
-      plot_index <- plot_index[-(drop_list)]
+      n_tmp <- sqrt(length(plots_tmp))
+      ## plot_index = lower diagonal 
+      plot_index <- sapply(1:(n_tmp-1), function(x) (x+1):n_tmp+(x-1)*n_tmp) %>% unlist()
 
       plots_row <- list()
 
@@ -314,20 +325,35 @@ for(row_index in 3:3) { #nrow(fit_tbl)) {
       
 #      title_subfig <- ggdraw() + draw_label(text_subfig, fontface='bold')
 
+      
       if(print_pairs_grid) {
         pairs_male <-bayesplot_grid(plots = plots_tmp) ## Change font size
-      } else { ## Print summaries as a row
+      } else {
+        ## Print summaries as a row
         pairs_male <- plot_grid(
           plotlist = plots_row,
           labels = labels_subfig,
+          label_size = 8,
+          hjust = -16,  # don't understand why this is so large
+          label_fontface = "plain",
           nrow = 1)
       }
       pairs_list[[male]] <- pairs_male
     }
     p <- plot_grid(plotlist = pairs_list,
                    ncol = 2)
-    plot_pairs_list <- plot_grid(title_row, p,  ncol = 1,
-                                 rel_heights=c(0.06, 1))
+    
+    plot_pairs_list <- plot_grid(p,
+                                 labels = desc_short,
+                                 ncol = 1,
+                                 label_size = 10,
+                                 hjust = 0,
+                                 vjust = - 0.75) +
+      # Add some space around the edges  
+      theme(plot.margin = unit(c(1,0.5,0.5,0.5), "cm"))
+    
+    tmp <- plot_grid(title_row, p,  ncol = 1,
+                     rel_heights=c(0.06, 1))
 
 
     print(plot_pairs_list)
@@ -339,21 +365,18 @@ for(row_index in 3:3) { #nrow(fit_tbl)) {
            bg = "white")
   }
   
-
   if(print_mcmc_scatter) {
 
     scatter_list <- list()
     for(male in male_vec) {
       # print(male)
       vars_male <- grep(male, vars_T, value = TRUE)
-      
-      scatter_tmp <-  mcmc_scatter( #was mcmc_scatter
+     # if(length(vars_male) > 2) vars_pair <-  
+      scatter_tmp <-  mcmc_hex( #was mcmc_scatter
         fit_stan_rename,
-        pars = c(vars_male) #, vars_Intercept),
-        #off_diag_args = list(size = 1, alpha = 0.35), # only used if `off_diag_fun = "scatter"`
-        #off_diag_fun = c("hex")
-        )  #+
-      # stat_density_2d(color = "lightgray", size = .5, bins = 5) # doesn't work with mcmc_pairs
+        ## Can only use two variables
+        pars = c(first(vars_male), last(var_male)) #, vars_Intercept),
+      )
       
       ## ggMarginal doesn't work natively with mcmc_hex, so we need to make the
       ##  points transparent and then add a hex layer
@@ -380,11 +403,7 @@ for(row_index in 3:3) { #nrow(fit_tbl)) {
 
     
   } # end if(print_mcmc_scatter)
-}
 
-## end
-```
-```{r}
   if(print_mcmc_pairs_group) {
     pairs_list2 <- list()
     
