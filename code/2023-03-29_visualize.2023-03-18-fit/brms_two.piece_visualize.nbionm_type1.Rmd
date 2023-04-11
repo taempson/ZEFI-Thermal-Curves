@@ -166,6 +166,15 @@ pairs_include_lp = TRUE
 n_rows_print_half <- 4 ## 1/2 of rows to print of prior
 print_pairs_grid <- FALSE ## if true print grid, if false print row
 print_full_prior <- FALSE
+off_diag_fun <- "scatter" # "scatter" or "hex" for mcmc_pairs
+
+print_mcmc_pairs <- TRUE # individual level parameters
+print_mcmc_pairs_group <- TRUE # lp and group level parameters
+print_mcmc_scatter <- TRUE # individual level parameters, histograms printed on margins
+print_stan_hist <- FALSE
+
+print_get_prior <- TRUE ## 
+print_prior_summary <- TRUE
 
 for(row_index in 1:nrow(fit_tbl)) {
 
@@ -180,15 +189,6 @@ for(row_index in 1:nrow(fit_tbl)) {
   data <- fit_brms[["data"]]
   fit_stan <- fit_brms$fit
   chains_n <- length(dimnames(fit_stan)$chains)
-
-  print_mcmc_pairs <- TRUE # individual level parameters
-  print_mcmc_pairs_group <- TRUE # lp and group level parameters
-  print_mcmc_scatter <- TRUE # individual level parameters, histograms printed on margins
-  print_stan_hist <- FALSE
-
-  print_get_prior <- TRUE ## reset value
-  print_prior_summary <- TRUE
-  
 
   desc_filename <- gsub("_", "-", desc) %>%
     gsub("; ", "_", .) %>%
@@ -221,7 +221,7 @@ for(row_index in 1:nrow(fit_tbl)) {
       class(tmp_join) <- "data.frame"
       print(tmp_join %>% select(-source))
     }
-    print_prior_summary <- TRUE
+#    print_prior_summary <- TRUE
   }
 
   print("Fit Information")
@@ -254,7 +254,8 @@ for(row_index in 1:nrow(fit_tbl)) {
   ## Count occurence of each male in model fit_brms
   male_instance <- sapply(male_vec, function(x) {sum(str_detect(x, string=vars_clean))})
 
-  if(print_mcmc_pairs) {
+  ## Check to make sure plotting will work and/or is desired
+  if((all(male_instance > 1) | pairs_include_lp) & print_mcmc_pairs) {
     ## Use mcmc_pairs
     pairs_list <- list()
     ## update panel.boarder
@@ -280,7 +281,7 @@ for(row_index in 1:nrow(fit_tbl)) {
           # plot all chains on lower diagonal
           # Could also split by draws
           chains <- list(top = 1:(chains_n), bottom = NULL)
-        )
+        ),
         ## I believe div_color means color of divergent samples
         ##np_style = pairs_style_np(div_color = chain)
         ## set point size and transparency
@@ -288,7 +289,8 @@ for(row_index in 1:nrow(fit_tbl)) {
         # off_diag_args are passed to mcmc_scatter() or mcmc_hex
         # off_diag_args = list(color = chain)        
         ## Try to use hex densities        
-        #off_diag_fun = "hex"
+        off_diag_fun = if_else(off_diag_fun == "hex", "hex", "scatter") ## "hex" won't likely work if trying to visualize separate chains
+
       )
 
       #        bayesplot_theme_set() # same as bayesplot_theme_set(theme_default())
@@ -300,7 +302,8 @@ for(row_index in 1:nrow(fit_tbl)) {
       n_tmp <- sqrt(length(plots_tmp))
       ## plot_index = lower diagonal 
       plot_index <- sapply(1:(n_tmp-1), function(x) (x+1):n_tmp+(x-1)*n_tmp) %>% unlist()
-
+      xlab_vec <- lapply(pairs_pars, rep, times = n_tmp) %>% unlist() %>% gsub("T[0-9]{3}_","", .) 
+      ylab_vec <- rev(xlab_vec)
       plots_row <- list()
 
       ## add contour lines
@@ -308,10 +311,11 @@ for(row_index in 1:nrow(fit_tbl)) {
         i = plot_index[[j]]
         # pars = c(vars_male): list of 4 ggplot objects diagonal plots are 2 and 3
         plots_tmp[[i]] <- plots_tmp[[i]] +
-          stat_density_2d(color = "black",
-                          size = .25,
-                          bins = 5)
-        
+             stat_density_2d(color = if_else(off_diag_fun == "hex", "black", "red"),
+                          size = .75,
+                          bins = 5) +
+          labs(x = xlab_vec[[i]], y = ylab_vec[[i]])         
+
         plots_row[[j]] <- plots_tmp[[i]]
         #ggExtra::ggMarginal(plots_tmp[[i]] +
         #                                        geom_point(col="transparent") +
@@ -319,14 +323,15 @@ for(row_index in 1:nrow(fit_tbl)) {
         #                                        theme(legend.position = "none"), type = "histogram")
       }
 
-
-      text_axes <- str_remove(pairs_pars, "T[0-9]+_")
+      
+      #text_axes <- str_remove(pairs_pars, "T[0-9]+_")
       labels_subfig <- str_extract(pairs_pars, "T[0-9]+")[[1]]
       
 #      title_subfig <- ggdraw() + draw_label(text_subfig, fontface='bold')
 
       
       if(print_pairs_grid) {
+        print("Begin `print_pairs_grid`")
         pairs_male <-bayesplot_grid(plots = plots_tmp) ## Change font size
       } else {
         ## Print summaries as a row
@@ -339,7 +344,9 @@ for(row_index in 1:nrow(fit_tbl)) {
           nrow = 1)
       }
       pairs_list[[male]] <- pairs_male
-    }
+    } # end for(male in male_vec)
+
+    ## Combine plots across males
     p <- plot_grid(plotlist = pairs_list,
                    ncol = 2)
     
@@ -357,15 +364,16 @@ for(row_index in 1:nrow(fit_tbl)) {
 
 
     print(plot_pairs_list)
-    filename <- paste0("plot-pairs_", filename_desc, ".png")
+    filename <- paste0("plot-pairs_", filename_desc, ".pdf")
     ggsave(filename = filename, path = file.path(output_dir, "figures"),
            width = 8, height = 11, units = "in",
            scale = 1,
            dpi=300,
            bg = "white")
-  }
-  
-  if(print_mcmc_scatter) {
+  }  ## end if(all(male... for mcmc_pairs
+
+
+  if(all(male_instance > 1) & print_mcmc_scatter) {
 
     scatter_list <- list()
     for(male in male_vec) {
@@ -375,7 +383,7 @@ for(row_index in 1:nrow(fit_tbl)) {
       scatter_tmp <-  mcmc_hex( #was mcmc_scatter
         fit_stan_rename,
         ## Can only use two variables
-        pars = c(first(vars_male), last(var_male)) #, vars_Intercept),
+        pars = c(first(vars_male), last(vars_male)) #, vars_Intercept),
       )
       
       ## ggMarginal doesn't work natively with mcmc_hex, so we need to make the
@@ -394,7 +402,7 @@ for(row_index in 1:nrow(fit_tbl)) {
 
     print(plot_scatter_list)
     
-    filename <- paste0("plot-scatter_", filename_desc, ".png")
+    filename <- paste0("plot-scatter_", filename_desc, ".pdf")
     ggsave(filename = filename, path = file.path(output_dir, "figures"),
            width = 8, height = 11, units = "in",
            scale = 1,
@@ -402,9 +410,12 @@ for(row_index in 1:nrow(fit_tbl)) {
            bg = "white")
 
     
-  } # end if(print_mcmc_scatter)
+      } # end if(print_mcmc_scatter)
 
-  if(print_mcmc_pairs_group) {
+  
+
+  
+  if(print_mcmc_pairs_group | length(vars_non_T > 1)) {
     pairs_list2 <- list()
     
     if(length(vars_Intercept) > 0) {
@@ -425,7 +436,7 @@ for(row_index in 1:nrow(fit_tbl)) {
       
     print(plot_pairs_list2)
 
-        filename <- paste0("plot-pairs2_", filename_desc, ".png")
+        filename <- paste0("plot-pairs2_", filename_desc, ".pdf")
     ggsave(filename = filename, path = file.path(output_dir, "figures"),
            width = 8, height = 11, units = "in",
            scale = 1,
@@ -473,7 +484,7 @@ for(row_index in 1:nrow(fit_tbl)) {
 
 ## "Set2" only has 8 colors by default.
 ## This code expands that ability, based on: https://www.datanovia.com/en/blog/easy-way-to-expand-color-palettes-in-r/
-n_colors <- length(male_vec)
+n_colors <- 11 # length(male_vec)
 colors_male <- colorRampPalette(brewer.pal(8, "Set2"))(n_colors)
 ```
 
@@ -490,7 +501,12 @@ curr_row_max <- switch(2,
                        )
 
 for(curr_row in 1:curr_row_max) {
-  
+
+
+}
+
+
+generate_epred_data <- function(curr_row = 1, fit_tbl = NULL) {
   curr_desc <- fit_tbl[[curr_row, "desc"]]
   curr_desc_short <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
   fit_brms <- fit_tbl[[curr_row, "fit"]][[1]]
@@ -510,6 +526,11 @@ for(curr_row in 1:curr_row_max) {
   data_epred <- data_grid %>%
     add_epred_draws(object = fit_brms, ndraws = 500, cores = n_cores)
 
+  return(data_epred)
+}
+
+
+  ## Plot
   male_vec_tmp <- male_vec #[c(1, 5, 8)]
   ## Only plot a few males due to large size of `data_epred`
   data_epred_tmp <- data_epred %>%
@@ -531,7 +552,7 @@ for(curr_row in 1:curr_row_max) {
   plot_data_vs_epred <- plot_tmp + facet_wrap(vars(male)) +
     labs(title = "Data vs. Expected Values", subtitle = curr_desc_short) 
   last_plot()
-  filename <- paste0("data.and.epred-vs-x_", filename_desc, ".png")
+  filename <- paste0("data.and.epred-vs-x_", filename_desc, ".pdf")
   ggsave(filename = filename, path = file.path(output_dir, "figures"),
          width = 8, height = 11, units = "in",
          scale = 1,
@@ -597,7 +618,7 @@ for(curr_row in 1:curr_row_max) {
     labs(title = "Data vs. Simulated Values", subtitle = curr_desc_short) 
   last_plot()
 
-  filename <- paste0("data-simulated-vs-x_", filename_desc, ".png")
+  filename <- paste0("data-simulated-vs-x_", filename_desc, ".pdf")
   ggsave(filename = filename, path = file.path(output_dir, "figures"),
          width = 8, height = 11, units = "in",
          scale = 1,
@@ -658,7 +679,7 @@ plot_model[["mean"]] <- tmp_plot
 
 tmp_plot
 
-filename <- paste0("data-epred-vs-temp_", filename_desc, ".png")
+filename <- paste0("data-epred-vs-temp_", filename_desc, ".pdf")
 ggsave(filename = filename, path = file.path(output_dir, "figures"),
        width = 8, height = 11, units = "in",
        scale = 1,
