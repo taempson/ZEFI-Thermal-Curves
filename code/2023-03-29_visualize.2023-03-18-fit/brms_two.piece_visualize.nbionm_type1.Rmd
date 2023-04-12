@@ -563,13 +563,17 @@ for(row_index in 1) {#1:nrow(fit_tbl)) {
       theme(plot.margin = unit(c(1,0.5,0.5,0.5), "cm"))
     } else {
     
-      plot_pairs_list <- marrangeGrob(pairs_list, ncol = 1, nrow = length(pairs_pars))
+      plot_pairs_list <- marrangeGrob(pairs_list, ncol = 1, nrow = length(pairs_pars),
+                                      top = desc_short,
+                                      bottom = quote(paste("page", g, "of", npages))
+                                      )
     }
 
 
     print(plot_pairs_list)
     filename <- paste0("plot-pairs_", filename_desc, ".pdf")
     ggsave(filename = filename, path = file.path(output_dir, "figures"),
+           plot = plot_pairs_list,
            width = 8, height = 11, units = "in",
            scale = 1,
            dpi=300,
