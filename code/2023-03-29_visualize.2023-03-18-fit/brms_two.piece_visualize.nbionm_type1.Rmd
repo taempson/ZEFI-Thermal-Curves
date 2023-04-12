@@ -95,11 +95,8 @@ n_cores <- 4
 
 ```{r}
 
-source("../../../custom-brms-families/families/nbinom_type1.R")
 
-## Define fmax() om case expose_functions()
 
-fmax <- function(x, x0) max(x, x0)
 
 ```
 ## Load `input`
@@ -109,15 +106,45 @@ fmax <- function(x, x0) max(x, x0)
 infile <- last(dir(file.path(input_dir, "tibbles"), "fit_tbl.*"))
 infile_tbl <- file.path(input_dir, "tibbles", infile)
 load(infile_tbl, verbose = TRUE)
-fit_tbl_orig <- fit_tbl
+## save filtered tibble incase it becomes corrupted locally
+fit_tbl_orig <- fit_tbl %>% filter(!(is.na(fit))) 
+```
 
-fit_tbl <- fit_tbl %>% filter(!(is.na(fit))) 
+### Add columns to `fit_tbl` for future use
+```{r}
+
+fit_tbl <- fit_tbl_orig
+
+names_col <- c("obs", "epred", "pred", "plots")
+for(tmp in names_col) {
+  ## note syntax for using value of variable to dynamically assign column name
+  if(!(tmp %in% names(fit_tbl))) fit_tbl <- fit_tbl %>%  add_column("{tmp}" := list(list()))
+}
+
+```
+
+## Define and/or Expose Functions used by STAN
+
+```{r}
+
+source("../../../custom-brms-families/families/nbinom_type1.R")
+
+## Define fmax() in case expose_functions()
+fmax <- function(x, x0) max(x, x0)
+
+## Create functions defined in stan's function header
+## Only need to do this once since all fits use the same user
+## defined functions such as "two_piece"
+## Only do this if not already defined or forcing
+force_expose_functions <- FALSE
+if(!exists("two_piece") | force_expose_functions) expose_functions(fit_tbl[[1, "fit"]], vectorize = TRUE, show_compiler_warnings = FALSE)
 
 ```
 
 ## Define local functions
 
 ```{r}
+
 which_tbl_row <- function(filter_male = FALSE, x0_flag = "individual", y0_flag = "individual", disp_flag = "uniform_1", disp_value = 0.01, model = "two_piece", tbl = fit_tbl) {
   which( tbl$filter_male %in% filter_male & 
           tbl$x0_flag %in% x0_flag &
@@ -135,6 +162,144 @@ clean_var_names <- function(fit) {
              gsub("__", "_", .) %>%
              gsub("r_male_(x0|s0|y0|disp)\\[(T[0-9]{3}),Intercept\\]", "\\2_\\1_r", .) %>%
              gsub("\\.", " ", .))
+}
+
+## Generate data for plotting expected values
+generate_epred_data <- function(fit_brms = NULL, ndraws = 1000, ncores = 4) {
+
+    ## Create grid of x values for epred/predictions
+
+  data_fit_brms <- fit_brms$data
+  data_grid <- data_fit_brms %>%
+    group_by(male) %>%
+    data_grid(x = seq_range(c(20, 46), n = 51))
+
+
+  ## add expected values
+  data_epred <- data_grid %>%
+    add_epred_draws(object = fit_brms, ndraws = ndraws, cores = ncores)
+
+  return(data_epred)
+}
+
+## Generate data for plotting range of predicted values
+generate_pred_data <- function(fit_brms = NULL, ndraws = 1000, ncores = 4) {
+
+  data_fit_brms <- fit_brms$data
+  
+  data_grid <- data_fit_brms %>%
+    group_by(male) %>%
+    data_grid(x = seq_range(c(20, 45.9), n = 51)) %>%  #, .model = fit_brms) %>% 
+    ungroup() 
+
+  ## add simulated values
+  data_pred <- data_grid %>%
+    add_predicted_draws(object = fit_brms, ndraws = ndraws, ncores = ncores )
+
+  return(data_pred)
+  }
+
+
+plot_epred<- function(data_epred, male_vec, desc, data_obs = NULL) {
+                            ## Plot
+  ## Only plot specified males
+  data_epred_tmp <- data_epred %>%
+    filter(male %in% male_vec)
+  plot_tmp <- ggplot(data = data_epred_tmp, aes(x = x, y = .epred)) + #, color = male)) +
+    ## Combine Scatter Plots and Model vs Data Plots
+    stat_lineribbon(aes(y=.epred)) +
+    scale_fill_brewer(palette = "Greys")
+    #scale_color_manual(values = colors_male) +
+    #scale_color_brewer(palette = "Set2") +
+
+  title <- "Expected Values vs. Temp"
+  if(!is.null(data_obs)){
+
+    data_obs_tmp <- data_obs %>% filter(male %in% male_vec)    
+    plot_tmp <- plot_tmp +
+      geom_point(data = data_obs_tmp,
+                 aes(x = x, y = y), color = "red")
+    title <- "Expected Values & Data vs. Temp"
+  }
+
+  y_max <- max(data_epred_tmp$.epred)*1.1
+  plot_tmp <- plot_tmp +
+    ylim(0, y_max) +
+    facet_wrap(vars(male)) +
+    labs(title = title, subtitle = desc)
+  
+  return(plot_tmp)
+}
+
+plot_pred<- function(data_pred, male_vec, desc, data_obs = NULL) {
+                            ## Plot
+  ## Only plot specified males
+  data_pred_tmp <- data_pred %>%
+    filter(male %in% male_vec)
+  plot_tmp <- ggplot(data = data_pred_tmp, aes(x = x, y = .prediction)) + #, color = male)) +
+    ## Combine Scatter Plots and Model vs Data Plots
+    stat_lineribbon(aes(y=.prediction)) +
+    scale_fill_brewer(palette = "Greys", direction =  -1)
+    #scale_color_manual(values = colors_male) +
+    #scale_color_brewer(palette = "Set2") +
+
+  title <- "Predicted Values vs. Temp"
+  if(!is.null(data_obs)){
+
+    data_obs_tmp <- data_obs %>% filter(male %in% male_vec)    
+    plot_tmp <- plot_tmp +
+      geom_point(data = data_obs_tmp,
+                 aes(x = x, y = y), color = "red")
+    title <- "Predicted Values & Data vs. Temp"
+  }
+
+  y_max <- max(data_pred_tmp$.prediction)*1.1
+  plot_tmp <- plot_tmp +
+    ylim(0, y_max) +
+    facet_wrap(vars(male)) +
+    labs(title = title, subtitle = desc)
+  
+  return(plot_tmp)
+}
+
+
+```
+
+## Generate Columns of Observed Data, Predicted Data and Expected Values 
+
+```{r}
+
+## add rows to fit_tbl if needed
+## Can restore fit_tbl to original values using
+##    fit_tbl <- fit_tbl_orig
+
+force_generate_epred <- TRUE
+force_generate_pred <- force_generate_epred
+force_generate_obs <- force_generate_epred
+
+curr_row_max <- nrow(fit_tbl)
+##curr_row_max <- 2
+
+
+for(curr_row in 1:curr_row_max) {
+
+  fit_brms <- fit_tbl[[curr_row, "fit"]][[1]]
+
+  if(length(fit_tbl[[curr_row, "epred"]][[1]]) ==0 | force_generate_epred) {
+    epred <- generate_epred_data(fit_brms)
+    fit_tbl[[curr_row, "epred"]] <-list(epred)
+  }
+  
+  if(length(fit_tbl[[curr_row, "pred"]][[1]]) ==0 | force_generate_pred) {
+    pred <- generate_pred_data(fit_brms)
+    fit_tbl[[curr_row, "pred"]] <- list(pred)
+  }
+
+  if(length(fit_tbl[[curr_row, "obs"]][[1]]) ==0 | force_generate_obs) {
+    obs <- fit_brms$data
+    fit_tbl[[curr_row, "obs"]] <-list(obs)
+  }
+
 }
 ```
 
@@ -478,9 +643,9 @@ for(row_index in 1:nrow(fit_tbl)) {
 
 # Plot Data and Predictions
 
-## Set up colors
+## Set up colors -- not currently needed
 
-```{r}
+```{r, eval = FALSE}
 
 ## "Set2" only has 8 colors by default.
 ## This code expands that ability, based on: https://www.datanovia.com/en/blog/easy-way-to-expand-color-palettes-in-r/
@@ -491,78 +656,84 @@ colors_male <- colorRampPalette(brewer.pal(8, "Set2"))(n_colors)
 Data suggests that disp should vary between males?
 
 
-## Plot Data and Expected Values vs. Temperature
+
+
+## Plot Predicted and Expected Values
 
 ```{r}
 
-curr_row_max <- switch(2,
-                       2,
-                       nrow(fit_tbl)
-                       )
+curr_row_max <- nrow(fit_tbl)
+curr_row_max <- 1
+save_plots = TRUE
+force_update_plots = TRUE
 
 for(curr_row in 1:curr_row_max) {
 
+  fit_row <- fit_tbl[curr_row, ]
+  
+  curr_desc <- fit_row$desc
+  
+  desc <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
+  obs <- fit_row[["obs"]][[1]]
+  epred <- fit_row[["epred"]][[1]]
+  males <- levels(obs$male)
 
-}
-
-
-generate_epred_data <- function(curr_row = 1, fit_tbl = NULL) {
-  curr_desc <- fit_tbl[[curr_row, "desc"]]
-  curr_desc_short <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
-  fit_brms <- fit_tbl[[curr_row, "fit"]][[1]]
-
-  expose_functions(fit_brms, vectorize = TRUE, show_compiler_warnings = FALSE)
-  data_fit_brms <- fit_brms$data
-
-
-  ## Create grid of x values for epred/predictions
-
-  data_grid <- data_fit_brms %>%
-    group_by(male) %>%
-    data_grid(x = seq_range(c(20, 46), n = 51))
-
-
-  ## add expected values
-  data_epred <- data_grid %>%
-    add_epred_draws(object = fit_brms, ndraws = 500, cores = n_cores)
-
-  return(data_epred)
-}
-
-
-  ## Plot
-  male_vec_tmp <- male_vec #[c(1, 5, 8)]
-  ## Only plot a few males due to large size of `data_epred`
-  data_epred_tmp <- data_epred %>%
-    filter(male %in% male_vec_tmp)
-
-  data_fit_brms_tmp <- data_fit_brms %>% filter(male %in% male_vec_tmp)
-  y_max <- max(data_epred_tmp$.epred)*1.1
-
-  plot_tmp <- ggplot(data = data_epred_tmp, aes(x = x, y = .epred, color = male)) +
-    ## Combine Scatter Plots and Model vs Data Plots
-    stat_lineribbon(aes(y=.epred)) +
-    scale_fill_brewer(palette = "Greys") +
-    scale_color_manual(values = colors_male) +
-    #scale_color_brewer(palette = "Set2") +
-    geom_point(data = data_fit_brms_tmp,
-               aes(x = x, y = y), color = "red") + 
-    ylim(0, y_max)
-
-  plot_data_vs_epred <- plot_tmp + facet_wrap(vars(male)) +
-    labs(title = "Data vs. Expected Values", subtitle = curr_desc_short) 
-  last_plot()
-  filename <- paste0("data.and.epred-vs-x_", filename_desc, ".pdf")
-  ggsave(filename = filename, path = file.path(output_dir, "figures"),
-         width = 8, height = 11, units = "in",
-         scale = 1,
-         dpi=300,
-         bg = "white")
+  plot_curr <- fit_tbl[[curr_row, "plots"]][[1]][["epred"]]
+  if(length(plot_curr) ==0 | force_update_plots) {
+    plot_tmp <- plot_epred(data_epred = epred, male_vec = males, desc = desc, data_obs = obs)
+    print(plot_tmp)
+    ## Why do I need the [[1]]?
+    fit_tbl[[curr_row, "plots"]][[1]][["epred"]] <- plot_tmp
+    
+    if(save_plots){
+      filename <- paste0("data.and.epred-vs-x_", filename_desc, ".pdf")
+      ggsave(filename = filename, plot = plot_tmp, path = file.path(output_dir, "figures"),
+             width = 8, height = 11, units = "in",
+             scale = 1,
+             dpi=300,
+             bg = "white")
+    }
+  }
 }
 ```
 
-
 ## Plot Data and Simulated Values vs. Temperature
+```{r}
+
+curr_row_max <- 1
+
+for(curr_row in 1:curr_row_max) {
+
+  fit_row <- fit_tbl[curr_row, ]
+  
+  curr_desc <- fit_row$desc
+  
+  desc <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
+  obs <- fit_row[["obs"]][[1]]
+  epred <- fit_row[["epred"]][[1]]
+  males <- levels(obs$male)
+  
+  plot_curr <- fit_tbl[[curr_row, "plots"]][[1]][["pred"]]
+  if(length(plot_curr) ==0 | force_update_plots) {
+    plot_tmp <- plot_pred(data_pred = pred, male_vec = males, desc = desc, data_obs = obs)
+    print(plot_tmp)
+  
+    fit_tbl[[curr_row, "plots"]][[1]][["pred"]] <- plot_tmp
+    if(save_plots) {
+      filename <- paste0("data.and.pred-vs-x_", filename_desc, ".pdf")
+      ggsave(filename = filename, plot = plot_tmp, path = file.path(output_dir, "figures"),
+             width = 8, height = 11, units = "in",
+             scale = 1,
+             dpi=300,
+             bg = "white")
+    }
+  }
+}
+
+```
+
+
+## OLD Plot Data and Simulated Values vs. Temperature
 
 ```{r}
 
@@ -581,14 +752,14 @@ for(curr_row in 1:curr_row_max) {
     object.size(fit_brms)
   }
   
-  data_fit_brms <- fit_brms$data
+  data_obs <- fit_brms$data
 
 
   ## Create grid of x values for epred/predictions
 
   #dataframe_tmp <- crossing(x = seq_range(c(20, 30), n = 51), draw = 1:3, male = male_vec)
   
-  data_grid <- data_fit_brms %>%
+  data_grid <- data_obs %>%
     group_by(male) %>%
     data_grid(x = seq_range(c(20, 45.9), n = 51)) %>%  #, .model = fit_brms) %>% 
     ungroup() 
@@ -610,7 +781,7 @@ for(curr_row in 1:curr_row_max) {
     scale_fill_brewer(palette = "Greys") +
     scale_color_manual(values = colors_male) +
     #scale_color_brewer(palette = "Set2") +
-    geom_point(data = data_fit_brms,
+    geom_point(data = data_obs,
                aes(x = x, y = y), color = "red") + 
     ylim(0, y_max)
 
@@ -648,7 +819,7 @@ list_plot_mean <- list()
   
 for(male in male_vec) {
     
-  tmp_data <- data_fit_brms %>% filter(male == !!male)
+  tmp_data <- data_obs %>% filter(male == !!male)
   motif_count <- tmp_data$y
   tmp_mean <- data_epred %>% filter(male == !!male)
 
@@ -671,7 +842,7 @@ tmp_plot <- plot_grid(
   ncol = 4
 )
 
-data_grid <- data_fit_brms %>%
+data_grid <- data_obs %>%
   group_by(male) %>%
   data_grid(x = seq_range(c(20, 40), n = 51))
 
@@ -694,7 +865,7 @@ list_plot_data <- list()
 for(male in male_vec) {
 
 
-  tmp_data <- data_fit_brms %>% filter(male == !!male)
+  tmp_data <- data_obs %>% filter(male == !!male)
   motif_count <- tmp_data$y
   tmp_pred  <- data_pred %>% filter(male ==!!male)
   tmp_plot_data <- ggplot(data = tmp_pred,
