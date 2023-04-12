@@ -207,12 +207,12 @@ plot_epred<- function(data_epred, male_vec, desc, data_obs = NULL) {
     filter(male %in% male_vec)
   plot_tmp <- ggplot(data = data_epred_tmp, aes(x = x, y = .epred)) + #, color = male)) +
     ## Combine Scatter Plots and Model vs Data Plots
-    stat_lineribbon(aes(y=.epred)) +
-    scale_fill_brewer(palette = "Greys")
+    scale_fill_brewer(palette = "Greys") +
+    stat_lineribbon(aes(y=.epred)) #, color = "blue"))
+
     #scale_color_manual(values = colors_male) +
     #scale_color_brewer(palette = "Set2") +
 
-  title <- "Expected Values vs. Temp"
   if(!is.null(data_obs)){
 
     data_obs_tmp <- data_obs %>% filter(male %in% male_vec)    
@@ -220,9 +220,13 @@ plot_epred<- function(data_epred, male_vec, desc, data_obs = NULL) {
       geom_point(data = data_obs_tmp,
                  aes(x = x, y = y), color = "red")
     title <- "Expected Values & Data vs. Temp"
+    y_max <- max(data_obs_tmp$y)*1.1
+  } else {
+
+    title <- "Expected Values vs. Temp"
+    y_max <- NA
   }
 
-  y_max <- max(data_epred_tmp$.epred)*1.1
   plot_tmp <- plot_tmp +
     ylim(0, y_max) +
     facet_wrap(vars(male)) +
@@ -231,19 +235,19 @@ plot_epred<- function(data_epred, male_vec, desc, data_obs = NULL) {
   return(plot_tmp)
 }
 
-plot_pred<- function(data_pred, male_vec, desc, data_obs = NULL) {
+plot_pred <- function(data_pred, male_vec, desc, data_obs = NULL) {
                             ## Plot
   ## Only plot specified males
   data_pred_tmp <- data_pred %>%
     filter(male %in% male_vec)
   plot_tmp <- ggplot(data = data_pred_tmp, aes(x = x, y = .prediction)) + #, color = male)) +
     ## Combine Scatter Plots and Model vs Data Plots
-    stat_lineribbon(aes(y=.prediction)) +
-    scale_fill_brewer(palette = "Greys", direction =  -1)
+    scale_fill_brewer(palette = "Greys", direction =  -1) +
+    stat_lineribbon(aes(y=.prediction)) #, fill = "blue"))
+
     #scale_color_manual(values = colors_male) +
     #scale_color_brewer(palette = "Set2") +
 
-  title <- "Predicted Values vs. Temp"
   if(!is.null(data_obs)){
 
     data_obs_tmp <- data_obs %>% filter(male %in% male_vec)    
@@ -251,9 +255,13 @@ plot_pred<- function(data_pred, male_vec, desc, data_obs = NULL) {
       geom_point(data = data_obs_tmp,
                  aes(x = x, y = y), color = "red")
     title <- "Predicted Values & Data vs. Temp"
+    y_max <- max(data_obs_tmp$y)*1.1
+  } else {
+    ymax <- NA
+    title <- "Predicted Values vs. Temp"
   }
 
-  y_max <- max(data_pred_tmp$.prediction)*1.1
+
   plot_tmp <- plot_tmp +
     ylim(0, y_max) +
     facet_wrap(vars(male)) +
@@ -273,7 +281,7 @@ plot_pred<- function(data_pred, male_vec, desc, data_obs = NULL) {
 ## Can restore fit_tbl to original values using
 ##    fit_tbl <- fit_tbl_orig
 
-force_generate_epred <- TRUE
+force_generate_epred <- FALSE
 force_generate_pred <- force_generate_epred
 force_generate_obs <- force_generate_epred
 
@@ -332,6 +340,7 @@ n_rows_print_half <- 4 ## 1/2 of rows to print of prior
 print_pairs_grid <- FALSE ## if true print grid, if false print row
 print_full_prior <- FALSE
 off_diag_fun <- "scatter" # "scatter" or "hex" for mcmc_pairs
+#use_mcmc_pairs <- FALSE ## indicate if to make scatter plots using mcmc_pairs
 
 print_mcmc_pairs <- TRUE # individual level parameters
 print_mcmc_pairs_group <- TRUE # lp and group level parameters
@@ -341,7 +350,7 @@ print_stan_hist <- FALSE
 print_get_prior <- TRUE ## 
 print_prior_summary <- TRUE
 
-for(row_index in 1:nrow(fit_tbl)) {
+for(row_index in 1) {#1:nrow(fit_tbl)) {
 
   cat(paste("Row: ", row_index))
   
@@ -437,6 +446,7 @@ for(row_index in 1:nrow(fit_tbl)) {
       }
 
 
+      if(TRUE) {
       ## Change text size
       # bayesplot_theme_update(text = element_text(size = 6)) #, family = "sans"))
       pairs_tmp <-  mcmc_pairs(
@@ -462,13 +472,36 @@ for(row_index in 1:nrow(fit_tbl)) {
 
       # add density curves to off diagonal
       plots_tmp <- pairs_tmp$bayesplots
+        
+        ## get list of off diagonal positions
+        n_tmp <- sqrt(length(plots_tmp))
+        ## plot_index = lower diagonal 
+        plot_index <- sapply(1:(n_tmp-1), function(x) (x+1):n_tmp+(x-1)*n_tmp) %>% unlist()
 
-      ## get list of off diagonal positions
-      n_tmp <- sqrt(length(plots_tmp))
-      ## plot_index = lower diagonal 
-      plot_index <- sapply(1:(n_tmp-1), function(x) (x+1):n_tmp+(x-1)*n_tmp) %>% unlist()
-      xlab_vec <- lapply(pairs_pars, rep, times = n_tmp) %>% unlist() %>% gsub("T[0-9]{3}_","", .) 
-      ylab_vec <- rev(xlab_vec)
+        xy_pars <- combn(pairs_pars, 2) %>% t() %>% as_tibble()
+        names(xy_pars) <- c("y", "x")
+
+        xlab_vec <-  xy_pars %>% transmute(x = gsub("T[0-9]{3}_","", x)) %>% unlist()
+        ylab_vec <- xy_pars %>% transmute(y = gsub("T[0-9]{3}_","", y)) %>% unlist()
+        ## These don't work
+        #xlab_vec <- lapply(pairs_pars, rep, times = n_tmp) %>% unlist() %>% gsub("T[0-9]{3}_","", .) 
+        #ylab_vec <- rev(xlab_vec)
+
+      } else { ## use ggplot2 scatterplots, not mcmc_pairs
+        plots_tmp <- list()
+        ## get df of plots to make based on xy axes
+        xy_pars <- combn(pairs_pars, 2) %>% t() %>% as_tibble()
+        names(xy_pars) <- c("y", "x")
+
+        xy_labs <-  xy_pars %>% mutate(x = gsub("T[0-9]{3}_","", x), y = gsub("T[0-9]{3}_","", y))
+        #xy_labs <-  xy_pars %>% across(x = gsub("T[0-9]{3}_","", x), y = gsub("T[0-9]{3}_","", y))
+        ## This 'works', but I can't modify the figure
+        plot_tmp <- apply(xy_pars, 1, function(x) {
+          mcmc_scatter(fit_stan_rename, pars =  x)}
+          )                  
+
+      }
+      
       plots_row <- list()
 
       ## add contour lines
@@ -479,7 +512,7 @@ for(row_index in 1:nrow(fit_tbl)) {
              stat_density_2d(color = if_else(off_diag_fun == "hex", "black", "red"),
                           size = .75,
                           bins = 5) +
-          labs(x = xlab_vec[[i]], y = ylab_vec[[i]])         
+          labs(x = xlab_vec[[j]], y = ylab_vec[[j]])         
 
         plots_row[[j]] <- plots_tmp[[i]]
         #ggExtra::ggMarginal(plots_tmp[[i]] +
@@ -504,7 +537,7 @@ for(row_index in 1:nrow(fit_tbl)) {
           plotlist = plots_row,
           labels = labels_subfig,
           label_size = 8,
-          hjust = -16,  # don't understand why this is so large
+          #hjust = -16,  # don't understand why this is so large
           label_fontface = "plain",
           nrow = 1)
       }
@@ -512,9 +545,14 @@ for(row_index in 1:nrow(fit_tbl)) {
     } # end for(male in male_vec)
 
     ## Combine plots across males
-    p <- plot_grid(plotlist = pairs_list,
-                   ncol = 2)
+    ifelse(length(pairs_pars) > 3, ncol <- 1, ncol <- 2)
+
+    use_plot_grid <- FALSE
     
+    if(use_plot_grid) { 
+    p <- plot_grid(plotlist = pairs_list,
+                   ncol = ncol)
+
     plot_pairs_list <- plot_grid(p,
                                  labels = desc_short,
                                  ncol = 1,
@@ -523,9 +561,10 @@ for(row_index in 1:nrow(fit_tbl)) {
                                  vjust = - 0.75) +
       # Add some space around the edges  
       theme(plot.margin = unit(c(1,0.5,0.5,0.5), "cm"))
+    } else {
     
-    tmp <- plot_grid(title_row, p,  ncol = 1,
-                     rel_heights=c(0.06, 1))
+      plot_pairs_list <- marrangeGrob(pairs_list, ncol = 1, nrow = length(pairs_pars))
+    }
 
 
     print(plot_pairs_list)
@@ -658,7 +697,7 @@ Data suggests that disp should vary between males?
 
 
 
-## Plot Predicted and Expected Values
+## Plot Predicted and Expected Values vs. Temp
 
 ```{r}
 
@@ -674,10 +713,18 @@ for(curr_row in 1:curr_row_max) {
   curr_desc <- fit_row$desc
   
   desc <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
+  filename_desc <- gsub("_", "-", desc) %>%
+    gsub("; ", "_", .) %>%
+    gsub(":? ", "-", .)
+
+  print(paste0("Row: ", curr_row, ", ", desc))
+  
   obs <- fit_row[["obs"]][[1]]
-  epred <- fit_row[["epred"]][[1]]
   males <- levels(obs$male)
 
+  print("Plotting Expectations")
+
+  epred <- fit_row[["epred"]][[1]]
   plot_curr <- fit_tbl[[curr_row, "plots"]][[1]][["epred"]]
   if(length(plot_curr) ==0 | force_update_plots) {
     plot_tmp <- plot_epred(data_epred = epred, male_vec = males, desc = desc, data_obs = obs)
@@ -694,27 +741,17 @@ for(curr_row in 1:curr_row_max) {
              bg = "white")
     }
   }
-}
-```
 
-## Plot Data and Simulated Values vs. Temperature
-```{r}
+## Plot Data and Predicted Values vs. Temperature
 
-curr_row_max <- 1
-
-for(curr_row in 1:curr_row_max) {
-
-  fit_row <- fit_tbl[curr_row, ]
-  
-  curr_desc <- fit_row$desc
-  
-  desc <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
-  obs <- fit_row[["obs"]][[1]]
-  epred <- fit_row[["epred"]][[1]]
-  males <- levels(obs$male)
+## Reserve term "simulated" for when uisng the best fit MODEL
+  ## Warning: Removed XXX rows containing missing values (`stat_slabinterval()`).
+  ## This is from ggplot2 and indicates there's data outside the y range
+  print("Plotting predictions")
+  pred <- fit_row[["pred"]][[1]]
   
   plot_curr <- fit_tbl[[curr_row, "plots"]][[1]][["pred"]]
-  if(length(plot_curr) ==0 | force_update_plots) {
+  if(length(plot_curr) == 0 | force_update_plots) {
     plot_tmp <- plot_pred(data_pred = pred, male_vec = males, desc = desc, data_obs = obs)
     print(plot_tmp)
   
