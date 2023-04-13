@@ -176,7 +176,7 @@ However, the data doesn't seem to follow any real distribution and its at the mo
 
 ## Set up functions, parameters, and results tibble 
 
-```r
+```{r}
 
 data_stan <- data_ind %>% rename(y = motif_count, x = temp) %>%
   mutate(male = factor(male))
@@ -206,6 +206,8 @@ stan_asymptotic_func <- paste0(" real  asymp(real x, real phi, real y0) {
  real xmax = ", xmax, "; ## paste in value for xmax\n
  return(y0 * (1 - exp( - phi * (xmax - x))) );
  } ")
+
+print(stan_two_piece_func)
 
 ## Function to drop chains, such as those that get stuck on a suboptimal posterior peak
 ## Taken from:
@@ -291,9 +293,9 @@ fit_tbl <- crossing(model = models,
 
 ```{r, message = FALSE }
 
-run_fits <- FALSE 
+run_fits <- TRUE
 force_load <- FALSE  #reload fit_tbl even if it already exits
-save_fits <- FALSE
+save_fits <- TRUE
 
 
 if(run_fits) {
@@ -307,11 +309,12 @@ if(run_fits) {
 }
 
 
+print_pairs_plot <- FALSE  # Could base on model used, gets large when lots of individual or groups
 
 sampling = "nbinom_type1"
 prior_shape_y0 = "flat"
 
-flags_x0_used <- c("individual", "groups_1", "uniform_1") %>% rev()#
+flags_x0_used <- c("individual", "groups_1", "uniform_1") # %>% rev()#
 flags_y0_used <- c("individual")
 values_disp_used <- values_disp
 flags_disp_used <- c("individual", "groups_1", "uniform_1")[3] #  |> rev() |> first()
@@ -320,8 +323,10 @@ shape_y0_prior <- "flat" # flat or normal
 
 ## These males produce bimodial posteriors and interfere with model fitting
 ## Ideally, we'd do a preliminary analysis without them and then include them later.
+#male_exclude = c("T235", "T236")
 
-male_exclude = c("T235", "T236")
+## These males have huge dispersion outside the predicted valeus
+male_exclude <- c("T235", "T243")
 
 fit_index <- 0
 
@@ -333,10 +338,10 @@ for(male_filter in c(FALSE, TRUE)) {
                two_piece = {
                    ## Note issues in non-convergence are related to bimodality of posterior surface.
                    stan_func <- stan_two_piece_func
-                   warmup <- 3000 # floor(3/4 * iter)
-                   iter <- warmup + 2000
+                   warmup <- 10000 # floor(3/4 * iter)
+                   iter <- 2 * warmup
                    adapt_delta <- 0.99
-                   thin <- 4
+                   thin <- 5
                },
                one_piece = {
                    stan_func <- stan_one_piece_func
@@ -408,7 +413,7 @@ for(male_filter in c(FALSE, TRUE)) {
                                        iter <- iter
                                        warmup <- warmup
                                        thin <- thin
-                                       n_cores <- 6 ## set to 1 if getting errors from stan in order to see relevant message.
+                                       n_cores <- 12 ## set to 1 if getting errors from stan in order to see relevant message.
                                        n_chains <- n_cores
                                        stanvar_func <-
                                            stanvar(scode = paste(
@@ -448,7 +453,10 @@ for(male_filter in c(FALSE, TRUE)) {
                                               uniform_1 = formula(x0 ~ 0 + Intercept),
                                               uniform_2 = formula(x0 ~ 0 + x0_group),
                                               ## `0 + Intercept` avoids prior being defined on centered data
-                                              groups_1 = formula(x0 ~ 0 + Intercept + (1|male)), 
+                                              # The following formulation is incorrect and assumes that x0 is centered around 0
+                                              #groups_1 = formula(x0 ~ 0 + (1|male)),
+                                              groups_1 = formula(x0 ~ 0 + Intercept + (1|male)),
+                                              
                                               groups_2 = formula(x0 ~ 0 + Intercept + (1|male) + x0_group),
                                               individual = formula(x0 ~ 0 + male) ## Do not use 1 + male!
                                               )
@@ -518,7 +526,8 @@ for(male_filter in c(FALSE, TRUE)) {
                                                individual = NULL
                                                )
                             
-                            x0_priors <- prior(uniform(32, 44.5), lb = 32, ub = 44.5, nlpar = "x0") + x0_prior
+                            x0_priors <- prior(uniform(32, 45.9), lb = 32, ub = 45.9, nlpar = "x0") +
+                                x0_prior
 
                             phi_priors <- prior(uniform(0.1, 100), lb = 0.01, ub = 17, nlpar = "phi")
                             
@@ -603,11 +612,11 @@ for(male_filter in c(FALSE, TRUE)) {
                                        )
 
 
-                            print("Prior Summary")
-                            print(prior_summary(fit))
-                            print("Fit Information")
-                            print(desc)
-                            print(fit)
+                            #print("Prior Summary")
+                            #print(prior_summary(fit))
+                            #print("Fit Information")
+                            #print(desc)
+                            #print(fit)
                             
                                         #fit_exp <- expose_functions(fit) , vectorize = TRUE)
                                         #fit_cr <- add_criterion(fit_exp, c("loo", "waic"))
@@ -674,6 +683,8 @@ for(male_filter in c(FALSE, TRUE)) {
                                    scale = 0.4,
                                    dpi=300)
 
+                            ## Pairs Plot
+                            if(print_pairs_plot) {
                             list_plot <- list()
                             if(model == "one_piece" & disp_flag != "individual") {
                                 ## each male only appears once in the one piece models
@@ -716,7 +727,7 @@ for(male_filter in c(FALSE, TRUE)) {
                                 
                                         #            }
                                         #end else for fitting
-                                
+                                }
                             }
                         }
                     }
