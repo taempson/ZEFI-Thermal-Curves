@@ -74,6 +74,7 @@ library(bayesplot)
 library(tidybayes)
 library(loo)
 library(modelr)
+library(reshape2) ## provides melt
 
 ## options(ggplot2.continuous.colour="viridis",
 ##        ggplot2.discrete.colour="viridis",
@@ -88,6 +89,8 @@ ggplot2::theme_set(theme_default(base_size = 10))
 ## ggplot2::theme_set(theme_default())
 
 n_cores <- 4
+
+color_scheme_set("viridis")
 
 ```
 
@@ -115,7 +118,7 @@ fit_tbl_orig <- fit_tbl %>% filter(!(is.na(fit)))
 
 fit_tbl <- fit_tbl_orig
 
-names_col <- c("obs", "epred", "pred", "plots")
+names_col <- c("chains_best", "lp_stats", "obs", "epred", "pred", "plots")
 for(tmp in names_col) {
   ## note syntax for using value of variable to dynamically assign column name
   if(!(tmp %in% names(fit_tbl))) fit_tbl <- fit_tbl %>%  add_column("{tmp}" := list(list()))
@@ -137,13 +140,45 @@ fmax <- function(x, x0) max(x, x0)
 ## defined functions such as "two_piece"
 ## Only do this if not already defined or forcing
 force_expose_functions <- FALSE
-if(!exists("two_piece") | force_expose_functions) expose_functions(fit_tbl[[1, "fit"]], vectorize = TRUE, show_compiler_warnings = FALSE)
+if(!exists("two_piece") | force_expose_functions) expose_functions(fit_tbl[[1, "fit"]][[1]], vectorize = TRUE, show_compiler_warnings = FALSE)
 
 ```
 
 ## Define local functions
 
 ```{r}
+
+## Copied from: https://discourse.mc-stan.org/t/select-chains-and-iterations-post-sampling-in-brms/6822/8
+drop_chains <- function(brm_fit, chains_to_drop) {
+  # brm_fit is the output of brms::brm
+
+  sim = brm_fit$fit@sim  # Handy shortcut
+  sim$samples <- sim$samples[-chains_to_drop]
+  
+  # Update the meta-info
+  sim$chains = sim$chains - length(chains_to_drop)
+  sim$warmup2 = sim$warmup2[-chains_to_drop]
+  
+  # Add the modified sim back to x
+  brm_fit$fit@sim = sim
+  brm_fit
+}
+
+keep_chains <- function(brm_fit, chains_to_keep) {
+  # brm_fit is the output of brms::brm
+
+  sim = brm_fit$fit@sim  # Handy shortcut
+  sim$samples <- sim$samples[chains_to_keep]
+  
+  # Update the meta-info
+  sim$chains = length(chains_to_keep)
+  sim$warmup2 = sim$warmup2[chains_to_keep]
+  
+  # Add the modified sim back to x
+  brm_fit$fit@sim = sim
+  brm_fit
+  
+}
 
 which_tbl_row <- function(filter_male = FALSE, x0_flag = "individual", y0_flag = "individual", disp_flag = "uniform_1", disp_value = 0.01, model = "two_piece", tbl = fit_tbl) {
   which( tbl$filter_male %in% filter_male & 
@@ -207,8 +242,8 @@ plot_epred<- function(data_epred, male_vec, desc, data_obs = NULL) {
     filter(male %in% male_vec)
   plot_tmp <- ggplot(data = data_epred_tmp, aes(x = x, y = .epred)) + #, color = male)) +
     ## Combine Scatter Plots and Model vs Data Plots
-    scale_fill_brewer(palette = "Greys") +
-    stat_lineribbon(aes(y=.epred)) #, color = "blue"))
+    stat_lineribbon(aes(y = .epred), .width = c(.95, .8, 0.5, 0.25), color = "#08519C") +
+    scale_fill_brewer(palette = "Greys") 
 
     #scale_color_manual(values = colors_male) +
     #scale_color_brewer(palette = "Set2") +
@@ -242,8 +277,8 @@ plot_pred <- function(data_pred, male_vec, desc, data_obs = NULL) {
     filter(male %in% male_vec)
   plot_tmp <- ggplot(data = data_pred_tmp, aes(x = x, y = .prediction)) + #, color = male)) +
     ## Combine Scatter Plots and Model vs Data Plots
-    scale_fill_brewer(palette = "Greys", direction =  -1) +
-    stat_lineribbon(aes(y=.prediction)) #, fill = "blue"))
+    stat_lineribbon(aes(y = .epred), .width = c(.95, .8, .5, 0.25), color = "#08519C") +
+    scale_fill_brewer(palette = "Greys", direction =  -1)
 
     #scale_color_manual(values = colors_male) +
     #scale_color_brewer(palette = "Set2") +
@@ -270,7 +305,6 @@ plot_pred <- function(data_pred, male_vec, desc, data_obs = NULL) {
   return(plot_tmp)
 }
 
-
 ```
 
 ## Generate Columns of Observed Data, Predicted Data and Expected Values 
@@ -284,9 +318,10 @@ plot_pred <- function(data_pred, male_vec, desc, data_obs = NULL) {
 force_generate_epred <- FALSE
 force_generate_pred <- force_generate_epred
 force_generate_obs <- force_generate_epred
+save_plots = TRUE
+force_update_plots = TRUE
 
 curr_row_max <- nrow(fit_tbl)
-##curr_row_max <- 2
 
 
 for(curr_row in 1:curr_row_max) {
@@ -330,14 +365,88 @@ for(name in names(fit_tbl)[1:8]) {
 }
 
 ```
+### Print Posterior Probability Traces and Identify Best Chains When Need
 
+- Should probably move some of this code to the fitting routines.
+
+```{r}
+
+for(row_index in 3) {#1:nrow(fit_tbl)) {
+
+  cat(paste("Row: ", row_index))
+  
+  data <- fit_brms[["data"]]
+  
+  fit_row <- fit_tbl[row_index, ]
+  fit_brms <- fit_row$fit[[1]]
+  fit_stan <- fit_brms$fit
+  chains_n <- length(dimnames(fit_stan)$chains)
+
+  desc <- fit_row$desc
+
+  desc_filename <- gsub("_", "-", desc) %>%
+    gsub("; ", "_", .) %>%
+    gsub(":? ", "-", .)
+  desc_short <- desc %>% str_replace("nbinom_type1; two_piece; ","")
+  print(desc_short)
+  plot_trace <- mcmc_trace(fit_brms, pars = c("lp__"))
+  last_plot()
+  ## Plot violin plots of posterior values
+  ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html
+  fit_array <- as.array(fit_stan)
+  n_chains <- 
+  plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9))
+  last_plot()
+
+  fit_tibble <- melt(fit_array) %>% as_tibble()
+  lp_tbl <- fit_tibble %>% filter(parameters == "lp__")
+
+  lp_stats <- lp_tbl %>%
+    group_by(chains) %>%
+    summarize(mean = mean(value), sd = sd(value), n = n(), se = sd/sqrt(n) ) %>%
+    arrange(mean)
+
+  ## Find chain with greatest mean lp__ value and calculate SE on mean
+  mean_max <- lp_stats[[1, "mean"]]
+  se <- lp_stats[[1, "se"]]
+  ## Use a larger threshold to avoid 1/20 being dropped due to type 1 errors
+  threshold <- mean_max - 4 * se
+
+  ## Flag chains with matching means to max
+  lp_stats <- lp_stats %>%
+    mutate(match_max = mean > threshold) %>%
+    arrange(chains)
+
+  fit_tbl[[row_index, "lp_stats"]] <- lp_stats
+  
+  chains_best <- filter(lp_stats, match_max) %>%
+    pull(chains) %>%
+    sub("chain:", "", .) %>%
+    as.numeric()
+  n_chains_best <- length(chains_best)
+  n_chains <- levels(fit_tibble$chains) %>% length()
+
+  print(desc_short)
+  if(n_chains != n_chains_best) {
+    print(paste("Chains Best:", chains_best, " (", n_chains_best, "out of", n_chains, ")" ))
+  }
+  
+  fit_tbl[[row_index, "chains_best"]] <- list(chains_best)
+
+  
+  ## Remove bad chains
+  fit_brms_best <- keep_chains(fit_brms, chains_best)
+  
+}
+
+```
 ### Print fits
 
 ```{r, message = FALSE }
 
 pairs_include_lp = TRUE
 n_rows_print_half <- 4 ## 1/2 of rows to print of prior
-print_pairs_grid <- FALSE ## if true print grid, if false print row
+use_plot_grid <- FALSE ## if true print grid, if false print row
 print_full_prior <- FALSE
 off_diag_fun <- "scatter" # "scatter" or "hex" for mcmc_pairs
 #use_mcmc_pairs <- FALSE ## indicate if to make scatter plots using mcmc_pairs
@@ -350,19 +459,18 @@ print_stan_hist <- FALSE
 print_get_prior <- TRUE ## 
 print_prior_summary <- TRUE
 
-for(row_index in 1) {#1:nrow(fit_tbl)) {
+for(row_index in 3) {#1:nrow(fit_tbl)) {
 
   cat(paste("Row: ", row_index))
-  
-  row_values <- fit_tbl[row_index, ]
-  desc <- row_values$desc
-  filename_desc <- gsub("_", "-", desc) %>%
-    gsub("; ", "_", .) %>%
-    gsub(":? ", "-", .)
-  fit_brms <- row_values$fit[[1]]
+
   data <- fit_brms[["data"]]
+  
+  fit_row <- fit_tbl[row_index, ]
+  fit_brms <- fit_row$fit[[1]]
   fit_stan <- fit_brms$fit
   chains_n <- length(dimnames(fit_stan)$chains)
+
+  desc <- fit_row$desc
 
   desc_filename <- gsub("_", "-", desc) %>%
     gsub("; ", "_", .) %>%
@@ -399,7 +507,7 @@ for(row_index in 1) {#1:nrow(fit_tbl)) {
   }
 
   print("Fit Information")
-  print(summary(fit_brms) ) # %>% gsub("disp_value", row_values[["disp_value"]]), .) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
+  print(summary(fit_brms) ) # %>% gsub("disp_value", fit_row[["disp_value"]]), .) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
 
 
   #clean up variable names
@@ -424,6 +532,8 @@ for(row_index in 1) {#1:nrow(fit_tbl)) {
   constants_non_T <- ggdist::parse_dist(priors_tmp) %>% filter(grepl("constant", .dist)) %>% pull(class)
   vars_non_T <- vars_non_T[!(vars_non_T %in% constants_non_T)]
   
+
+
   
   ## Count occurence of each male in model fit_brms
   male_instance <- sapply(male_vec, function(x) {sum(str_detect(x, string=vars_clean))})
@@ -446,7 +556,7 @@ for(row_index in 1) {#1:nrow(fit_tbl)) {
       }
 
 
-      if(TRUE) {
+      if(TRUE) { ## use mcmc_pairs not ggplot2 scatterplots
       ## Change text size
       # bayesplot_theme_update(text = element_text(size = 6)) #, family = "sans"))
       pairs_tmp <-  mcmc_pairs(
@@ -488,6 +598,8 @@ for(row_index in 1) {#1:nrow(fit_tbl)) {
         #ylab_vec <- rev(xlab_vec)
 
       } else { ## use ggplot2 scatterplots, not mcmc_pairs
+        ## Ideally this woudl eventually be used so that we can color code chains
+        
         plots_tmp <- list()
         ## get df of plots to make based on xy axes
         xy_pars <- combn(pairs_pars, 2) %>% t() %>% as_tibble()
@@ -528,58 +640,68 @@ for(row_index in 1) {#1:nrow(fit_tbl)) {
 #      title_subfig <- ggdraw() + draw_label(text_subfig, fontface='bold')
 
       
-      if(print_pairs_grid) {
-        print("Begin `print_pairs_grid`")
+      if(use_plot_grid) {
         pairs_male <-bayesplot_grid(plots = plots_tmp) ## Change font size
       } else {
         ## Print summaries as a row
         pairs_male <- plot_grid(
           plotlist = plots_row,
-          labels = labels_subfig,
-          label_size = 8,
-          #hjust = -16,  # don't understand why this is so large
+          #labels = labels_subfig,
+          #label_size = 8,
+          # hjust = 0,  # don't understand why this is so large
+          # vjust = 0, These don't work as expected
           label_fontface = "plain",
-          nrow = 1)
+          nrow = 1) +
+          labs(tag = labels_subfig) +
+          theme(plot.tag = element_text(size = rel(1), face = "bold", vjust = 1))
       }
       pairs_list[[male]] <- pairs_male
     } # end for(male in male_vec)
 
-    ## Combine plots across males
-    ifelse(length(pairs_pars) > 3, ncol <- 1, ncol <- 2)
+    ## Combine plots based on grid or row
+    if(use_plot_grid) {
+      ## Set number of males per row
+      ifelse(length(pairs_pars) > 2, ncol_row <- 1, ncol_row <- 2)
+      ## Set number of rows/page
+      ifelse(length(pairs_pars) > 2, nrow_page <- 4, nrow_page <- 5)
 
-    use_plot_grid <- FALSE
-    
-    if(use_plot_grid) { 
-    p <- plot_grid(plotlist = pairs_list,
-                   ncol = ncol)
+      p <- plot_grid(plotlist = pairs_list)
 
-    plot_pairs_list <- plot_grid(p,
-                                 labels = desc_short,
-                                 ncol = 1,
-                                 label_size = 10,
-                                 hjust = 0,
-                                 vjust = - 0.75) +
-      # Add some space around the edges  
-      theme(plot.margin = unit(c(1,0.5,0.5,0.5), "cm"))
-    } else {
-    
-      plot_pairs_list <- marrangeGrob(pairs_list, ncol = 1, nrow = length(pairs_pars),
+      plot_pairs_list <- plot_grid(p,
+                                   labels = desc_short,
+                                   ncol = ncol_row,
+                                   label_size = 10,
+                                   hjust = 0,
+                                   vjust = - 0.75) +
+        # Add some space around the edges  
+        theme(plot.margin = unit(c(1,0.5,0.5,0.5), "cm"))
+    } else {  ## use_plot_grid is false
+      ## Put all plots on the same row
+      
+      ## Set number of males per row
+      ifelse(length(pairs_pars) > 3, ncol_row <- 1, ncol_row <- 2)
+      ## Set number of rows/page
+      ifelse(length(pairs_pars) > 3, nrow_page <- 4, nrow_page <- 5)
+      
+      plot_pairs_list <- marrangeGrob(pairs_list, ncol = 1, nrow = nrow_page,
                                       top = desc_short,
                                       bottom = quote(paste("page", g, "of", npages))
                                       )
+      
     }
 
 
     print(plot_pairs_list)
-    filename <- paste0("plot-pairs_", filename_desc, ".pdf")
-    ggsave(filename = filename, path = file.path(output_dir, "figures"),
-           plot = plot_pairs_list,
-           width = 8, height = 11, units = "in",
-           scale = 1,
-           dpi=300,
-           bg = "white")
-  }  ## end if(all(male... for mcmc_pairs
-
+    if(save_plots) {
+      filename <- paste0("plot-pairs_", desc_filename, ".pdf")
+      ggsave(filename = filename, path = file.path(output_dir, "figures"),
+             plot = plot_pairs_list,
+             width = 8, height = 11, units = "in",
+             scale = 1,
+             dpi=300,
+             bg = "white")
+    }  ## end if(all(male... for mcmc_pairs
+  }
 
   if(all(male_instance > 1) & print_mcmc_scatter) {
 
@@ -610,7 +732,7 @@ for(row_index in 1) {#1:nrow(fit_tbl)) {
 
     print(plot_scatter_list)
     
-    filename <- paste0("plot-scatter_", filename_desc, ".pdf")
+    filename <- paste0("plot-scatter_", desc_filename, ".pdf")
     ggsave(filename = filename, path = file.path(output_dir, "figures"),
            width = 8, height = 11, units = "in",
            scale = 1,
@@ -644,7 +766,7 @@ for(row_index in 1) {#1:nrow(fit_tbl)) {
       
     print(plot_pairs_list2)
 
-        filename <- paste0("plot-pairs2_", filename_desc, ".pdf")
+        filename <- paste0("plot-pairs2_", desc_filename, ".pdf")
     ggsave(filename = filename, path = file.path(output_dir, "figures"),
            width = 8, height = 11, units = "in",
            scale = 1,
@@ -665,7 +787,7 @@ for(row_index in 1) {#1:nrow(fit_tbl)) {
     fit_stan <- stan_plot(fit_stan_rename, pars = vars_tmp) +
       ggtitle("Thresholds", subtitle = desc_short)
     
-    filename <- paste0("fit-stan_", filename_desc, ".pdf")
+    filename <- paste0("fit-stan_", desc_filename, ".pdf")
     ggsave(filename = filename, path = file.path(output_dir, "figures"), dpi=300)
   }
   
@@ -676,10 +798,71 @@ for(row_index in 1) {#1:nrow(fit_tbl)) {
                        bins = 25,
                        ncol = ncol) +
       ggtitle(desc_short)
-    filename <- paste0("histogram_", filename_desc, ".pdf")
+  }
+  if(save_plots) {
+    filename <- paste0("histogram_", desc_filename, ".pdf")
     ggsave(filename = filename, path = file.path(output_dir, "figures"), dpi=300)
   }
+  
+    
+  obs <- fit_row[["obs"]][[1]]
+
+
+  print("Plotting Expectations")
+
+  epred <- fit_row[["epred"]][[1]]
+  plot_curr <- fit_tbl[[curr_row, "plots"]][[1]][["epred"]]
+  if(length(plot_curr) ==0 | force_update_plots) {
+    plot_tmp <- plot_epred(data_epred = epred, male_vec = male_vec, desc = desc, data_obs = obs)
+    print(plot_tmp)
+    ## Why do I need the [[1]]?
+    fit_tbl[[curr_row, "plots"]][[1]][["epred"]] <- plot_tmp
+    
+    if(save_plots){
+      filename <- paste0("data.and.epred-vs-x_", desc_filename, ".pdf")
+      ggsave(filename = filename, plot = plot_tmp, path = file.path(output_dir, "figures"),
+             width = 8, height = 11, units = "in",
+             scale = 1,
+             dpi=300,
+             bg = "white")
+    }
+  }
+
+  ## Plot Data and Predicted Values vs. Temperature
+
+  ## Reserve term "simulated" for when uisng the best fit MODEL
+  ## Warning: Removed XXX rows containing missing values (`stat_slabinterval()`).
+  ## This is from ggplot2 and indicates there's data outside the y range
+  print("Plotting predictions")
+  pred <- fit_row[["pred"]][[1]]
+  
+  plot_curr <- fit_tbl[[curr_row, "plots"]][[1]][["pred"]]
+  if(length(plot_curr) == 0 | force_update_plots) {
+    plot_tmp <- plot_pred(data_pred = pred, male_vec = male_vec, desc = desc_short, data_obs = obs)
+    print(plot_tmp)
+  
+    fit_tbl[[curr_row, "plots"]][[1]][["pred"]] <- plot_tmp
+    if(save_plots) {
+      filename <- paste0("data.and.pred-vs-x_", desc_filename, ".pdf")
+      ggsave(filename = filename, plot = plot_tmp, path = file.path(output_dir, "figures"),
+             width = 8, height = 11, units = "in",
+             scale = 1,
+             dpi=300,
+             bg = "white")
+    }
+  }
+
+  
+  #mcmc_trace(posterior, pars = c("lp__"))
+  
 }
+```
+
+
+## Exit rendering
+```{r}
+
+knitr::knit_exit()
 
 ```
 
@@ -717,7 +900,7 @@ for(curr_row in 1:curr_row_max) {
   curr_desc <- fit_row$desc
   
   desc <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
-  filename_desc <- gsub("_", "-", desc) %>%
+  desc_filename <- gsub("_", "-", desc) %>%
     gsub("; ", "_", .) %>%
     gsub(":? ", "-", .)
 
@@ -731,13 +914,13 @@ for(curr_row in 1:curr_row_max) {
   epred <- fit_row[["epred"]][[1]]
   plot_curr <- fit_tbl[[curr_row, "plots"]][[1]][["epred"]]
   if(length(plot_curr) ==0 | force_update_plots) {
-    plot_tmp <- plot_epred(data_epred = epred, male_vec = males, desc = desc, data_obs = obs)
+    plot_tmp <- plot_epred(data_epred = epred, male_vec = males, desc = desc_short, data_obs = obs)
     print(plot_tmp)
     ## Why do I need the [[1]]?
     fit_tbl[[curr_row, "plots"]][[1]][["epred"]] <- plot_tmp
     
     if(save_plots){
-      filename <- paste0("data.and.epred-vs-x_", filename_desc, ".pdf")
+      filename <- paste0("data.and.epred-vs-x_", desc_filename, ".pdf")
       ggsave(filename = filename, plot = plot_tmp, path = file.path(output_dir, "figures"),
              width = 8, height = 11, units = "in",
              scale = 1,
@@ -761,7 +944,7 @@ for(curr_row in 1:curr_row_max) {
   
     fit_tbl[[curr_row, "plots"]][[1]][["pred"]] <- plot_tmp
     if(save_plots) {
-      filename <- paste0("data.and.pred-vs-x_", filename_desc, ".pdf")
+      filename <- paste0("data.and.pred-vs-x_", desc_filename, ".pdf")
       ggsave(filename = filename, plot = plot_tmp, path = file.path(output_dir, "figures"),
              width = 8, height = 11, units = "in",
              scale = 1,
@@ -772,6 +955,11 @@ for(curr_row in 1:curr_row_max) {
 }
 
 ```
+
+
+
+
+
 
 
 ## OLD Plot Data and Simulated Values vs. Temperature
@@ -830,7 +1018,7 @@ for(curr_row in 1:curr_row_max) {
     labs(title = "Data vs. Simulated Values", subtitle = curr_desc_short) 
   last_plot()
 
-  filename <- paste0("data-simulated-vs-x_", filename_desc, ".pdf")
+  filename <- paste0("data-simulated-vs-x_", desc_filename, ".pdf")
   ggsave(filename = filename, path = file.path(output_dir, "figures"),
          width = 8, height = 11, units = "in",
          scale = 1,
@@ -891,7 +1079,7 @@ plot_model[["mean"]] <- tmp_plot
 
 tmp_plot
 
-filename <- paste0("data-epred-vs-temp_", filename_desc, ".pdf")
+filename <- paste0("data-epred-vs-temp_", desc_filename, ".pdf")
 ggsave(filename = filename, path = file.path(output_dir, "figures"),
        width = 8, height = 11, units = "in",
        scale = 1,
