@@ -371,6 +371,8 @@ for(name in names(fit_tbl)[1:8]) {
 
 ```{r}
 
+n_chains_target <- 4
+
 for(row_index in 3) {#1:nrow(fit_tbl)) {
 
   cat(paste("Row: ", row_index))
@@ -423,20 +425,25 @@ for(row_index in 3) {#1:nrow(fit_tbl)) {
     pull(chains) %>%
     sub("chain:", "", .) %>%
     as.numeric()
+  fit_tbl[[row_index, "chains_best"]] <- list(chains_best)
   n_chains_best <- length(chains_best)
   n_chains <- levels(fit_tibble$chains) %>% length()
 
   print(desc_short)
   if(n_chains != n_chains_best) {
     print(paste("Chains Best:", chains_best, " (", n_chains_best, "out of", n_chains, ")" ))
+    print("Dropping other chains")
   }
-  
-  fit_tbl[[row_index, "chains_best"]] <- list(chains_best)
 
-  
-  ## Remove bad chains
+  if(n_chains_best > n_chains_target) {
+    ## just take the first n target Chains
+    print("Dropping extra chains")
+    chains_best <- chains_best[1:n_chains_target]
+  }
+
+  ## Keep only desired chains
   fit_brms_best <- keep_chains(fit_brms, chains_best)
-  
+  fit_tbl[[row_index, "fit"]] <- fit_brms_best
 }
 
 ```
