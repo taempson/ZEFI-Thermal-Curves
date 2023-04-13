@@ -94,56 +94,6 @@ color_scheme_set("viridis")
 
 ```
 
-## Source family
-
-```{r}
-
-
-
-
-```
-## Load `input`
-
-```{r}
-
-infile <- last(dir(file.path(input_dir, "tibbles"), "fit_tbl.*"))
-infile_tbl <- file.path(input_dir, "tibbles", infile)
-load(infile_tbl, verbose = TRUE)
-## save filtered tibble incase it becomes corrupted locally
-fit_tbl_orig <- fit_tbl %>% filter(!(is.na(fit))) 
-```
-
-### Add columns to `fit_tbl` for future use
-```{r}
-
-fit_tbl <- fit_tbl_orig
-
-names_col <- c("chains_best", "lp_stats", "obs", "epred", "pred", "plots")
-for(tmp in names_col) {
-  ## note syntax for using value of variable to dynamically assign column name
-  if(!(tmp %in% names(fit_tbl))) fit_tbl <- fit_tbl %>%  add_column("{tmp}" := list(list()))
-}
-
-```
-
-## Define and/or Expose Functions used by STAN
-
-```{r}
-
-source("../../../custom-brms-families/families/nbinom_type1.R")
-
-## Define fmax() in case expose_functions()
-fmax <- function(x, x0) max(x, x0)
-
-## Create functions defined in stan's function header
-## Only need to do this once since all fits use the same user
-## defined functions such as "two_piece"
-## Only do this if not already defined or forcing
-force_expose_functions <- FALSE
-if(!exists("two_piece") | force_expose_functions) expose_functions(fit_tbl[[1, "fit"]][[1]], vectorize = TRUE, show_compiler_warnings = FALSE)
-
-```
-
 ## Define local functions
 
 ```{r}
@@ -307,6 +257,143 @@ plot_pred <- function(data_pred, male_vec, desc, data_obs = NULL) {
 
 ```
 
+## Source family
+
+```{r}
+
+
+
+
+```
+## Load `input`
+
+```{r}
+
+infile <- last(dir(file.path(input_dir, "tibbles"), "fit_tbl.*"))
+infile_tbl <- file.path(input_dir, "tibbles", infile)
+load(infile_tbl, verbose = TRUE)
+## save filtered tibble incase it becomes corrupted locally
+fit_tbl_orig <- fit_tbl %>% filter(!(is.na(fit))) 
+```
+
+### Print Posterior Probability Traces and Identify Best Chains When Need
+
+- Should probably move some of this code to the fitting routines.
+
+```{r}
+
+fit_tbl <- fit_tbl_original
+
+n_chains_target <- 4
+
+for(row_index in 1:nrow(fit_tbl)) {
+
+  cat(paste("Row: ", row_index))
+  
+  data <- fit_brms[["data"]]
+  
+  fit_row <- fit_tbl[row_index, ]
+  fit_brms <- fit_row$fit[[1]]
+  fit_stan <- fit_brms$fit
+  chains_n <- length(dimnames(fit_stan)$chains)
+
+  desc <- fit_row$desc
+
+  desc_filename <- gsub("_", "-", desc) %>%
+    gsub("; ", "_", .) %>%
+    gsub(":? ", "-", .)
+  desc_short <- desc %>% str_replace("nbinom_type1; two_piece; ","")
+  print(desc_short)
+  plot_trace <- mcmc_trace(fit_brms, pars = c("lp__"))
+  last_plot()
+  ## Plot violin plots of posterior values
+  ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html
+  fit_array <- as.array(fit_stan)
+  n_chains <- 
+  plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9))
+  last_plot()
+
+  fit_tibble <- melt(fit_array) %>% as_tibble()
+  lp_tbl <- fit_tibble %>% filter(parameters == "lp__")
+
+  lp_stats <- lp_tbl %>%
+    group_by(chains) %>%
+    summarize(mean = mean(value), sd = sd(value), n = n(), se = sd/sqrt(n) ) %>%
+    arrange(mean)
+
+  ## Find chain with greatest mean lp__ value and calculate SE on mean
+  mean_max <- lp_stats[[1, "mean"]]
+  se <- lp_stats[[1, "se"]]
+  ## Use a larger threshold to avoid 1/20 being dropped due to type 1 errors
+  threshold <- mean_max - 4 * se
+
+  ## Flag chains with matching means to max
+  lp_stats <- lp_stats %>%
+    mutate(match_max = mean > threshold) %>%
+    arrange(chains)
+
+  # fit_tbl[[row_index, "lp_stats"]] <- lp_stats
+  
+  chains_best <- filter(lp_stats, match_max) %>%
+    pull(chains) %>%
+    sub("chain:", "", .) %>%
+    as.numeric()
+  # fit_tbl[[row_index, "chains_best"]] <- list(chains_best)
+  n_chains_best <- length(chains_best)
+  n_chains <- levels(fit_tibble$chains) %>% length()
+
+  print(desc_short)
+  if(n_chains != n_chains_best) {
+    print(paste("Chains Best:", chains_best, " (", n_chains_best, "out of", n_chains, ")" ))
+    print("Dropping other chains")
+  }
+
+  if(n_chains_best > n_chains_target) {
+    ## just take the first n target Chains
+    print("Dropping extra chains")
+    chains_best <- chains_best[1:n_chains_target]
+  }
+
+  ## Keep only desired chains
+  fit_brms_best <- keep_chains(fit_brms, chains_best)
+  ## update tbl
+  fit_tbl[[row_index, "fit"]] <- fit_brms_best
+}
+
+## Save a version of tbl 
+fit_tbl_filtered <- fit_tbl
+```
+
+### Add columns to `fit_tbl` for future use
+```{r}
+
+names_col <- c("obs", "epred", "pred", "plots")
+for(tmp in names_col) {
+  ## note syntax for using value of variable to dynamically assign column name
+  if(!(tmp %in% names(fit_tbl))) fit_tbl <- fit_tbl %>%  add_column("{tmp}" := list(list()))
+}
+
+```
+
+## Define and/or Expose Functions used by STAN
+
+```{r}
+
+source("../../../custom-brms-families/families/nbinom_type1.R")
+
+## Define fmax() in case expose_functions()
+fmax <- function(x, x0) max(x, x0)
+
+## Create functions defined in stan's function header
+## Only need to do this once since all fits use the same user
+## defined functions such as "two_piece"
+## Only do this if not already defined or forcing
+force_expose_functions <- FALSE
+if(!exists("two_piece") | force_expose_functions) expose_functions(fit_tbl[[1, "fit"]][[1]], vectorize = TRUE, show_compiler_warnings = FALSE)
+
+```
+
+
 ## Generate Columns of Observed Data, Predicted Data and Expected Values 
 
 ```{r}
@@ -362,88 +449,6 @@ for(name in names(fit_tbl)[1:8]) {
   assign(var, pull(fit_tbl, name) %>% unique(.))
   # access via get()
   cat(paste0(var, ": ", paste0(get(var), sep = "\n\t")))
-}
-
-```
-### Print Posterior Probability Traces and Identify Best Chains When Need
-
-- Should probably move some of this code to the fitting routines.
-
-```{r}
-
-n_chains_target <- 4
-
-for(row_index in 3) {#1:nrow(fit_tbl)) {
-
-  cat(paste("Row: ", row_index))
-  
-  data <- fit_brms[["data"]]
-  
-  fit_row <- fit_tbl[row_index, ]
-  fit_brms <- fit_row$fit[[1]]
-  fit_stan <- fit_brms$fit
-  chains_n <- length(dimnames(fit_stan)$chains)
-
-  desc <- fit_row$desc
-
-  desc_filename <- gsub("_", "-", desc) %>%
-    gsub("; ", "_", .) %>%
-    gsub(":? ", "-", .)
-  desc_short <- desc %>% str_replace("nbinom_type1; two_piece; ","")
-  print(desc_short)
-  plot_trace <- mcmc_trace(fit_brms, pars = c("lp__"))
-  last_plot()
-  ## Plot violin plots of posterior values
-  ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html
-  fit_array <- as.array(fit_stan)
-  n_chains <- 
-  plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9))
-  last_plot()
-
-  fit_tibble <- melt(fit_array) %>% as_tibble()
-  lp_tbl <- fit_tibble %>% filter(parameters == "lp__")
-
-  lp_stats <- lp_tbl %>%
-    group_by(chains) %>%
-    summarize(mean = mean(value), sd = sd(value), n = n(), se = sd/sqrt(n) ) %>%
-    arrange(mean)
-
-  ## Find chain with greatest mean lp__ value and calculate SE on mean
-  mean_max <- lp_stats[[1, "mean"]]
-  se <- lp_stats[[1, "se"]]
-  ## Use a larger threshold to avoid 1/20 being dropped due to type 1 errors
-  threshold <- mean_max - 4 * se
-
-  ## Flag chains with matching means to max
-  lp_stats <- lp_stats %>%
-    mutate(match_max = mean > threshold) %>%
-    arrange(chains)
-
-  fit_tbl[[row_index, "lp_stats"]] <- lp_stats
-  
-  chains_best <- filter(lp_stats, match_max) %>%
-    pull(chains) %>%
-    sub("chain:", "", .) %>%
-    as.numeric()
-  fit_tbl[[row_index, "chains_best"]] <- list(chains_best)
-  n_chains_best <- length(chains_best)
-  n_chains <- levels(fit_tibble$chains) %>% length()
-
-  print(desc_short)
-  if(n_chains != n_chains_best) {
-    print(paste("Chains Best:", chains_best, " (", n_chains_best, "out of", n_chains, ")" ))
-    print("Dropping other chains")
-  }
-
-  if(n_chains_best > n_chains_target) {
-    ## just take the first n target Chains
-    print("Dropping extra chains")
-    chains_best <- chains_best[1:n_chains_target]
-  }
-
-  ## Keep only desired chains
-  fit_brms_best <- keep_chains(fit_brms, chains_best)
-  fit_tbl[[row_index, "fit"]] <- fit_brms_best
 }
 
 ```
