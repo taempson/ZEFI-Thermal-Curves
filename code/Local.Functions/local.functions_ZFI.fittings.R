@@ -125,13 +125,13 @@ plot_pred <- function(data_pred, male_vec, desc, data_obs = NULL) {
   return(plot_tmp)
 }
 
-is_stanfit <- function(fit) ifelse(class(fit) == "stanfit",  TRUE, FALSE)
-is_brmsfit <- function(fit) ifelse(class(fit) == "brmsfit",  TRUE, FALSE)
-is_fit <- function(fit) ifelse( is_stanfit(fit) | is_brmsfit(fit), TRUE, FALSE)
+is_stanfit <- function(fit) if_else(class(fit) == "stanfit",  TRUE, FALSE)
+is_brmsfit <- function(fit) if_else(class(fit) == "brmsfit",  TRUE, FALSE)
+is_fit <- function(fit) if_else((is_stanfit(fit) | is_brmsfit(fit)), TRUE, FALSE)
 
-verify_stanfit <- function(fit) if(!is_stanfit(fit)) stop(paste('fit must be of class `stanfit`, not ', class(fit), "."))
-verify_brmsfit <- function(fit) if(!is_brmsfit(fit)) stop(paste('fit must be of class `stanfit`, not ', class(fit), "."))
-verify_fit <- function(fit) if(!is_stanfit(fit) & !is_brmsfit(fit)) stop(paste('fit must be of class `stanfit`, not ', class(fit), "."))
+verify_stanfit <- function(fit) if(!is_stanfit(fit)) stop(paste("fit must be of class `stanfit`, not ", class(fit), "."))
+verify_brmsfit <- function(fit) if(!is_brmsfit(fit)) stop(paste("fit must be of class `brmsfit`, not ", class(fit), "."))
+verify_fit <- function(fit) if(!is_stanfit(fit) & !is_brmsfit(fit)) stop(paste("fit must be of class `stanfit` or `brmsfit`, not ", class(fit), "."))
 
 ## Code derived from: https://discourse.mc-stan.org/t/select-chains-and-iterations-post-sampling-in-brms/6822/8
 keep_chains <- function(fit, chains_to_keep) {
@@ -166,30 +166,33 @@ drop_chains <- function(fit, chains_to_drop) {
 }
 
 # works on single brms/stan fit object.size
-fit_to_tibble<- function(fit) {
 
-  verify_fit(fit)
+fit_to_tibble <- function(fit) {
+    verify_fit(fit)
+   
+    if(is_brmsfit(fit)) fit <- fit$fit
 
-  if(is_brmsfit(fit)) fit <- fit$fit
-
-  
-  fit_tibble <- as.array(fit) %>% 
-    melt(.) %>%
-    as_tibble() %>%
-    mutate(chains = as.character(chains)) %>%
-    mutate(
-      chains = sub("chain:", "", chains) %>% as.integer()
-    )
-  return(fit_tibble)
+    fit_tibble <- as.array(fit) %>%
+        melt(.) %>%
+        as_tibble() %>%
+        mutate(chains = as.character(chains)) %>%
+        mutate(
+            chains = sub("chain:", "", chains) %>%
+                as.integer()
+        )
+    return(fit_tibble)
 }
 
 
 calc_fit_lp_stats <- function(fit) {
+  ## Convert to tibble if necessary
+    if(is_tibble(fit)) {
+        fit_tibble <- fit
+    } else {
+        fit_tibble <- fit_to_tibble(fit)
+    }
 
-  ## Convert to tiblbe if necessary
-  ifelse(is_fit(fit), fit_tibble <- fit_to_tibble(fit), fit_tibble <- fit)
-
-  lp_tbl <- fit_tibble %>% filter(parameters == "lp__")
+    lp_tbl <- fit_tibble %>% filter(parameters == "lp__")
 
   ## Calc stats and arrange so fit with highest mean is at top 
   lp_stats <- lp_tbl %>%
@@ -202,17 +205,17 @@ calc_fit_lp_stats <- function(fit) {
 
 ## Takes in tibble, returns a tibble
 
-keep_chains_top <- function(fit, n_chains_max, se_factor = 4, verbose = TRUE, best_only = TRUE) {
+keep_chains_top <- function(fit, n_chains_max, se_factor = 4, verbose = FALSE, best_only = TRUE) {
 
   ## make sure correct object is passed
-  verify_stanfit(fit)
+  verify_fit(fit)
   
   fit_tibble <- fit_to_tibble(fit)
-  
+  print("Here")
   ## Calc stats and arrange so fit with highest mean is at top 
   lp_stats <- calc_fit_lp_stats(fit_tibble) %>%
-    arrange(desc(mean))
-  
+      arrange(desc(mean))
+  print("There")
   if(!best_only) {
     if(verbose) print(lp_stats)
     # Take top n_chains_max chains
