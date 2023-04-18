@@ -124,6 +124,17 @@ library(latex2exp)
 
 source("../Local.Functions/local.functions_ZFI.fittings.R")
 
+
+which_switch_male <- function(flag) {
+                                return <- "individual" #default value
+                                #update?
+                                if(flag %in% c("uniform_1", "groups_1")) return <- "single"
+                                if(flag %in% c("uniform_2", "groups_2")) return <- "double"                    
+
+                                return(return)
+}
+
+
 ```
 
 ## Custom family
@@ -187,8 +198,9 @@ However, the data doesn't seem to follow any real distribution and its at the mo
 
 ```{r}
 
-data_stan <- data_ind %>% rename(y = motif_count, x = temp) %>%
-    mutate(male = factor(male))
+data_stan <- data_ind %>%
+    rename(y = motif_count, x = temp) #%>%
+    #mutate(male = factor(male))
 males <- unique(data_stan$male)
 nmales <- length(males)
 
@@ -246,7 +258,7 @@ values_disp <- switch(1,
                       list(0.1, "flat"), #, 0.1, 1) # doesn't work yet
                       c("flat"))
 
-flags_disp <- c("uniform_1", "groups_1", "individual")
+flags_disp <- c("uniform_1", "groups_1", "individual", "uniform_2")
 
 
 ## whether to filter males with large disp values estimated using one piece model
@@ -272,7 +284,7 @@ if(FALSE) {
                         loo = list(NA),
                         fit_best = list(NA),
                         fit_top = list(NA),
-                        lp_stats = list(NA)
+                        stats_fit = list(NA)
                         )
 
 } else {
@@ -293,7 +305,7 @@ if(FALSE) {
                       loo = list(NA),
                       fit_best = list(NA),
                       fit_top = list(NA),
-                      lp_stats = list(NA)
+                      stats_fit = list(NA)
                       )
 }
 
@@ -332,7 +344,7 @@ n_chains_top <- 4  # how many to keep for model analysis
 flags_x0_used <- c("individual", "groups_1", "uniform_1") # %>% rev()#
 flags_y0_used <- c("individual")
 values_disp_used <- values_disp
-flags_disp_used <- c("individual", "groups_1", "uniform_1")[3] #  |> rev() |> first()
+flags_disp_used <- c("individual", "groups_1", "uniform_1", "uniform_2")[4] #  |> rev() |> first()
 models_used <- c("one_piece", "two_piece", "asymptotic")[2] #c("one_piece", "two_piece") #, "two_piece")
 shape_y0_prior <- "flat" # flat or normal
 
@@ -341,7 +353,8 @@ shape_y0_prior <- "flat" # flat or normal
                                         #male_filter = c("T235", "T236")
 
 ## These males have huge dispersion outside the predicted valeus
-male_filter <- c("T235", "T243")
+male_disp_high <- c("T235", "T243")
+male_filter_out <- c("T235", "T243")
 
 curr_row <- 1
 
@@ -430,30 +443,43 @@ for(male_filter in c(FALSE, TRUE)) {
 
                             ## Refresh data in case x0_group or y0_group are all set to 1
                             data <- data_stan
-                            if(male_filter) data <- data %>% filter(!(male %in% male_filter))
-
-                            males_used <- unique(data$male)
                             
                             if(model == "one_piece") data <- data %>% filter(x < xignore)
+                            if(filter) data <- data %>%
+                                           filter(!(male %in% male_filter_out))
 
 
-                            print("Set flags based on fitted model structure")
-                            if(x0_flag %in% c("uniform_1", "groups_1")) data <- mutate(data, x0_group = 1)
-                            if(y0_flag %in% c("uniform_1", "groups_1")) data <-mutate(data, y0_group = 1)
-                            if(x0_flag %in% c("individual")) data <- mutate(data, x0_group = male)
-                            if(y0_flag %in% c("individual")) data <- mutate(data, y0_group = male)
+                            print("Set grouping flags")
+                            for(flag in c("x0", "y0", "disp") ) {
+                                switch_male <- which_switch_male(flag)
 
-
-
-                            ## Note we need to put a tibble into a list because row updates, even if doing
-                            ## just one cell, require a list format.
-                            ## Haven't defined "y0_group" or "x0_group" variables
-                            if(FALSE) {
-                                fit_tbl[[curr_row, "x0_group_list"]] <- list(unique(data[, c("male", "x0_group")]))
-                                fit_tbl[[curr_row, "y0_group_list"]] <- list(unique(data[, c("male", "y0_group")]))
+                                group_txt <- paste0(flag, "_group")
+                                
+                                data <- switch(switch_male,
+                                               "single" = {
+                                                   mutate(data, tmp_group = 1)
+                                               },
+                                               "double" = {
+                                                   mutate(
+                                                       data,
+                                                       tmp_group =
+                                                           if_else(male %in% male_disp_high, 2, 1))
+                                               },
+                                               "individual" = {
+                                                   mutate(data, tmp_group = male)
+                                               },
+                                               NA
+                                               ) %>%
+                                    rename(!!group_txt := tmp_group)
+                                print(names(data))
                             }
+                                
                             
-                            print("Define parameter formulas")
+                            males_used <- unique(data$male)
+                            print(males_used)
+                            
+                            print("Define model formulas for parameters")
+
                             x0_form <- switch(x0_flag,
                                               uniform_1 = formula(x0 ~ 0 + Intercept),
                                               uniform_2 = formula(x0 ~ 0 + x0_group),
@@ -492,6 +518,8 @@ for(male_filter in c(FALSE, TRUE)) {
 
                             disp_form <- switch(disp_flag,
                                                 uniform_1 = NULL, #formula(disp ~ 1),
+                                                uniform_2 =formula(disp ~ group),
+                                                groups_1 = formula(disp ~ 0 + Intercept + (1|male)),
                                                 groups_1 = formula(disp ~ 0 + Intercept + (1|male)),
                                                 individual = formula(disp ~ 0 + male)
                                                 )
@@ -635,12 +663,16 @@ for(male_filter in c(FALSE, TRUE)) {
                             fit_brms <- fit
                             fit_stan <- fit_brms$fit
 
-                            fit_stats <- calc_fit_lp_stats(fit_brms)
-                            print(fit_stats)
-                            fit_tbl[[curr_row, "fit_stats"]][[1]] <- fit_stats
+                            stats_fit <- calc_fit_lp_stats(fit_brms)
+                            print(stats_fit %>% arrange(desc(mean)))
+                            fit_tbl[[curr_row, "stats_fit"]][[1]] <- stats_fit
 
                             make_stan_best = FALSE
                             ## Get all fits similar to the best one
+                            ## DOESN"T WORK CONSISTENTLY
+                            ## There's an issue with the local.functions code
+                            ## not working with both stanfit and brmsfit objects
+                            ## It's very confusing
                             if(make_stan_best) {
                                 fit_stan_best <- keep_chains_top(fit_stan, n_chains_max = n_chains_top, verbose = TRUE, best_only = TRUE)
                                 fit_best <- fit_brms
@@ -649,6 +681,8 @@ for(male_filter in c(FALSE, TRUE)) {
                                 fit_tbl[[curr_row, "fit_best"]][[1]] <- fit_best
                             }
                             make_stan_top = FALSE
+                            ## DOESN"T WORK CONSISTENTLY
+                            ## There's an issue with the local.functions code
                             if(make_stan_top) {
                                         # Get the top fits
                                 fit_stan_top <- keep_chains_top(fit_stan, n_chains_max = n_chains_top, verbose = FALSE, best_only = FALSE)
@@ -686,7 +720,7 @@ for(male_filter in c(FALSE, TRUE)) {
                         cat("\n\n\n")
                         
                         print(desc_tmp)
-                        lp_stats <- calc_fit_lp_stats(fit)
+                        #lp_stats <- calc_fit_lp_stats(fit)
                         if(print_prior_summary) {
                             print("Prior Information")
                             print(prior_summary(fit)) # %>% filter(nlpar!="y0"))
@@ -694,7 +728,7 @@ for(male_filter in c(FALSE, TRUE)) {
                             
                             print("Fit Information")
                             print(summary(fit)) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
-                            print(lp_stats)
+                            print(stats_fit)
                             
                             for(fit_string in NULL) { #c("fit_top", "fit_best")) {
                                 fit <- fit_tbl[[curr_row, fit_string]][[1]]
@@ -822,7 +856,7 @@ if(FALSE) {
 }
 
 
-fit_tbl <- add_column_safely(fit_tbl, c("lp_stats", "fit_best", "fit_top"))
+fit_tbl <- add_column_safely(fit_tbl, c("stats_fit", "fit_best", "fit_top"))
 
 n_chains_max <- 4
 
@@ -858,8 +892,8 @@ for(curr_row in 1:nrow(fit_tbl)) {
                                         #n_chains <- 
         plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9))
         last_plot()
-        fit_stats <- calc_fit_lp_stats(fit_stan)
-        fit_tbl[[curr_row, "fit_stats"]][[1]] <- fit_stats
+        stats_fit <- calc_fit_lp_stats(fit_stan)
+        fit_tbl[[curr_row, "stats_fit"]][[1]] <- stats_fit
 
         ## Get all fits similar to the best one
         fit_stan_best <- keep_chains_top(fit_stan, n_chains_max = n_chains_top, verbose = TRUE, best_only = TRUE)
