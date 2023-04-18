@@ -72,7 +72,7 @@ I interpret this to mean that when things are really noisy (high `theta`), one w
 It would be good to look at the correlations via `pairs()`.
 - To me this is consistent with the infomal knowledge that the 
 - Two males have fitting issues, "T235" and "T236".
-This appears to be due to a bimodal posterior surface where one region has low 'x0' (< 40C), but low 'y0', ane the other has a high `x0` and low `y0` 
+This appears to be due to a bimodal posterior surface where one region has low 'x0' (< 40C), but low 'y0', ane the other has a high `x0` and low `y0`
 
 
 # Set up
@@ -126,14 +126,14 @@ source("../Local.Functions/local.functions_ZFI.fittings.R")
 
 
 which_switch_male <- function(flag) {
-                                return <- "individual" #default value
-                                #update?
-                                if(flag %in% c("uniform_1", "groups_1")) return <- "single"
-                                if(flag %in% c("uniform_2", "groups_2")) return <- "double"                    
+    return <- NA #default value
 
-                                return(return)
+    if(flag %in% c("uniform_1", "groups_1")) return <- "single"
+    if(flag %in% c("uniform_2", "groups_2")) return <- "double"
+    if(flag %in% c("individual")) return <- "individual" 
+
+    return(return)
 }
-
 
 ```
 
@@ -358,7 +358,7 @@ male_filter_out <- c("T235", "T243")
 
 curr_row <- 1
 
-for(male_filter in c(FALSE, TRUE)) {
+for(male_filter in c(FALSE) ) { #, TRUE)) {
     for(model in models_used) {
 
         print(model)
@@ -366,10 +366,10 @@ for(male_filter in c(FALSE, TRUE)) {
                two_piece = {
                    ## Note issues in non-convergence are related to bimodality of posterior surface.
                    stan_func <- stan_two_piece_func
-                   warmup <- 15000 # floor(3/4 * iter)
-                   iter <- 25000
-                   adapt_delta <- 0.975
-                   thin <- 5
+                   warmup <- 5000 # floor(3/4 * iter)
+                   iter <- 8000
+                   adapt_delta <- 0.9
+                   thin <- 4
                },
                one_piece = {
                    stan_func <- stan_one_piece_func
@@ -445,16 +445,19 @@ for(male_filter in c(FALSE, TRUE)) {
                             data <- data_stan
                             
                             if(model == "one_piece") data <- data %>% filter(x < xignore)
-                            if(filter) data <- data %>%
+                            if(male_filter) data <- data %>%
                                            filter(!(male %in% male_filter_out))
 
 
                             print("Set grouping flags")
-                            for(flag in c("x0", "y0", "disp") ) {
+                            for(flag_prefix in c("x0", "y0", "disp") ) {
+
+                                group_txt <- paste0(flag_prefix, "_group")
+                                flag_txt <- paste0(flag_prefix, "_flag")
+                                flag <- eval(parse(text = flag_txt))
+                                
                                 switch_male <- which_switch_male(flag)
 
-                                group_txt <- paste0(flag, "_group")
-                                
                                 data <- switch(switch_male,
                                                "single" = {
                                                    mutate(data, tmp_group = 1)
@@ -471,58 +474,51 @@ for(male_filter in c(FALSE, TRUE)) {
                                                NA
                                                ) %>%
                                     rename(!!group_txt := tmp_group)
-                                print(names(data))
                             }
-                                
+
+                            str_extract_all(names(data), ".*_flag") %>%
+                                unlist() %>%
+                                print()
                             
                             males_used <- unique(data$male)
                             print(males_used)
                             
-                            print("Define model formulas for parameters")
+                            print("Define model formulas")
+                            for(flag_prefix in c("x0", "y0", "disp") ) {
+                                
+                                flag_txt <- paste0(flag_prefix, "_flag")
+                                flag <- eval(parse(text = flag_txt))
 
-                            x0_form <- switch(x0_flag,
-                                              uniform_1 = formula(x0 ~ 0 + Intercept),
-                                              uniform_2 = formula(x0 ~ 0 + x0_group),
-                                              ## `0 + Intercept` avoids prior being defined on centered data
-                                        # The following formulation is incorrect and assumes that x0 is centered around 0
-                                        #groups_1 = formula(x0 ~ 0 + (1|male)),
-                                              groups_1 = formula(x0 ~ 0 + Intercept + (1|male)),
+
+                                print(paste0(flag_prefix, ": ", flag))
+                            
+                            
+                                string_formula <- switch(flag,
+                                               uniform_1 = paste0(flag_prefix, " ~ 0 + Intercept"),
+                                               uniform_2 = paste0(flag_prefix, " ~ 0 + ", flag_prefix, "_group"),
+                                               ## `0 + Intercept` avoids prior being defined on centered data
+                                               ## The following formulation is incorrect and
+                                               ## assumes that x0 is centered around 0
+                                               ## groups_1 = formula(x0 ~ 0 + (1|male)),
+                                               groups_1 = paste0(flag_prefix, " ~ 0 + Intercept + (1|male)"),
                                               
-                                              groups_2 = formula(x0 ~ 0 + Intercept + (1|male) + x0_group),
-                                              individual = formula(x0 ~ 0 + male) ## Do not use 1 + male!
-                                              )
-
+                                               groups_2 = paste0(flag_prefix, " ~ 0 + Intercept + (1|male) + ", flag_prefix, "_group"),
+                                               individual = paste0(flag_prefix, " ~ 0 + male"), ## Do not use 1 + male!
+                                               NA
+                                               )
+                                form_txt <- paste0(flag_prefix, "_form")
+                                assign(form_txt, as.formula(string_formula))
+                            }
+                            
+                            ## Used in asymptotic model: use phi instead of threshold x0
                             phi_form <- formula(deparse(x0_form) %>% gsub("x0", "phi", .))
 
-                            y0_form <- switch(y0_flag,
-                                              uniform_1 = formula(y0 ~ 0 + Intercept),
-                                              ## `0 + Intercept` avoids prior being defined on centered data
-                                              uniform_2 = formula(y0 ~ 0 + y0_group),
-                                              groups_1 = formula(y0 ~ 0 + Intercept + (1| male)), 
-                                              groups_2 = formula(y0 ~ 0 + (1| male) + y0_group),
-                                              individual = formula(y0 ~ 0 + male)
-                                              ## `-1 + ` gives me the error:
-                                              ## Warning in parallel::mclapply(1:chains, FUN = callFun, mc.preschedule = FALSE,  :
-                                              ##  4 function calls resulted in an error
-                                              ## Error in FUN(X[[i]], ...) : 
-                                              ##  trying to get slot "mode" from an object (class "try-error") that is not an S4 object
-                                              ## should I use `0 +` or `-1 +` ?
-                                              )
 
                             threshold_form <- switch(model,
                                                      two_piece = x0_form,
                                                      one_piece = NULL,
                                                      asymptotic = phi_form
                                                      )
-
-
-                            disp_form <- switch(disp_flag,
-                                                uniform_1 = NULL, #formula(disp ~ 1),
-                                                uniform_2 =formula(disp ~ group),
-                                                groups_1 = formula(disp ~ 0 + Intercept + (1|male)),
-                                                groups_1 = formula(disp ~ 0 + Intercept + (1|male)),
-                                                individual = formula(disp ~ 0 + male)
-                                                )
 
                             nlform <- switch(model,
                                              two_piece = bf(y ~ two_piece(x, x0, y0), nl = TRUE),
@@ -537,7 +533,7 @@ for(male_filter in c(FALSE, TRUE)) {
                             
                             print("Define priors")
 
-                                        # pass disp_value via stanvar argument
+                            ## pass disp_value via stanvar argument
                             stanvar_prior <- stanvar(disp_value, name = "disp_value")
                             
                             prior_string <- if(disp_value == "flat") {
@@ -719,12 +715,12 @@ for(male_filter in c(FALSE, TRUE)) {
 
                         cat("\n\n\n")
                         
-                        print(desc_tmp)
+                        print(desc)
                         #lp_stats <- calc_fit_lp_stats(fit)
                         if(print_prior_summary) {
                             print("Prior Information")
                             print(prior_summary(fit)) # %>% filter(nlpar!="y0"))
-                            print(desc_tmp)
+                            print(desc)
                             
                             print("Fit Information")
                             print(summary(fit)) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
@@ -754,7 +750,7 @@ for(male_filter in c(FALSE, TRUE)) {
 
                             ## Print out info on fits
                             plot_trace <- mcmc_trace(fit, pars = c("lp__")) +
-                                ggtitle(desc_short_tmp)
+                                ggtitle(desc_short)
                             print(plot_trace)
                             filename <- paste0("trace_", desc_filename_tmp, ".pdf")
                             ggsave(filename = filename, path = file.path(output_dir, "figures"),
@@ -778,7 +774,7 @@ for(male_filter in c(FALSE, TRUE)) {
                                                pars = vars_fit,
                                                bins = 30,
                                                ncol = ncol) +
-                                ggtitle(desc_short_tmp)
+                                ggtitle(desc_short)
                             print(hist)
                             
                             filename <- paste0("histogram_", desc_filename_tmp, ".pdf")
@@ -819,7 +815,7 @@ for(male_filter in c(FALSE, TRUE)) {
                                     grid_plot <- cowplot::plot_grid(
                                                               plotlist = list_plot,
                                                               ncol = 2)
-                                        #ggtitle(desc_short_tmp)
+                                        #ggtitle(desc_short)
                                     
                                     print(grid_plot)
                                     filename <- paste0("grid.plot_", desc_filename_tmp, ".png")
