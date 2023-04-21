@@ -286,3 +286,27 @@ add_column_safely <- function(tbl, names_col) {
   }
   return(tbl)
 }
+
+## SYNTAX NOTE: When using the same naem for the argument and default value, you need to tell
+## R your default is defined in the parent environment, not the local one of the
+## function
+## f=parent.frame()$f
+last_plot_save <- function(file_prefix = parent.frame()$file_prefix,
+                           desc = desc_filename,
+                           output_dir = parent.frame()$output_dir,
+                           scale = 1,
+                           width = 8,
+                           height = 11,
+                           dpi = 300) {
+  filename <- paste0(file_prefix, "_", desc_filename, ".pdf")
+  ## print(output_dir)
+  path <- file.path(output_dir, "figures")
+  ggsave(filename = filename, path = path,
+         plot = last_plot(),
+         width = width,
+         height = height,
+         scale = scale,
+         dpi= dpi,
+         units = "in",
+         bg = "white")
+}
