@@ -100,6 +100,8 @@ color_scheme_set("viridis")
 
 source("../Local.Functions/local.functions_ZFI.fittings.R")
 
+```
+
 ## Source family
 
 ```{r}
@@ -116,6 +118,7 @@ load(infile_tbl, verbose = TRUE)
 ## save filtered tibble incase it becomes corrupted locally
 fit_tbl_orig <- fit_tbl
 fit_tbl <- fit_tbl_orig %>% filter(!(is.na(fit))) 
+
 ```
 
 ### Print Posterior Probability Traces and Identify Best Chains When Need
@@ -124,13 +127,14 @@ fit_tbl <- fit_tbl_orig %>% filter(!(is.na(fit)))
 
 ```{r}
 
-fit_tbl <- fit_tbl_original
-
 n_chains_target <- 4
 
-for(row_index in 1:nrow(fit_tbl)) {
+row_index_max <- nrow(fit_tbl)
+row_index_max <- 3
 
-  cat(paste("Row: ", row_index))
+for(row_index in 1:row_index_max) {
+
+  cat(paste("fit_tbl Row: ", row_index, "\n\n"))
   
   data <- fit_brms[["data"]]
   
@@ -148,15 +152,28 @@ for(row_index in 1:nrow(fit_tbl)) {
   print(desc_short)
   plot_trace <- mcmc_trace(fit_brms, pars = c("lp__"))
   last_plot()
+  file_prefix <- "trace_lp"
+  if(save_plots) last_plot_save() #file_prefix = file_prefix)
+ 
   ## Plot violin plots of posterior values
   ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html
 
-
   fit_array <- as.array(fit_stan)
   #n_chains <- 
-  plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9))
+  if(FALSE) { ## use violin plots
+    file_prefix <- "violin_lp"
+    plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9)) +
+    yaxis_ticks(on = TRUE) +
+    yaxis_text(on = TRUE)
+  } else { # use histograms
+    file_prefix <- "hist_lp"
+    plot_hist_chain <- mcmc_hist_by_chain(fit_array, pars = c("lp__")) +
+    yaxis_ticks(on = TRUE) +
+    yaxis_text(on = TRUE)
+    }
   last_plot()
-
+  last_plot_save()
+  
   fit_tibble <- melt(fit_array) %>% as_tibble()
   lp_tbl <- fit_tibble %>% filter(parameters == "lp__")
 
@@ -165,43 +182,48 @@ for(row_index in 1:nrow(fit_tbl)) {
     summarize(mean = mean(value), sd = sd(value), n = n(), se = sd/sqrt(n) ) %>%
     arrange(mean)
 
-  ## Find chain with greatest mean lp__ value and calculate SE on mean
-  mean_max <- lp_stats[[1, "mean"]]
-  se <- lp_stats[[1, "se"]]
-  ## Use a larger threshold to avoid 1/20 being dropped due to type 1 errors
-  threshold <- mean_max - 4 * se
+  extract_best_flag <- TRUE
+  if(extract_best_flag) {
+    
+    ## Find chain with greatest mean lp__ value and calculate SE on mean
+    mean_max <- lp_stats[[1, "mean"]]
+    se <- lp_stats[[1, "se"]]
+    ## Use a larger threshold to avoid 1/20 being dropped due to type 1 errors
+    threshold <- mean_max - 4 * se
 
-  ## Flag chains with matching means to max
-  lp_stats <- lp_stats %>%
-    mutate(match_max = mean > threshold) %>%
-    arrange(chains)
+    ## Flag chains with matching means to max
+    lp_stats <- lp_stats %>%
+      mutate(match_max = mean > threshold) %>%
+      arrange(chains)
 
-  # fit_tbl[[row_index, "lp_stats"]] <- lp_stats
-  
-  chains_best <- filter(lp_stats, match_max) %>%
-    pull(chains) %>%
-    sub("chain:", "", .) %>%
-    as.numeric()
-  # fit_tbl[[row_index, "chains_best"]] <- list(chains_best)
-  n_chains_best <- length(chains_best)
-  n_chains <- levels(fit_tibble$chains) %>% length()
+    # fit_tbl[[row_index, "lp_stats"]] <- lp_stats
+    
+    chains_best <- filter(lp_stats, match_max) %>%
+      pull(chains) %>%
+      sub("chain:", "", .) %>%
+      as.numeric()
+    # fit_tbl[[row_index, "chains_best"]] <- list(chains_best)
+    n_chains_best <- length(chains_best)
+    n_chains <- levels(fit_tibble$chains) %>% length()
 
-  print(desc_short)
-  if(n_chains != n_chains_best) {
-    print(paste("Chains Best:", chains_best, " (", n_chains_best, "out of", n_chains, ")" ))
-    print("Dropping other chains")
+    print(desc_short)
+    print(paste("Chains Best:", paste(chains_best, collapse = ", "), " (", n_chains_best, "out of", n_chains, ")" ))
+
+    if(n_chains != n_chains_best) {
+      print("Dropping non-best chains")
+    }
+
+    if(n_chains_best > n_chains_target) {
+      ## just take the first n target Chains
+      print("Dropping extra best chains")
+      chains_best <-  sample(chains_best, n_chains_target)
+    }
+
+    ## Keep only desired chains
+    fit_brms_best <- keep_chains(fit_brms, chains_best)
+    ## update tbl
+    fit_tbl[[row_index, "fit_best"]][[1]] <- fit_brms_best
   }
-
-  if(n_chains_best > n_chains_target) {
-    ## just take the first n target Chains
-    print("Dropping extra chains")
-    chains_best <- chains_best[1:n_chains_target]
-  }
-
-  ## Keep only desired chains
-  fit_brms_best <- keep_chains(fit_brms, chains_best)
-  ## update tbl
-  fit_tbl[[row_index, "fit"]] <- fit_brms_best
 }
 
 ```
@@ -324,7 +346,7 @@ for(curr_row in 1:curr_row_max) {
 
 ```{r}
 
-xmax <- 45.5
+xmax <- 45.9
 
 ## Here I create a variable using a string and then access it using a string
 for(name in names(fit_tbl)[1:8]) {
@@ -762,6 +784,7 @@ knitr::knit_exit()
 
 ```
 
+# CRUFT!!!!!!
 
 # Plot Data and Predictions
 
