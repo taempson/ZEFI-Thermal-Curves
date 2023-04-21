@@ -211,11 +211,9 @@ keep_chains_top <- function(fit, n_chains_max, se_factor = 4, verbose = FALSE, b
   verify_fit(fit)
   
   fit_tibble <- fit_to_tibble(fit)
-  print("Here")
   ## Calc stats and arrange so fit with highest mean is at top 
   lp_stats <- calc_fit_lp_stats(fit_tibble) %>%
       arrange(desc(mean))
-  print("There")
   if(!best_only) {
     if(verbose) print(lp_stats)
     # Take top n_chains_max chains
