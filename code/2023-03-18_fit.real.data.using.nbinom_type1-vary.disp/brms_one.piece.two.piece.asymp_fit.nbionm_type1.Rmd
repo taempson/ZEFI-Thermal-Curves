@@ -15,7 +15,7 @@ output:
 
 knitr::opts_chunk$set(
   dev = 'pdf',
-  fig.height = 9,
+  fig.height = 9, #set height for all figures, can be changed for individual chunks
   fig.pos = "H", out.extra = "", # option for latex pacakge `float`
   warning = TRUE, # show warnings
   message = TRUE, # show messages
@@ -910,79 +910,3 @@ knitr::knit_exit()
 
 
 ```
-
-
-
-## Populate fit_best column
-```{r}
-
-if(FALSE) {
-    load(outfile_tbl)
-    fit_tbl_bkup <- fit_tbl
-} else {
-    fit_tbl <- fit_tbl_bkup
-}
-
-
-fit_tbl <- add_column_safely(fit_tbl, c("stats_fit", "fit_best", "fit_top"))
-
-n_chains_max <- 4
-
-for(curr_row in 1:nrow(fit_tbl)) {
-
-    cat(paste("Row: \n", curr_row))
-
-    fit_row <- fit_tbl[curr_row, ]
-    fit_brms <- fit_row$fit[[1]]
-    if(!is_brmsfit(fit_brms) ) {
-        print("Fit slot missing brmsfit object, skipping...")              
-    } else {
-        ## fit == brmsfit so proceed
-        fit_stan <- fit_brms$fit
-        
-
-        desc <- fit_row$desc
-        print(desc)
-        
-        chains_n <- length(dimnames(fit_stan)$chains)
-
-        desc_filename <- gsub("_", "-", desc) %>%
-            gsub("; ", "_", .) %>%
-            gsub(":? ", "-", .)
-        desc_short <- desc %>% str_replace("nbinom_type1; two_piece; ","")
-        print(desc_short)
-        plot_trace <- mcmc_trace(fit_brms, pars = c("lp__"))
-        if(display_plots) print(last_plot())
-        ## Plot violin plots of posterior values
-        ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html
-        
-        fit_array <- as.array(fit_stan)        
-                                        #n_chains <- 
-        plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9))
-        if(display_plots) print(last_plot())
-        stats_fit <- calc_fit_lp_stats(fit_stan)
-        fit_tbl[[curr_row, "stats_fit"]][[1]] <- stats_fit
-
-        ## Get all fits similar to the best one
-        fit_stan_best <- keep_chains_top(fit_stan, n_chains_max = n_chains_top, verbose = TRUE, best_only = TRUE)
-        fit_best <- fit_brms
-        fit_best$fit <- fit_stan_best
-        ## update tbl
-        fit_tbl[[curr_row, "fit_best"]][[1]] <- fit_best
-
-                                        # Get the top fits
-        fit_stan_top <- keep_chains_top(fit_stan, n_chains_max = n_chains_top, verbose = FALSE, best_only = FALSE)
-        fit_top <- fit_brms
-        fit_top$fit <- fit_stan_top
-        ## update tbl
-        fit_tbl[[curr_row, "fit_top"]][[1]] <- fit_best        
-        
-    }  
-}
-
-## Save a version of tbl 
-fit_tbl_unfiltered <- fit_tbl
-
-
-```
-
