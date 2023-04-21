@@ -215,17 +215,17 @@ However, the data doesn't seem to follow any real distribution and its at the mo
 
 ```{r}
 
-data_stan <- data_ind %>%
+data_tbl <- data_ind %>%
   rename(y = motif_count, x = temp) #%>%
 #mutate(male = factor(male))
-males <- unique(data_stan$male)
+males <- unique(data_tbl$male)
 nmales <- length(males)
 
 xmax <- 46 # maximum value for x0
 xignore <- 39 # x value above which data is ignored in one_piece model
 
 stan_two_piece_func <- paste0(" real  two_piece(real x, real x0, real y0) {
- real xmax = ", xmax, "; ## paste in value for xmax\n
+ real xmax = ", xmax, "; ## paste in value for xmax
  real y;
 
  if(x0 > xmax) {
@@ -234,18 +234,18 @@ stan_two_piece_func <- paste0(" real  two_piece(real x, real x0, real y0) {
     y = y0 * (xmax - fmax(x0, x))/(xmax - x0);
  }
  return(y);
- } ")
+ }\n")
 
 stan_one_piece_func <- paste0(" real  one_piece(real y0) {
  return(y0);
- } ")
+ }\n")
 
 stan_asymptotic_func <- paste0(" real  asymp(real x, real phi, real y0) {
  real xmax = ", xmax, "; ## paste in value for xmax\n
  return(y0 * (1 - exp( - phi * (xmax - x))) );
- } ")
+ }\n")
 
-print(stan_two_piece_func)
+cat(stan_two_piece_func)
 
 
 ```
@@ -285,23 +285,23 @@ filter_male <- c(TRUE, FALSE)
 N <- length(data)
 
 ## define full table a priori
-  fit_tbl_crossed <- crossing(
-    model = models,
-    #sampling_dist = sampling_dists,
-    x0_flag = flags_x0,
-    y0_flag = flags_y0,
-    disp_flag = flags_disp,
-    disp_value = values_disp,
-    filter_male = filter_male,
-    fit = list(NA),
-    stats_fit = list(NA),
-    fit_best = list(NA),
-    fit_top = list(NA),
-    plots = list(NA),
-    llik = list(NA),
-    r_eff = list(NA),
-    loo = list(NA)
-    )
+fit_tbl_crossed <- crossing(
+  model = models,
+  #sampling_dist = sampling_dists,
+  x0_flag = flags_x0,
+  y0_flag = flags_y0,
+  disp_flag = flags_disp,
+  disp_value = values_disp,
+  filter_male = filter_male,
+  fit = list(NA),
+  stats_fit = list(NA),
+  fit_best = list(NA),
+  fit_top = list(NA),
+  plots = list(NA),
+  llik = list(NA),
+  r_eff = list(NA),
+  loo = list(NA)
+)
 
 
 if(fit_tbl_initiate_crossed) {
@@ -310,7 +310,7 @@ if(fit_tbl_initiate_crossed) {
 } else {
 
   ## Use an empty tibble
-  fit_tbl <- fit_tibble_crossed[0, ]
+  fit_tbl <- fit_tbl_crossed[0, ]
 }
 
 ```
@@ -323,14 +323,18 @@ if(fit_tbl_initiate_crossed) {
 ## Fit Settings
 render_plots <- TRUE ## Build or use previously generated plots in tbl
 render_plots_force <- FALSE ## Force regeneration of plots if they already exist
-display_plots <- TRUE  ## Display plots to local device?
-save_plots_file <- TRUE  ## Save plots to file?
-save_plots_tibble
-rerender_plots <- FALSE ## Option to force rerendering of plot
-run_fits <- TRUE
-save_fits <- TRUE
-skip_existing_fits <- FALSE
-force_load <- FALSE  #reload fit_tbl even if it already exits
+if(interactive()) {
+  display_plots <- FALSE ## Display plots to local device?
+} else {
+  display_plots <- TRUE
+}
+save_plots_file <- FALSE  ## Save plots to file?
+## save_plots_tibble
+##rerender_plots <- FALSE ## Option to force rerendering of plot
+run_fits <- FALSE
+save_fits <- TRUE #FALSE
+run_fits_force <- FALSE # force refitting of model; used with run_fits = TRUE
+force_load <- FALSE  # reload fit_tbl even if it already exits; used with run_fits = FALSE
 print_get_prior <- FALSE ## Print generic priors, prior to fit.
 print_prior_summary <- FALSE  ## Print actual priors, post fitting
 
@@ -376,38 +380,41 @@ male_filter_out <- c("T235", "T243")
 
 curr_row <- 1
 
-for(male_filter in c(FALSE) ) { #, TRUE)) {
-  for(model in models_used) {
 
-    print(model)
-    switch(model,           
-           two_piece = {
-             ## Note issues in non-convergence are related to bimodality of posterior surface.
-             stan_func <- stan_two_piece_func
-             warmup <- 30000 # floor(3/4 * iter)
-             iter <- warmup + 10000
-             adapt_delta <- 0.99 ## increasing from 0.9 to 0.99 didn't help eliminate divergence
-             thin <- 5
-           },
-           one_piece = {
-             stan_func <- stan_one_piece_func
-             warmup <- 2000 
-             iter <- warmup + 2000
-             thin <- 4
-             adapt_delta <- 0.7
-           },
-           asymptotic = {
-             stan_func <- stan_asymptotic_func
-             warmup <- 2000
-             iter <- warmup + 2000
-             thin <- 4
-             adapt_delta <- 0.9
-           }
-           
-           )
+for(model in models_used) {
+  print(model)
+  switch(model,           
+         two_piece = {
+           ## Note issues in non-convergence are related to bimodality of posterior surface.
+           stan_func <- stan_two_piece_func
+           warmup <- 30000 # floor(3/4 * iter)
+           iter <- warmup + 10000
+           adapt_delta <- 0.99 ## increasing from 0.9 to 0.99 didn't help eliminate divergence
+           thin <- 5
+         },
+         one_piece = {
+           stan_func <- stan_one_piece_func
+           warmup <- 2000 
+           iter <- warmup + 2000
+           thin <- 4
+           adapt_delta <- 0.7
+         },
+         asymptotic = {
+           stan_func <- stan_asymptotic_func
+           warmup <- 2000
+           iter <- warmup + 2000
+           thin <- 4
+           adapt_delta <- 0.9
+         }
+         
+         )
+
+  cat(stan_func)
+    
+
+  for(male_filter in c(FALSE) ) { #, TRUE)) {
+    
     for(disp_flag in flags_disp_used) {  
-
-      print(stan_func)
       
       for(x0_flag in flags_x0_used) {
         
@@ -415,7 +422,7 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
 
           ## define variable for labeling figures
           x0_label <- ifelse(model == "one_piece", "NA", x0_flag)
-          
+
 
           for(disp_value in values_disp_used) {
 
@@ -423,7 +430,8 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
 
             desc_short <- paste0("x0: " , x0_label, "; y0: ", y0_flag, "; disp_flag: ", disp_flag, "; disp prior: ", disp_value, "; filter: ", male_filter)
             desc <- paste0(sampling, "; ", model, "; ", desc_short)
-
+            #print(desc)
+            
             desc_filename <- gsub("_", "-", desc) %>%
               gsub("; ", "_", .) %>%
               gsub(":? ", "-", .)
@@ -431,14 +439,11 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
             #stan_model_name <- sub(desc_filename, "_disp-prior-[0-9.]+_filter", "_filter")
             stan_model_name <- desc_filename #sub("_disp-prior-[0-9.]+_", "_", desc_filename)
             
-            
-            fit_tbl[ curr_row, ]$desc <- desc
 
-            print(desc)
             if(run_fits) {
 
               fit_prerun <- fit_tbl[[curr_row, "fit"]][[1]]
-              if(!skip_existing_fits | !is_brmsfit(fit_prerun)) {
+              if(!run_fits_force | !is_brmsfit(fit_prerun)) {
                 print("Fitting Models")
                 switch(sampling,
                        "nbinom_type1"= {
@@ -458,8 +463,7 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
                        )
 
                 ## Refresh data in case x0_group or y0_group are all set to 1
-                data <- data_stan
-
+                data <- data_tbl
                 
                 if(model == "one_piece") data <- data %>% filter(x < xignore)
                 if(male_filter) data <- data %>%
@@ -496,10 +500,7 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
                 str_extract_all(names(data), ".*_flag") %>%
                   unlist() %>%
                   print()
-                
-                males_used <- unique(data$male)
-                print(males_used)
-                
+                                
                 print("Define model formulas")
                 for(flag_prefix in c("x0", "y0", "disp") ) {
                   
@@ -679,6 +680,7 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
                 fit <- fit_prerun
               }
 
+              
               ## Extract up to `n_chains_top` chains for fit_best and fit_top
 
               verify_brmsfit(fit)
@@ -717,17 +719,19 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
                 ## update tbl
                 fit_tbl[[curr_row, "fit_top"]][[1]] <- fit_stan_top
               }
-            } else {
+              ## end if(run_fits)
+            } else { 
               print("Working with Pre-existing Fits")
               
               ## Try to assign from local memory.
-              if(!exists("fit_tbl") | force_load | nrow(fit_tbl) ==1) {
+              if(!exists("fit_tbl") | force_load | nrow(fit_tbl) == 0) {
                 print(paste("Loading Models from file", infile_tbl))       
-                load(file = infile_tbl)
+                load(file = infile_tbl, verbose = TRUE)
+                ## Need only for older fittings
+                fit_tbl <- add_column_safely(fit_tbl, "plots")
               }
               
               fit <- fit_tbl[[curr_row, "fit"]][[1]]
-              print(class(fit))
               fit_stan <- fit$fit
               ## These shoudl be brmsfit objects
               fit_top <- fit_tbl[[curr_row, "fit_top"]][[1]]
@@ -738,14 +742,14 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
 
             cat("\n\n\n")
             
-            print(desc)
             ## lp_stats <- calc_fit_lp_stats(fit)
             if(print_prior_summary) {
+              print(desc)
               print("Prior Information")
               print(prior_summary(fit)) # %>% filter(nlpar!="y0"))
             }
+
             print(desc)
-            
             print("Fit Information")
             print(summary(fit)) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
             print(stats_fit)
@@ -765,7 +769,7 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
             ## indicate pXlot name
             plot_name <- "plot_trace"            
             plot_curr <- plots_row[[plot_name]]            
-            if(is.na(plot_curr) | render_plots_force) { ## Generate and append plot
+            if( (is.null(plot_curr)  | render_plots_force) & render_plots) { ## Generate and append plot
               ## Plotting code goes below here
               plot_trace <- mcmc_trace(fit, pars = c("lp__")) +
                 ggtitle(desc_short)
@@ -780,7 +784,7 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
             ## indicate plot name
             plot_name <- "plot_violin"            
             plot_curr <- plots_row[[plot_name]]            
-            if(is.na(plot_curr) | render_plots_force) { ## Generate and append plot
+            if( (is.null(plot_curr) | render_plots_force) & render_plots) { ## Generate and append plot
               ## Plotting code goes below here              
               ## Plot violin plots of posterior values
               ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html#n_chains <-
@@ -808,7 +812,7 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
 
             plot_name <- "plot_hist"
             plot_curr <- plots_row[[plot_name]]            
-            if(is.na(plot_curr) | render_plots_force) { ## Generate and append plot
+            if( (is.null(plot_curr) | render_plots_force) & render_plots) { ## Generate and append plot
               ## Plotting code goes below here              
               plot_hist <-  stan_hist(fit_stan_rename,
                                     pars = vars_fit,
@@ -830,7 +834,7 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
 
             plot_name <- "plot_pairs"
             plot_curr <- plots_row[[plot_name]]            
-            if(is.na(plot_curr) | render_plots_force) { ## Generate and append plot
+            if( (is.null(plot_curr) | render_plots_force) & render_plots) { ## Generate and append plot
               ## Pairs Plot
               list_plot <- list()
                 if(model == "one_piece" & disp_flag != "individual") {
@@ -850,6 +854,9 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
                                                   variable = c("disp", "lprior", "lp__")
                                                   )
                 } else { # not one_piece disp_flag != individual
+
+                  data <- fit$data
+                  males_used <- unique(data$male)
                   list_plot <- list()
                   for(male in males_used) {
                     ##print(male);
@@ -859,12 +866,15 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
                             regex = TRUE)
                     
                   }
-                  
-                  plot_pairs <- cowplot::plot_grid(
-                    plotlist = list_plot,
-                    ncol = 2)
-                  #ggtitle(desc_short)
+                                    #ggtitle(desc_short)
                 }
+              plot_pairs <- cowplot::plot_grid(
+                plotlist = list_plot,
+                ncol = 2)
+              ## Finish plotting code
+              
+              plots_row[[plot_name]] <- plot_pairs
+              
             } else {
               ## update last_plot() settings
               set_last_plot(plot_pairs)
@@ -872,17 +882,16 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
             if(display_plots) print(last_plot())
             file_prefix <- sub("plot_", "", plot_name)                
             if(save_plots_file) last_plot_save(file_prefix = file_prefix)
-
             ## update plots_row
-            fit_tbl[[ curr_row, "plots"]] <- plots_row
+            fit_tbl[[ curr_row, "plots"]][[1]] <- plots_row
 
             curr_row <- curr_row + 1
           }  ## End disp_values
         } ## end y0_flag
       } ## end x0_flag
     } ## end flag_disp
-  } ## end model_used
-} ## end filter male
+  } ## end filter male
+} ## end model_used
 
 rm("curr_row")
 ```
