@@ -170,7 +170,7 @@ names(data_ind)
 #set seom variables that I expect to change below
 
 display_plots <- FALSE
-save_plots <- FALSE
+save_plots_file <- FALSE
 ```
 
 ## Determine reasonable priors for y0
@@ -258,6 +258,7 @@ print(stan_two_piece_func)
 
 ```{r}
 
+fit_tbl_initiate_crossed <- FALSE
 
 models <- c("one_piece", "two_piece", "asymptotic")[2:3] #, "one_piece") #, "asymptotic")
 sampling_dists <- c("nbinom_type1") ##, "com_poisson") ## lognormal doesn't work since the counts can be 0.
@@ -283,48 +284,33 @@ filter_male <- c(TRUE, FALSE)
 
 N <- length(data)
 
-if(FALSE) {
-  ## deifne full table a priori
-  fit_tbl <- crossing(model = models,
-                      #sampling_dist = sampling_dists,
-                      x0_flag = flags_x0,
-                      y0_flag = flags_y0,
-                      disp_flag = flags_disp,
-                      disp_value = values_disp,
+## define full table a priori
+  fit_tbl_crossed <- crossing(
+    model = models,
+    #sampling_dist = sampling_dists,
+    x0_flag = flags_x0,
+    y0_flag = flags_y0,
+    disp_flag = flags_disp,
+    disp_value = values_disp,
+    filter_male = filter_male,
+    fit = list(NA),
+    stats_fit = list(NA),
+    fit_best = list(NA),
+    fit_top = list(NA),
+    plots = list(NA),
+    llik = list(NA),
+    r_eff = list(NA),
+    loo = list(NA)
+    )
 
-                      desc = "NA_character",
-                      filter_male = filter_male,
-                      #y0_group_list = list(NA), #tbl_tmp, #list(NA),
-                      x0_group_list = list(NA),
-                      fit = list(NA),
-                      llik = list(NA),
-                      r_eff = list(NA),
-                      loo = list(NA),
-                      fit_best = list(NA),
-                      fit_top = list(NA),
-                      stats_fit = list(NA)
-                      )
 
+if(fit_tbl_initiate_crossed) {
+
+  fit_tbl <- fit_tbl_crossed
 } else {
 
-  fit_tbl <- tibble(model = NA,
-                    #sampling_dist = sampling_dists,
-                    x0_flag = NA,
-                    y0_flag = NA,
-                    disp_flag = NA,
-                    disp_value = NA,
-                    desc = NA, #"NA_character",
-                    filter_male = NA,
-                    #y0_group_list = list(NA), #tbl_tmp, #list(NA),
-                    #                      x0_group_list = list(NA),
-                    fit = list(NA),
-                    llik = list(NA),
-                    r_eff = list(NA),
-                    loo = list(NA),
-                    fit_best = list(NA),
-                    fit_top = list(NA),
-                    stats_fit = list(NA)
-                    )
+  ## Use an empty tibble
+  fit_tbl <- fit_tibble_crossed[0, ]
 }
 
 ```
@@ -335,8 +321,11 @@ if(FALSE) {
 ```{r, message = FALSE }
 
 ## Fit Settings
+render_plots <- TRUE ## Build or use previously generated plots in tbl
+render_plots_force <- FALSE ## Force regeneration of plots if they already exist
 display_plots <- TRUE  ## Display plots to local device?
-save_plots <- TRUE  ## Save plots to file?
+save_plots_file <- TRUE  ## Save plots to file?
+save_plots_tibble
 rerender_plots <- FALSE ## Option to force rerendering of plot
 run_fits <- TRUE
 save_fits <- TRUE
@@ -765,82 +754,128 @@ for(male_filter in c(FALSE) ) { #, TRUE)) {
             fit_stan_rename <-
               fit_stan %>%
               setNames(gsub("b_", "", names(.)) %>%
-                         gsub("(x0|phi|y0)_male(T[0-9]{3})", "\\2_\\1", .) %>%
+                         gsub("(x0|phi|y0)_male[0-9]{3})", "\\2_\\1", .) %>%
                          gsub("__", "_", .) %>%
-                         gsub("r_male_(x0|phi|y0)\\[(T[0-9]{3}),Intercept\\]", "\\2_\\1_r", .) %>%
+                         gsub("r_male_(x0|phi|y0)\\[(Tplo[0-9]{3}),Intercept\\]", "\\2_\\1_r", .) %>%
                          gsub("\\.", " ", .))
 
-            ##
+            ##  Get plots for current fit settings
+            plots_row <- fit_tbl[[ curr_row, "plots"]]
 
-
-            ## Print out info on fits
-            plot_trace <- mcmc_trace(fit, pars = c("lp__")) +
-              ggtitle(desc_short)
+            ## indicate pXlot name
+            plot_name <- "plot_trace"            
+            plot_curr <- plots_row[[plot_name]]            
+            if(is.na(plot_curr) | render_plots_force) { ## Generate and append plot
+              ## Plotting code goes below here
+              plot_trace <- mcmc_trace(fit, pars = c("lp__")) +
+                ggtitle(desc_short)
+              ## Finish plotting code
+              plots_row[[plot_name]] <- plot_trace
+            } else{
+              ## update last_plot() settings
+              set_last_plot(plot_trace)
+            }
             
 
-            ## Plot violin plots of posterior values
-            ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html#n_chains <-
-            fit_array <- as.array(fit_stan)
-            plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9)) +
-              yaxis_ticks(on = TRUE) +
-              yaxis_text(on = TRUE)
+            ## indicate plot name
+            plot_name <- "plot_violin"            
+            plot_curr <- plots_row[[plot_name]]            
+            if(is.na(plot_curr) | render_plots_force) { ## Generate and append plot
+              ## Plotting code goes below here              
+              ## Plot violin plots of posterior values
+              ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html#n_chains <-
+              fit_array <- as.array(fit_stan)
+              plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9)) +
+                yaxis_ticks(on = TRUE) +
+                yaxis_text(on = TRUE) +
+                ggtitle(desc_short)
+              ## Finish plotting code
+              plots_row[[plot_name]] <- plot_violin
+            } else{
+              ## update last_plot() settings
+              set_last_plot(plot_violin)
+            }
 
+            
             plot_trace_and_violin <- plot_grid(plotlist = list(plot_trace, plot_violin),
                                            ncol = 1)
-            if(save_plots) last_plot_save(file_prefix = "trace-and-violin")
+            if(save_plots_file) last_plot_save(file_prefix = "trace-and-violin")
             if(display_plots) print(last_plot())
             
             vars_fit <- names(fit_stan_rename) %>% na.omit(.) %>% sort(., decreasing = TRUE)
             ncol <- 4 
-            plot_hist <-  stan_hist(fit_stan_rename,
+
+
+            plot_name <- "plot_hist"
+            plot_curr <- plots_row[[plot_name]]            
+            if(is.na(plot_curr) | render_plots_force) { ## Generate and append plot
+              ## Plotting code goes below here              
+              plot_hist <-  stan_hist(fit_stan_rename,
                                     pars = vars_fit,
                                     bins = 30,
                                     ncol = ncol) + 
               ggtitle(desc_short) +
               ## Reduce plot label size
-              theme(plot.title = element_text(size = rel(1), face = "bold"))
-            if(save_plots) last_plot_save(file_prefix = "histogram")            
+                theme(plot.title = element_text(size = rel(1), face = "bold"))
+              ## Finish plotting code
+              plots_row[[plot_name]] <- plot_hist
+            } else{
+              ## update last_plot() settings
+              set_last_plot(plot_hist)
+            }
+            file_prefix <- sub("plot_", "", plot_name)                
+            if(save_plots_file) last_plot_save(file_prefix = file_prefix)            
             if(display_plots) print(last_plot())
 
-            ## Pairs Plot
-            if(print_pairs_plot) {
-              list_plot <- list()
-              if(model == "one_piece" & disp_flag != "individual") {
-                ## each male only appears once in the one piece models
-                splitby <- 3
-                nsplits <- max(nmales %/% splitby, 1)
-                tmp_stop <- (1:nsplits) * splitby
-                tmp_start <- tmp_stop - (splitby - 1)
-                for(i in 1:nsplits) {
-                  tmp_range <- tmp_start[[i]]:tmp_stop[[i]]
-                  list_plot[[i]] <- pairs(fit,
-                                          variable = c(as.character(males[tmp_range]),
-                                                       "disp"),
-                                          regex = TRUE)
-                }
-                list_plot[[nsplits+1]] <- pairs(fit,
-                                                variable = c("disp", "lprior", "lp__")
-                                                )
-              } else { # not one_piece disp_flag != individual
-                list_plot <- list()
-                for(male in males_used) {
-                  ##print(male);
-                  list_plot[[male]] <-
-                    pairs(fit,
-                          variable = c(male, "lp__"),
-                          regex = TRUE)
-                  
-                }
-                grid_plot <- cowplot::plot_grid(
-                  plotlist = list_plot,
-                  ncol = 2)
-                #ggtitle(desc_short)
-                
-                if(display_plots) print(last_plot())
-                if(save_plots) last_plot_save(file_prefix = "grid.plot")
 
-              } #end else for grid plot
-            } # end print_plot_pairs
+            plot_name <- "plot_pairs"
+            plot_curr <- plots_row[[plot_name]]            
+            if(is.na(plot_curr) | render_plots_force) { ## Generate and append plot
+              ## Pairs Plot
+              list_plot <- list()
+                if(model == "one_piece" & disp_flag != "individual") {
+                  ## each male only appears once in the one piece models
+                  splitby <- 3
+                  nsplits <- max(nmales %/% splitby, 1)
+                  tmp_stop <- (1:nsplits) * splitby
+                  tmp_start <- tmp_stop - (splitby - 1)
+                  for(i in 1:nsplits) {
+                    tmp_range <- tmp_start[[i]]:tmp_stop[[i]]
+                    list_plot[[i]] <- pairs(fit,
+                                            variable = c(as.character(males[tmp_range]),
+                                                         "disp"),
+                                            regex = TRUE)
+                  }
+                  list_plot[[nsplits+1]] <- pairs(fit,
+                                                  variable = c("disp", "lprior", "lp__")
+                                                  )
+                } else { # not one_piece disp_flag != individual
+                  list_plot <- list()
+                  for(male in males_used) {
+                    ##print(male);
+                    list_plot[[male]] <-
+                      pairs(fit,
+                            variable = c(male, "lp__"),
+                            regex = TRUE)
+                    
+                  }
+                  
+                  plot_pairs <- cowplot::plot_grid(
+                    plotlist = list_plot,
+                    ncol = 2)
+                  #ggtitle(desc_short)
+                }
+            } else {
+              ## update last_plot() settings
+              set_last_plot(plot_pairs)
+            }
+            if(display_plots) print(last_plot())
+            file_prefix <- sub("plot_", "", plot_name)                
+            if(save_plots_file) last_plot_save(file_prefix = file_prefix)
+
+            ## update plots_row
+            fit_tbl[[ curr_row, "plots"]] <- plots_row
+
             curr_row <- curr_row + 1
           }  ## End disp_values
         } ## end y0_flag
