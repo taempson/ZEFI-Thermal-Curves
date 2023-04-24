@@ -20,14 +20,22 @@ clean_var_names <- function(fit) {
 }
 
 ## Generate data for plotting expected values
-generate_epred_data <- function(fit_brms = NULL, ndraws = 1000, ncores = 4) {
+generate_epred_data <- function(fit_brms = NULL, group = c(disp_group, male), ndraws = 3000, ncores = 4) {
 
+    ## Code for converting argument group into values for group_by()
+    ## Based on: https://stackoverflow.com/a/68866579/5322644
+    grp_lst <- as.list(substitute(group))
+    print(grp_lst)
+    if(length(grp_lst)> 1) grp_lst <- grp_lst[-1]
+    grps <- purrr::map_chr(grp_lst, rlang::as_string)
+    print(grps)
   ## Create grid of x values for epred/predictions
-
-  data_fit_brms <- fit_brms$data
-  data_grid <- data_fit_brms %>%
-    group_by(male) %>%
-    data_grid(x = seq_range(c(20, 46), n = 51))
+    data_fit_brms <- fit_brms$data
+#    groupings <- names(data_fit_brms) 
+    data_grid <- data_fit_brms %>%
+        group_by(across(all_of(grps))) %>%
+        #group_by(grps) %>%
+        data_grid(x = seq_range(c(20, 46), n = 51))
 
 
   ## add expected values
@@ -43,7 +51,7 @@ generate_pred_data <- function(fit_brms = NULL, ndraws = 1000, ncores = 4) {
   data_fit_brms <- fit_brms$data
   
   data_grid <- data_fit_brms %>%
-    group_by(male) %>%
+    group_by(disp_group, male) %>%
     data_grid(x = seq_range(c(20, 45.9), n = 51)) %>%  #, .model = fit_brms) %>% 
     ungroup() 
 
