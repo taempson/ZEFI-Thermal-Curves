@@ -121,158 +121,6 @@ fit_tbl <- fit_tbl_orig %>% filter(!(is.na(fit)))
 
 ```
 
-### Print Posterior Probability Traces and Identify Best Chains When Need
-
-- Should probably move some of this code to the fitting routines.
-
-```{r}
-
-n_chains_target <- 4
-
-row_index_max <- nrow(fit_tbl)
-row_index_max <- 3
-
-for(row_index in 1:row_index_max) {
-
-  cat(paste("fit_tbl Row: ", row_index, "\n\n"))
-  
-  data <- fit_brms[["data"]]
-  
-  fit_row <- fit_tbl[row_index, ]
-  fit_brms <- fit_row$fit[[1]]
-  fit_stan <- fit_brms$fit
-  chains_n <- length(dimnames(fit_stan)$chains)
-
-  desc <- fit_row$desc
-
-  desc_filename <- gsub("_", "-", desc) %>%
-    gsub("; ", "_", .) %>%
-    gsub(":? ", "-", .)
-  desc_short <- desc %>% str_replace("nbinom_type1; two_piece; ","")
-  print(desc_short)
-  plot_trace <- mcmc_trace(fit_brms, pars = c("lp__"))
-  last_plot()
-  file_prefix <- "trace_lp"
-  if(save_plots) last_plot_save() #file_prefix = file_prefix)
- 
-  ## Plot violin plots of posterior values
-  ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html
-
-  fit_array <- as.array(fit_stan)
-  #n_chains <- 
-  if(FALSE) { ## use violin plots
-    file_prefix <- "violin_lp"
-    plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9)) +
-    yaxis_ticks(on = TRUE) +
-    yaxis_text(on = TRUE)
-  } else { # use histograms
-    file_prefix <- "hist_lp"
-    plot_hist_chain <- mcmc_hist_by_chain(fit_array, pars = c("lp__")) +
-    yaxis_ticks(on = TRUE) +
-    yaxis_text(on = TRUE)
-    }
-  last_plot()
-  last_plot_save()
-  
-  fit_tibble <- melt(fit_array) %>% as_tibble()
-  lp_tbl <- fit_tibble %>% filter(parameters == "lp__")
-
-  lp_stats <- lp_tbl %>%
-    group_by(chains) %>%
-    summarize(mean = mean(value), sd = sd(value), n = n(), se = sd/sqrt(n) ) %>%
-    arrange(mean)
-
-  extract_best_flag <- TRUE
-  if(extract_best_flag) {
-    
-    ## Find chain with greatest mean lp__ value and calculate SE on mean
-    mean_max <- lp_stats[[1, "mean"]]
-    se <- lp_stats[[1, "se"]]
-    ## Use a larger threshold to avoid 1/20 being dropped due to type 1 errors
-    threshold <- mean_max - 4 * se
-
-    ## Flag chains with matching means to max
-    lp_stats <- lp_stats %>%
-      mutate(match_max = mean > threshold) %>%
-      arrange(chains)
-
-    # fit_tbl[[row_index, "lp_stats"]] <- lp_stats
-    
-    chains_best <- filter(lp_stats, match_max) %>%
-      pull(chains) %>%
-      sub("chain:", "", .) %>%
-      as.numeric()
-    # fit_tbl[[row_index, "chains_best"]] <- list(chains_best)
-    n_chains_best <- length(chains_best)
-    n_chains <- levels(fit_tibble$chains) %>% length()
-
-    print(desc_short)
-    print(paste("Chains Best:", paste(chains_best, collapse = ", "), " (", n_chains_best, "out of", n_chains, ")" ))
-
-    if(n_chains != n_chains_best) {
-      print("Dropping non-best chains")
-    }
-
-    if(n_chains_best > n_chains_target) {
-      ## just take the first n target Chains
-      print("Dropping extra best chains")
-      chains_best <-  sample(chains_best, n_chains_target)
-    }
-
-    ## Keep only desired chains
-    fit_brms_best <- keep_chains(fit_brms, chains_best)
-    ## update tbl
-    fit_tbl[[row_index, "fit_best"]][[1]] <- fit_brms_best
-  }
-}
-
-```
-
-```{r}
-
-
-#fit_tbl <- fit_tbl_original
-
-n_chains_max <- 4
-
-for(row_index in 1:nrow(fit_tbl)) {
-
-  cat(paste("Row: ", row_index))
-  
-  fit_row <- fit_tbl[row_index, ]
-  fit_brms <- fit_row$fit[[1]]
-  fit_stan <- fit_brms$fit
-  chains_n <- length(dimnames(fit_stan)$chains)
-
-  desc <- fit_row$desc
-
-  desc_filename <- gsub("_", "-", desc) %>%
-    gsub("; ", "_", .) %>%
-    gsub(":? ", "-", .)
-  desc_short <- desc %>% str_replace("nbinom_type1; two_piece; ","")
-  print(desc_short)
-  plot_trace <- mcmc_trace(fit_brms, pars = c("lp__"))
-  last_plot()
-  ## Plot violin plots of posterior values
-  ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html
-
-  fit_array <- as.array(fit_stan)
-  #n_chains <- 
-  plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9))
-  last_plot()
-
-  #fit_brms_best <- keep_best_chains(fit_brms, n_chains_max = n_chains_max)
-  
-  ## update tbl
-  #fit_tbl[[row_index, "fit_best"]] <- fit_brms_best
-}
-
-## Save a version of tbl 
-fit_tbl_filtered <- fit_tbl
-
-
-```
-
 ### Add columns to `fit_tbl` for future use
 ```{r}
 
@@ -325,7 +173,9 @@ for(curr_row in 1:curr_row_max) {
     epred <- generate_epred_data(fit_brms)
     fit_tbl[[curr_row, "epred"]] <-list(epred)
   }
-  
+}
+
+
   if(length(fit_tbl[[curr_row, "pred"]][[1]]) ==0 | force_generate_pred) {
     pred <- generate_pred_data(fit_brms)
     fit_tbl[[curr_row, "pred"]] <- list(pred)
@@ -816,17 +666,22 @@ for(curr_row in 1:curr_row_max) {
 
   fit_row <- fit_tbl[curr_row, ]
   
-  curr_desc <- fit_row$desc
-  
-  desc <- curr_desc %>% str_replace("nbinom_type1; two_piece; ","")
+
+  desc <- fit_row$desc
+
   desc_filename <- gsub("_", "-", desc) %>%
     gsub("; ", "_", .) %>%
     gsub(":? ", "-", .)
+  desc_short <- desc %>% str_replace("nbinom_type1; two_piece; ","")
 
   print(paste0("Row: ", curr_row, ", ", desc))
   
   obs <- fit_row[["obs"]][[1]]
-  males <- levels(obs$male)
+  if(class(obs$male) == "character") {
+    males <- unique(obs$male)
+  } else {
+    males <- levels(obs$male) %>% unique()
+  }
 
   print("Plotting Expectations")
 
@@ -1090,5 +945,196 @@ for(prediction in c("data")) {
 ```{r}
 
 knitr::knit_exit()
+
+```
+
+### Identify Best Chains __ Obsolete
+
+```{r, eval = FALSE}
+
+if(FALSE) {
+  for(row_index in 1:row_index_max) {
+    fit_tibble <- melt(fit_array) %>% as_tibble()
+    lp_tbl <- fit_tibble %>% filter(parameters == "lp__")
+
+    lp_stats <- lp_tbl %>%
+      group_by(chains) %>%
+      summarize(mean = mean(value), sd = sd(value), n = n(), se = sd/sqrt(n) ) %>%
+      arrange(mean)
+
+    extract_best_flag <- TRUE
+    if(extract_best_flag) {
+      
+      ## Find chain with greatest mean lp__ value and calculate SE on mean
+      mean_max <- lp_stats[[1, "mean"]]
+      se <- lp_stats[[1, "se"]]
+      ## Use a larger threshold to avoid 1/20 being dropped due to type 1 errors
+      threshold <- mean_max - 4 * se
+
+      ## Flag chains with matching means to max
+      lp_stats <- lp_stats %>%
+        mutate(match_max = mean > threshold) %>%
+        arrange(chains)
+
+      # fit_tbl[[row_index, "lp_stats"]] <- lp_stats
+      
+      chains_best <- filter(lp_stats, match_max) %>%
+        pull(chains) %>%
+        sub("chain:", "", .) %>%
+        as.numeric()
+      # fit_tbl[[row_index, "chains_best"]] <- list(chains_best)
+      n_chains_best <- length(chains_best)
+      n_chains <- levels(fit_tibble$chains) %>% length()
+
+      print(desc_short)
+      print(paste("Chains Best:", paste(chains_best, collapse = ", "), " (", n_chains_best, "out of", n_chains, ")" ))
+
+      if(n_chains != n_chains_best) {
+        print("Dropping non-best chains")
+      }
+
+      if(n_chains_best > n_chains_target) {
+        ## just take the first n target Chains
+        print("Dropping extra best chains")
+        chains_best <-  sample(chains_best, n_chains_target)
+      }
+
+      ## Keep only desired chains
+      fit_brms_best <- keep_chains(fit_brms, chains_best)
+      ## update tbl
+      fit_tbl[[row_index, "fit_best"]][[1]] <- fit_brms_best
+    }
+  }
+}
+
+```
+
+### Print Posterior Probability Traces
+
+- Most of this code has been moved to the fitting routines.
+
+```{r}
+
+n_chains_target <- 4
+
+row_index_max <- nrow(fit_tbl)
+row_index_max <- 3
+
+
+save_plots <- FALSE
+save_plots_new <- save_plots ## redundant?
+render_plots_force <- FALSE
+render_plots <- TRUE
+
+for(row_index in 1:row_index_max) {
+
+  cat(paste("fit_tbl Row: ", row_index, "\n\n"))
+  
+  fit_row <- fit_tbl[row_index, ]
+  fit_brms <- fit_row$fit[[1]]
+  #data <- fit_brms[["data"]]
+  fit_stan <- fit_brms$fit
+  chains_n <- length(dimnames(fit_stan)$chains)
+  plots_row <- fit_row[["plots"]][[1]]
+  
+  desc <- fit_row$desc
+
+  desc_filename <- gsub("_", "-", desc) %>%
+    gsub("; ", "_", .) %>%
+    gsub(":? ", "-", .)
+  desc_short <- desc %>% str_replace("nbinom_type1; two_piece; ","")
+  print(desc_short)
+
+   ## indicate pXlot name
+  plot_name <- "plot_trace"            
+  plot_curr <- plots_row[[plot_name]]  
+  if( (is.null(plot_curr)  | render_plots_force) & render_plots) { ## Generate and append plot
+    ## Plotting code goes below here
+    plot_trace <- mcmc_trace(fit, pars = c("lp__")) +
+      ggtitle(desc_short)
+    ## Finish plotting code
+    plots_row[[plot_name]] <- plot_trace
+  } else{
+plot_trace <- plot_curr
+    ## update last_plot() settings
+    set_last_plot(plot_trace)
+  }
+  file_prefix <- sub("plot_", "", plot_name)                
+  if(save_plots) last_plot_save(file_prefix = file_prefix)
+  
+  plot_name <- "plot_violin"            
+  plot_curr <- plots_row[[plot_name]]            
+  if( (is.null(plot_curr) | render_plots_force) & render_plots) { ## Generate and append plot
+    ## Plotting code goes below here              
+    ## Plot violin plots of posterior values
+    ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html#n_chains <-
+    fit_array <- as.array(fit_stan)
+    if(FALSE) { ## use violin plots
+      plot_tmp <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9))
+    } else { # use histograms
+      plot_tmp <- mcmc_hist_by_chain(fit_array, pars = c("lp__"))
+    }
+    
+    plot_violin <- plot_tmp +
+      yaxis_ticks(on = TRUE) +
+      yaxis_text(on = TRUE) +
+      ggtitle(desc_short)
+    ## Finish plotting code
+    plots_row[[plot_name]] <- plot_violin
+  } else{
+    ## update last_plot() settings
+    plot_violin <- plot_curr
+    set_last_plot(plot_violin)
+  }
+
+  file_prefix <- sub("plot_", "", plot_name)
+  if(save_plots) last_plot_save(file_prefix = file_prefix)
+}
+```
+
+## Plot ??
+
+```{r}
+
+
+#fit_tbl <- fit_tbl_original
+
+n_chains_max <- 4
+
+for(row_index in 1:nrow(fit_tbl)) {
+
+  cat(paste("Row: ", row_index))
+  
+  fit_row <- fit_tbl[row_index, ]
+  fit_brms <- fit_row$fit[[1]]
+  fit_stan <- fit_brms$fit
+  chains_n <- length(dimnames(fit_stan)$chains)
+
+  desc <- fit_row$desc
+
+  desc_filename <- gsub("_", "-", desc) %>%
+    gsub("; ", "_", .) %>%
+    gsub(":? ", "-", .)
+  desc_short <- desc %>% str_replace("nbinom_type1; two_piece; ","")
+  print(desc_short)
+  plot_trace <- mcmc_trace(fit_brms, pars = c("lp__"))
+  last_plot()
+  ## Plot violin plots of posterior values
+  ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html
+
+  fit_array <- as.array(fit_stan)
+  #n_chains <- 
+  plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9))
+  last_plot()
+
+  #fit_brms_best <- keep_best_chains(fit_brms, n_chains_max = n_chains_max)
+  
+  ## update tbl
+  #fit_tbl[[row_index, "fit_best"]] <- fit_brms_best
+}
+
+## Save a version of tbl 
+fit_tbl_filtered <- fit_tbl
+
 
 ```
