@@ -113,6 +113,8 @@ source("../Local.Functions/local.functions_ZFI.fittings.R")
 ```{r}
 
 infile <- last(dir(file.path(input_dir, "tibbles"), "fit_tbl.*"))
+## Override default fo most recent fits
+#infile <- "fit_tbl_adapt-delta-0.90.Rda"
 infile_tbl <- file.path(input_dir, "tibbles", infile)
 load(infile_tbl, verbose = TRUE)
 ## save filtered tibble incase it becomes corrupted locally
@@ -150,43 +152,8 @@ if(!exists("two_piece") | force_expose_functions) expose_functions(fit_tbl[[1, "
 
 ## Generate Columns of Observed Data, Predicted Data and Expected Values 
 
-```{r}
+- Moved to separate file
 
-## add rows to fit_tbl if needed
-## Can restore fit_tbl to original values using
-##    fit_tbl <- fit_tbl_orig
-
-force_generate_epred <- FALSE
-force_generate_pred <- force_generate_epred
-force_generate_obs <- force_generate_epred
-save_plots = TRUE
-force_update_plots = TRUE
-
-curr_row_max <- nrow(fit_tbl)
-
-
-for(curr_row in 1:curr_row_max) {
-
-  fit_brms <- fit_tbl[[curr_row, "fit"]][[1]]
-
-  if(length(fit_tbl[[curr_row, "epred"]][[1]]) ==0 | force_generate_epred) {
-    epred <- generate_epred_data(fit_brms)
-    fit_tbl[[curr_row, "epred"]] <-list(epred)
-  }
-}
-
-
-  if(length(fit_tbl[[curr_row, "pred"]][[1]]) ==0 | force_generate_pred) {
-    pred <- generate_pred_data(fit_brms)
-    fit_tbl[[curr_row, "pred"]] <- list(pred)
-  }
-
-  if(length(fit_tbl[[curr_row, "obs"]][[1]]) ==0 | force_generate_obs) {
-    obs <- fit_brms$data
-    fit_tbl[[curr_row, "obs"]] <-list(obs)
-  }
-
-}
 ```
 
 # Visualize Model Fits
@@ -195,6 +162,9 @@ for(curr_row in 1:curr_row_max) {
 ## Set up functions, parameters, and results tibble 
 
 ```{r}
+
+save_plots = TRUE
+force_update_plots = TRUE
 
 xmax <- 45.9
 
@@ -208,6 +178,7 @@ for(name in names(fit_tbl)[1:8]) {
 }
 
 ```
+
 ### Print fits
 
 ```{r, message = FALSE }
@@ -231,11 +202,12 @@ for(row_index in 3) {#1:nrow(fit_tbl)) {
 
   cat(paste("Row: ", row_index))
 
-  data <- fit_brms[["data"]]
-  
   fit_row <- fit_tbl[row_index, ]
   fit_brms <- fit_row$fit[[1]]
   fit_stan <- fit_brms$fit
+  data <- fit_brms[["data"]]
+  
+
   chains_n <- length(dimnames(fit_stan)$chains)
 
   desc <- fit_row$desc
@@ -468,8 +440,8 @@ for(row_index in 3) {#1:nrow(fit_tbl)) {
              scale = 1,
              dpi=300,
              bg = "white")
-    }  ## end if(all(male... for mcmc_pairs
-  }
+    }  
+  } ## end if(all(male... for mcmc_pairs
 
   if(all(male_instance > 1) & print_mcmc_scatter) {
 
