@@ -22,15 +22,23 @@ clean_var_names <- function(fit) {
 ## Generate data for plotting expected values
 generate_epred_data <- function(fit_brms = NULL, group = c(disp_group, male), ndraws = 3000, ncores = 4) {
 
+    grps <- NULL
+
+    ngrps <- ngrps(fit_brms)
+    ifelse(length(ngrps) ==0 | length(group) == 0, grouping <-FALSE, grouping <- TRUE)
+
+    data_fit_brms <- fit_brms$data
     ## Code for converting argument group into values for group_by()
     ## Based on: https://stackoverflow.com/a/68866579/5322644
-    grp_lst <- as.list(substitute(group))
-    print(grp_lst)
-    if(length(grp_lst)> 1) grp_lst <- grp_lst[-1]
-    grps <- purrr::map_chr(grp_lst, rlang::as_string)
-    print(grps)
-  ## Create grid of x values for epred/predictions
-    data_fit_brms <- fit_brms$data
+    if(grouping) {
+        grp_lst <- as.list(substitute(group))
+        print(grp_lst)
+        if(length(grp_lst)> 1) grp_lst <- grp_lst[-1]
+        grps <- purrr::map_chr(grp_lst, rlang::as_string)
+        print(grps)
+    }
+    
+        ## Create grid of x values for epred/predictions
 #    groupings <- names(data_fit_brms) 
     data_grid <- data_fit_brms %>%
         group_by(across(all_of(grps))) %>%
@@ -302,7 +310,7 @@ last_plot_save <- function(file_prefix = parent.frame()$file_prefix,
                            output_dir = parent.frame()$output_dir,
                            scale = 1,
                            width = 8,
-                           height = 11,
+                           height = 10,
                            dpi = 300) {
   filename <- paste0(file_prefix, "_", desc_filename, ".pdf")
   ## print(output_dir)
