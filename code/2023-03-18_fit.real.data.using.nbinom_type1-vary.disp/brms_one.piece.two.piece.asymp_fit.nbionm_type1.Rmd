@@ -846,45 +846,69 @@ for(model in models_used) {
                   for(i in 1:nsplits) {
                     tmp_range <- tmp_start[[i]]:tmp_stop[[i]]
                     list_plot[[i]] <- pairs(fit,
+                                            off_diag_fun = if_else(off_diag_fun == "hex", "hex", "scatter"),
                                             variable = c(as.character(males[tmp_range]),
                                                          "disp"),
                                             regex = TRUE)
                   }
                   list_plot[[nsplits+1]] <- pairs(fit,
-                                                  variable = c("disp", "lprior", "lp__")
+                                                  variable = c("disp", "lprior", "lp_")
                                                   )
                 } else { # not one_piece disp_flag != individual
 
-                  data <- fit$data
-                  males_used <- unique(data$male)
                   list_plot <- list()
-                  for(male in males_used) {
+                  for(male in male_vec) {
                     ##print(male);
                     list_plot[[male]] <-
                       pairs(fit,
-                            variable = c(male, "lp__"),
+                            off_diag_fun = if_else(off_diag_fun == "hex", "hex", "scatter"),
+                            variable = c(male, "lp_"),
                             regex = TRUE)
                     
                   }
-                                    #ggtitle(desc_short)
+                  #ggtitle(desc_short)
                 }
-              plot_pairs <- cowplot::plot_grid(
-                plotlist = list_plot,
-                ncol = 2)
-              ## Finish plotting code
-              
-              plots_row[[plot_name]] <- plot_pairs
-              
-            } else {
-              ## update last_plot() settings
-              set_last_plot(plot_pairs)
-            }
-            if(display_plots) print(last_plot())
-            file_prefix <- sub("plot_", "", plot_name)                
-            if(save_plots_file) last_plot_save(file_prefix = file_prefix)
-            ## update plots_row
-            fit_tbl[[ curr_row, "plots"]][[1]] <- plots_row
 
+                #browser()
+                
+                ## Set number of males per row
+                ifelse(length(list_plot[[male]]) > 2, ncol_row <- 1, ncol_row <- 2)
+                ## Set number of rows/page
+                ifelse(length(list_plot[[male]]) > 2,
+                       ifelse(length(list_plot[[male]]) > 4,
+                              nrow_page <- 3,
+                              nrow_page <- 4),
+                       nrow_page <- 5)
+
+                ## Note this makes a list of plots
+                plot_pairs <- marrangeGrob(grobs = list_plot,
+                                           ncol = ncol_row,
+                                           nrow = nrow_page,
+                                           top = desc_short,
+                                           bottom = quote(paste("page", g, "of", npages))
+                                           )
+                ## plot_pairs <- cowplot::plot_grid(
+                ##   plotlist = list_plot,
+                ##   ncol = 2)
+                ## Finish plotting code
+                #set_last_plot(plot_pairs) ## Don'[t think marrangeGrob updates last_plot()
+                plots_row[[plot_name]] <- plot_pairs
+                
+              } else {
+                ## update last_plot() settings
+                set_last_plot(plot_pairs)
+              }
+              if(display_plots) print(plot_pairs); #dev.off()
+              file_prefix <- sub("plot_", "", plot_name)
+              ## Need to update following line since imarrangeGrob output isn't technically a plot
+              if(save_plots_file) last_plot_save(file_prefix = file_prefix)
+
+
+              ## update plots_row
+              fit_tbl[[ curr_row, "plots"]][[1]] <- plots_row
+            }
+             #graphics.off()
+            # browser()
             curr_row <- curr_row + 1
           }  ## End disp_values
         } ## end y0_flag
