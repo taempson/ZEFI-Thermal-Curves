@@ -3,19 +3,20 @@ title: "Piecewise Regression with Negative Binomial Type I Error on Real Data us
 author: "Michael Gilchrist"
 date: "Created: 2023-02-28; Compiled: `r date()`"
 output: 
-    pdf_document:
+#    pdf_document:
         # improve float placement
         # see https://bookdown.org/yihui/rmarkdown-cookbook/figure-placement.html
         # extra_dependencies: ["flafter"]
         # Another way to try and control float placement
-        extra_dependencies: ["float"]
+        #extra_dependencies: ["float"]        
+        #keep_tex:  true
 ---
 
-```{r setup, include=FALSE, }
+```{r setup, include = FALSE}
 
 knitr::opts_chunk$set(
-  dev = 'pdf',
-  fig.height = 9, #set height for all figures, can be changed for individual chunks
+  #dev = 'pdf',
+  fig.height = 8.5, #set height for all figures, can be changed for individual chunks
   fig.pos = "H", out.extra = "", # option for latex pacakge `float`
   warning = TRUE, # show warnings
   message = TRUE, # show messages
@@ -155,7 +156,10 @@ source("../../../custom-brms-families/families/nbinom_type1.R")
 ## Load Data
 
 ```{r}
-sapply(file.path("input", dir("input")),
+infiles <- file.path("input", dir("input"))
+print(infiles)
+
+sapply(infiles,
        load, verbose = TRUE, envir = .GlobalEnv)
 
 head(stats_ind)
@@ -171,6 +175,8 @@ names(data_ind)
 
 display_plots <- FALSE
 save_plots_file <- FALSE
+color_scheme_set("viridis")
+
 ```
 
 ## Determine reasonable priors for y0
@@ -258,17 +264,18 @@ cat(stan_two_piece_func)
 
 ```{r}
 
-fit_tbl_initiate_crossed <- FALSE
+fit_tbl_initiate_crossed <- TRUE
 
-models <- c("one_piece", "two_piece", "asymptotic")[2:3] #, "one_piece") #, "asymptotic")
+models <- c("one_piece", "two_piece", "asymptotic") #, "one_piece") #, "asymptotic")
 sampling_dists <- c("nbinom_type1") ##, "com_poisson") ## lognormal doesn't work since the counts can be 0.
 flags_x0 <- c("uniform_1",
+              "uniform_2",
               "groups_1", ## this doesn't work with x0_Intercept prior, suggests error in priors
-              #              "groups_2a",
+              "groups_2", #              "groups_2a",
               #              "groups_2b",
               "individual")
 
-flags_y0 <- c("uniform_1", "groups_1", "individual")[3]
+flags_y0 <- c("uniform_1", "groups_1", "individual") %>% last()
 
 values_disp <- switch(1,
                       c(0.01), # 0.125 is a good value
@@ -276,7 +283,7 @@ values_disp <- switch(1,
                       list(0.1, "flat"), #, 0.1, 1) # doesn't work yet
                       c("flat"))
 
-flags_disp <- c("uniform_1", "groups_1", "individual", "uniform_2")
+flags_disp <- c("uniform_1", "uniform_2", "groups_1", "individual")
 
 
 ## whether to filter males with large disp values estimated using one piece model
@@ -297,7 +304,7 @@ fit_tbl_crossed <- crossing(
   stats_fit = list(NA),
   fit_best = list(NA),
   fit_top = list(NA),
-  plots = list(NA),
+  plots = list(list()),
   llik = list(NA),
   r_eff = list(NA),
   loo = list(NA)
@@ -316,34 +323,60 @@ if(fit_tbl_initiate_crossed) {
 ```
 
 
-### Run fits
+### Run fit
 
-```{r, message = FALSE }
+Note
+
+- Code starting wth `results=...` added to allow use of `\clearpage`
+  For more details, see: [https://stackoverflow.com/a/48069427/5322644].
+
+```{r, message = TRUE, results='asis', eval=(opts_knit$get('rmarkdown.pandoc.to') == 'latex'), echo = FALSE} 
+
+## Run Settings
+run_fits <- TRUE
+#run_fits <- FALSE
+save_fits <- FALSE
+#save_fits <- TRUE 
+run_fits_force <- TRUE # force refitting of model; used with run_fits = TRUE
+force_load <- FALSE  # reload fit_tbl even if it already exits; used with run_fits = FALSE
+verbose <- TRUE
 
 ## Fit Settings
 render_plots <- TRUE ## Build or use previously generated plots in tbl
-render_plots_force <- FALSE ## Force regeneration of plots if they already exist
+render_plots_force <- TRUE ## Force regeneration of plots if they already exist
+render_hex <- TRUE
+render_hist <- TRUE
+render_pairs <- FALSE
+off_diag_fun = "hex"
+
+
 if(interactive()) {
   display_plots <- FALSE ## Display plots to local device?
+  save_plots_file <- TRUE  ## Save plots to file?
 } else {
   display_plots <- TRUE
+  save_plots_file <- FALSE 
 }
-save_plots_file <- FALSE  ## Save plots to file?
-## save_plots_tibble
-##rerender_plots <- FALSE ## Option to force rerendering of plot
-run_fits <- FALSE
-save_fits <- TRUE #FALSE
-run_fits_force <- FALSE # force refitting of model; used with run_fits = TRUE
-force_load <- FALSE  # reload fit_tbl even if it already exits; used with run_fits = FALSE
-print_get_prior <- FALSE ## Print generic priors, prior to fit.
-print_prior_summary <- FALSE  ## Print actual priors, post fitting
 
-if(run_fits) {
+
+## Print settings
+print_get_prior <- TRUE ## Print generic priors, prior to fit.
+print_prior_summary <- TRUE  ## Print actual priors, post fitting
+
+if(run_fits_force) {
   infile_tbl <- NULL
 } else {
   infile <- last(dir(file.path(output_dir, "tibbles"), "fit_tbl.*"))
+  ## over ride latest file below
+  #infile <- "fit_tbl_adapt-delta-0.90.Rda"
   infile_tbl <- file.path(output_dir, "tibbles", infile)
+  if(force_load) {
+    print(paste0("Loading `infile_tbl` = ", infile_tbl))
+    load(infile_tbl)
+  }
+  
 }
+
 
 if(save_fits) {
   cur_time <- gsub(" ", "_", Sys.time()) %>% gsub(":", ".", .)
@@ -365,7 +398,7 @@ n_chains_top <- 4  # how many to keep for model analysis
 flags_x0_used <- c("individual", "groups_1", "uniform_1") # %>% rev()#
 flags_y0_used <- c("individual")
 values_disp_used <- values_disp
-flags_disp_used <- c("individual", "groups_1", "uniform_1", "uniform_2")[3:4] #  |> rev() |> first()
+flags_disp_used <- c("individual", "groups_1", "groups_2", "uniform_1", "uniform_2")[4:5] #  |> rev() |> first()
 models_used <- c("one_piece", "two_piece", "asymptotic")[2] #c("one_piece", "two_piece") #, "two_piece")
 shape_y0_prior <- "flat" # flat or normal
 
@@ -389,7 +422,7 @@ for(model in models_used) {
            stan_func <- stan_two_piece_func
            warmup <- 30000 # floor(3/4 * iter)
            iter <- warmup + 10000
-           adapt_delta <- 0.99 ## increasing from 0.9 to 0.99 didn't help eliminate divergence
+           adapt_delta <- 0.9 ## increasing from 0.9 to 0.99 didn't help eliminate divergence
            thin <- 5
          },
          one_piece = {
@@ -410,9 +443,9 @@ for(model in models_used) {
          )
 
   cat(stan_func)
-    
+  
 
-  for(male_filter in c(FALSE) ) { #, TRUE)) {
+  for(male_filter in c(FALSE)) { #, TRUE)) {
     
     for(disp_flag in flags_disp_used) {  
       
@@ -432,7 +465,7 @@ for(model in models_used) {
             desc <- paste0(sampling, "; ", model, "; ", desc_short)
             #print(desc)
             
-            desc_filename <- gsub("_", "-", desc) %>%
+            desc_filename <- gsub("_|\\.", "-", desc) %>%
               gsub("; ", "_", .) %>%
               gsub(":? ", "-", .)
 
@@ -442,8 +475,8 @@ for(model in models_used) {
 
             if(run_fits) {
 
-              fit_prerun <- fit_tbl[[curr_row, "fit"]][[1]]
-              if(!run_fits_force | !is_brmsfit(fit_prerun)) {
+              ifelse(length(fit_tbl) >= curr_row, fit_prerun <- fit_tbl[[curr_row, "fit"]][[1]], fit_prerun <- "NA")
+              if(run_fits_force | !is_brmsfit(fit_prerun)) {
                 print("Fitting Models")
                 switch(sampling,
                        "nbinom_type1"= {
@@ -470,13 +503,15 @@ for(model in models_used) {
                                   filter(!(male %in% male_filter_out))
 
 
-                print("Set grouping flags")
-                for(flag_prefix in c("x0", "y0", "disp") ) {
+                print("Set grouping flags and formula")
+                
+                for(flag_prefix in c("x0", "y0", "disp")) {
 
                   group_txt <- paste0(flag_prefix, "_group")
                   flag_txt <- paste0(flag_prefix, "_flag")
                   flag <- eval(parse(text = flag_txt))
-                  
+
+                  ## Map from flags to more general categories below: "single", "double"...
                   switch_male <- which_switch_male(flag)
 
                   data <- switch(switch_male,
@@ -484,49 +519,54 @@ for(model in models_used) {
                                    mutate(data, tmp_group = 1)
                                  },
                                  "double" = {
+                                   male_high <- eval(parse(text=paste0("male_", flag_prefix, "_high")))
                                    mutate(
                                      data,
                                      tmp_group =
-                                       if_else(male %in% male_disp_high, 2, 1))
+                                       if_else(male %in% male_high, 2, 1))
                                  },
                                  "individual" = {
-                                   mutate(data, tmp_group = male)
+                                   mutate(data, tmp_group = 1) #tmp_group = male)
                                  },
                                  NA
                                  ) %>%
                     rename(!!group_txt := tmp_group)
-                }
 
-                str_extract_all(names(data), ".*_flag") %>%
-                  unlist() %>%
-                  print()
-                                
-                print("Define model formulas")
-                for(flag_prefix in c("x0", "y0", "disp") ) {
-                  
+                
+                  ## Define model formulas                 
                   flag_txt <- paste0(flag_prefix, "_flag")
                   flag <- eval(parse(text = flag_txt))
 
 
                   print(paste0(flag_prefix, ": ", flag))
                   
+                  flag_str <- paste0(flag_prefix, "_group")
                   
                   string_formula <- switch(flag,
                                            uniform_1 = paste0(flag_prefix, " ~ 0 + Intercept"),
-                                           uniform_2 = paste0(flag_prefix, " ~ 0 + ", flag_prefix, "_group"),
+                                           ## Doesn't work: paste0(flag_prefix, " ~ 0 + ", flag_str),
+                                           uniform_2 = paste0(flag_prefix, " ~ 0 + Intercept + ", flag_str),
                                            ## `0 + Intercept` avoids prior being defined on centered data
                                            ## The following formulation is incorrect and
                                            ## assumes that x0 is centered around 0
                                            ## groups_1 = formula(x0 ~ 0 + (1|male)),
                                            groups_1 = paste0(flag_prefix, " ~ 0 + Intercept + (1|male)"),
+                                             ##paste0(flag_prefix, " ~ 0 + ", flag_str, " + (", flag_str, "|male)"),
+
                                            
-                                           groups_2 = paste0(flag_prefix, " ~ 0 + Intercept + (1|male) + ", flag_prefix, "_group"),
+                                           groups_2 = paste0(flag_prefix, " ~ 0 + Intercept + (1|male) + ", flag_str),
+                                           ##paste0(flag_prefix, " ~ 0 + (", flag_str, "|male)"),
+                                             
                                            individual = paste0(flag_prefix, " ~ 0 + male"), ## Do not use 1 + male!
                                            NA
                                            )
                   form_txt <- paste0(flag_prefix, "_form")
                   assign(form_txt, as.formula(string_formula))
                 }
+
+                ## str_extract_all(names(data), ".*_flag") %>%
+                ##   unlist() %>%
+                ##   print()
                 
                 ## Used in asymptotic model: use phi instead of threshold x0
                 phi_form <- formula(deparse(x0_form) %>% gsub("x0", "phi", .))
@@ -588,6 +628,7 @@ for(model in models_used) {
                                    )
                 
                 x0_priors <- prior(uniform(32, 45.9), lb = 32, ub = 45.9, nlpar = "x0") +
+                  #prior(uniform(32, 45.9), lb = 32, ub = 45.9, nlpar = "x0") +
                   x0_prior
 
                 phi_priors <- prior(uniform(0.1, 100), lb = 0.01, ub = 17, nlpar = "phi")
@@ -724,7 +765,7 @@ for(model in models_used) {
               print("Working with Pre-existing Fits")
               
               ## Try to assign from local memory.
-              if(!exists("fit_tbl") | force_load | nrow(fit_tbl) == 0) {
+              if(!exists("fit_tbl") | nrow(fit_tbl) == 0) {
                 print(paste("Loading Models from file", infile_tbl))       
                 load(file = infile_tbl, verbose = TRUE)
                 ## Need only for older fittings
@@ -732,6 +773,7 @@ for(model in models_used) {
               }
               
               fit <- fit_tbl[[curr_row, "fit"]][[1]]
+              print(paste0("`class(fit)` = ", class(fit)))
               fit_stan <- fit$fit
               ## These shoudl be brmsfit objects
               fit_top <- fit_tbl[[curr_row, "fit_top"]][[1]]
@@ -754,21 +796,29 @@ for(model in models_used) {
             print(summary(fit)) #, pars = "x0*"))          %>% filter(nlpar!="y0"))
             print(stats_fit)
 
-            ##clean up variable names
+            ## Clean up variable names
             fit_stan_rename <-
               fit_stan %>%
-              setNames(gsub("b_", "", names(.)) %>%
-                         gsub("(x0|phi|y0)_male[0-9]{3})", "\\2_\\1", .) %>%
-                         gsub("__", "_", .) %>%
-                         gsub("r_male_(x0|phi|y0)\\[(Tplo[0-9]{3}),Intercept\\]", "\\2_\\1_r", .) %>%
-                         gsub("\\.", " ", .))
+              clean_var_names()
+            
+            data <- fit$data
+            vars_clean <- names(fit_stan_rename) %>% na.omit(.)
+            male_vec <- unique(data$male) %>% as.character(.)
+            ## get male specific vars (start with "T")
+            vars_T <- grep("^T[0-9]{3}", vars_clean, value = TRUE)
+            vars_Intercept <- grep("Intercept", vars_clean, value = TRUE)
+            vars_non_T <- vars_clean[!(vars_clean %in% c(vars_T, vars_Intercept))]
 
+            drop_lprior <- TRUE
+            if(drop_lprior) vars_non_T <- str_subset(vars_non_T, "lprior", negate = TRUE)
+            #print(vars_clean)
             ##  Get plots for current fit settings
-            plots_row <- fit_tbl[[ curr_row, "plots"]]
+            plots_row <- fit_tbl[[ curr_row, "plots"]][[1]]
 
-            ## indicate pXlot name
+            if(verbose) print("Plotting Trace")
+            ## indicate plot name
             plot_name <- "plot_trace"            
-            plot_curr <- plots_row[[plot_name]]            
+            plot_curr <- plots_row[[plot_name]]
             if( (is.null(plot_curr)  | render_plots_force) & render_plots) { ## Generate and append plot
               ## Plotting code goes below here
               plot_trace <- mcmc_trace(fit, pars = c("lp__")) +
@@ -781,6 +831,7 @@ for(model in models_used) {
             }
             
 
+            if(verbose) print("Plotting violin")
             ## indicate plot name
             plot_name <- "plot_violin"            
             plot_curr <- plots_row[[plot_name]]            
@@ -788,8 +839,13 @@ for(model in models_used) {
               ## Plotting code goes below here              
               ## Plot violin plots of posterior values
               ## Based on: https://cran.r-project.org/web/packages/bayesplot/vignettes/plotting-mcmc-draws.html#n_chains <-
-              fit_array <- as.array(fit_stan)
-              plot_violin <- mcmc_violin(fit_array, pars = c("lp__"), probs = c(0.1, 0.5, 0.9)) +
+              fit_array <- as.array(fit_stan_rename)
+              if(FALSE) { ## use violin plots
+                plot_tmp <- mcmc_violin(fit_array, pars = c("lp_"), probs = c(0.1, 0.5, 0.9))
+              } else { # use histograms
+                plot_tmp <- mcmc_hist_by_chain(fit_array, pars = c("lp_")) #, color_chains = TRUE)
+              }
+              plot_violin <- plot_tmp +
                 yaxis_ticks(on = TRUE) +
                 yaxis_text(on = TRUE) +
                 ggtitle(desc_short)
@@ -801,42 +857,121 @@ for(model in models_used) {
             }
 
             
-            plot_trace_and_violin <- plot_grid(plotlist = list(plot_trace, plot_violin),
-                                           ncol = 1)
+            plot_trace_and_violin <- plot_grid(plotlist = list(plot_trace, (plot_violin + ggtitle(NULL))),
+                                               ncol = 1,
+                                               rel_heights=c(0.3, 1))
             if(save_plots_file) last_plot_save(file_prefix = "trace-and-violin")
             if(display_plots) print(last_plot())
-            
-            vars_fit <- names(fit_stan_rename) %>% na.omit(.) %>% sort(., decreasing = TRUE)
-            ncol <- 4 
 
+            ## Count occurence of each male in model fit_brms
+            ## This is used to control plotting
+            male_instance <- sapply(male_vec, function(x) {sum(str_detect(x, string=vars_clean))})
 
-            plot_name <- "plot_hist"
-            plot_curr <- plots_row[[plot_name]]            
-            if( (is.null(plot_curr) | render_plots_force) & render_plots) { ## Generate and append plot
-              ## Plotting code goes below here              
-              plot_hist <-  stan_hist(fit_stan_rename,
-                                    pars = vars_fit,
-                                    bins = 30,
-                                    ncol = ncol) + 
-              ggtitle(desc_short) +
-              ## Reduce plot label size
-                theme(plot.title = element_text(size = rel(1), face = "bold"))
-              ## Finish plotting code
-              plots_row[[plot_name]] <- plot_hist
-            } else{
-              ## update last_plot() settings
-              set_last_plot(plot_hist)
+            if(render_hist) {
+              if(verbose) print("Plotting hist")
+              ## This one can be replace by plot_hex or scatter
+              plot_name <- "plot_hist"
+              plot_curr <- plots_row[[plot_name]]            
+              if( (is.null(plot_curr) | render_plots_force) & render_plots) { ## Generate and append plot
+                vars_fit <- names(fit_stan_rename) %>% na.omit(.) %>% sort(., decreasing = TRUE)
+                ncol <- 4
+                ## Plotting code goes below here              
+                plot_hist <-  stan_hist(fit_stan_rename,
+                                        pars = vars_fit,
+                                        bins = 30,
+                                        ncol = ncol) + 
+                  ggtitle(desc_short) +
+                  ## Reduce plot label size
+                  theme(plot.title = element_text(size = rel(1), face = "bold"))
+                ## Finish plotting code
+                plots_row[[plot_name]] <- plot_hist
+              } else{
+                ## update last_plot() settings
+                set_last_plot(plot_hist)
+              }
+              file_prefix <- sub("plot_", "", plot_name)                
+              if(save_plots_file) last_plot_save(file_prefix = file_prefix)            
+              if(display_plots) print(last_plot())
             }
-            file_prefix <- sub("plot_", "", plot_name)                
-            if(save_plots_file) last_plot_save(file_prefix = file_prefix)            
-            if(display_plots) print(last_plot())
+            
+            # remove old scatter plots
+            plots_row[["plot_scatter"]] <- NULL
+            if(render_hex) {
+              plot_name <- "plot_hex"
+              plot_curr <- plots_row[[plot_name]]            
+              if( (is.null(plot_curr) | render_plots_force | TRUE) & render_plots) { ## Generate and append plot
+                print("Plotting Hex")
+                scatter_list <- list()
 
+                for(male in male_vec) {
+                  # print(male)
+                  vars_male <- grep(male, vars_T, value = TRUE)
+                  #                  mutate(x = gsub("T[0-9]{3}_","", x), y = gsub("T[0-9]{3}_","", y))
+                  if(length(vars_male) == 1) {
+                    ## include lp
+                    vars_male <- c(vars_male, "lp_")
+                    ylab <- "log(Posterior)"
+                  } else {
 
-            plot_name <- "plot_pairs"
-            plot_curr <- plots_row[[plot_name]]            
-            if( (is.null(plot_curr) | render_plots_force) & render_plots) { ## Generate and append plot
-              ## Pairs Plot
-              list_plot <- list()
+                    if(length(vars_male) > 2) {
+                      print(
+                        paste0("WARNING: mcmc_hex can only work with 2 variables, but length(vars_male) = ",
+                               length(vars_male),
+                               "; vars_male = ",
+                               paste(vars_male),
+                               " Using only first two elements.",
+                               collapse = ","))
+                      vars_male <- vars_male[1:2]
+                    }
+                    
+                    ylab <- "y0"
+                    
+                  }
+                  
+                  scatter_tmp <-  mcmc_hex( #was mcmc_scatter
+                    fit_stan_rename,
+                    ## Can only use two variables
+                    pars = c(first(vars_male), last(vars_male)),
+                    ) + labs(x = "x0", y = ylab, title = male)
+
+                  ## Add histograms to plot axes/margin
+                  ## ggMarginal doesn't work natively with mcmc_hex, so we need to make the
+                  ## points transparent and then add a hex layer
+                  scatter_list[[male]] <- ggExtra::ggMarginal(scatter_tmp +
+                                                                geom_point(col="transparent") +
+                                                                geom_hex() +
+                                                                theme(legend.position = "none"), type = "histogram")
+                  
+                }
+                
+                p <- plot_grid(plotlist = scatter_list,
+                               ncol = 3) #, legend = TRUE)
+                
+                title_row <- ggdraw() + draw_label(desc_short, fontface='bold', size = 10)
+                
+                plot_hex <- plot_grid(title_row, p, ncol = 1, rel_heights=c(0.1, 1))
+
+                ## Finish plotting code
+                plots_row[[plot_name]] <- plot_hex
+              } else {
+                ## update last_plot() settings
+                set_last_plot(plot_hex)
+              }
+              
+              file_prefix <- sub("plot_", "", plot_name)                
+              if(save_plots_file) last_plot_save(file_prefix = file_prefix)            
+              if(display_plots) print(last_plot())
+            }
+
+            if(render_pairs) {
+              ## plot_Pairs not that useful
+              ## Might want to flag off 
+              plot_name <- "plot_pairs"
+              plot_curr <- plots_row[[plot_name]]            
+              if( (is.null(plot_curr) | render_plots_force) & render_plots) { ## Generate and append plot
+                print("Plotting Pairs")
+                ## Pairs Plot
+                list_plot <- list()
                 if(model == "one_piece" & disp_flag != "individual") {
                   ## each male only appears once in the one piece models
                   splitby <- 3
@@ -910,6 +1045,8 @@ for(model in models_used) {
              #graphics.off()
             # browser()
             curr_row <- curr_row + 1
+            cat("\\clearpage")
+            
           }  ## End disp_values
         } ## end y0_flag
       } ## end x0_flag
@@ -917,7 +1054,7 @@ for(model in models_used) {
   } ## end filter male
 } ## end model_used
 
-rm("curr_row")
+# rm("curr_row")
 ```
 
 ```{r}
