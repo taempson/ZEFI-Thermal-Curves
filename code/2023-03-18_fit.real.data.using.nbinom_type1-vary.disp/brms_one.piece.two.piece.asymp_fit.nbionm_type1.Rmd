@@ -398,7 +398,7 @@ n_chains_top <- 4  # how many to keep for model analysis
 flags_x0_used <- c("individual", "groups_1", "uniform_1") # %>% rev()#
 flags_y0_used <- c("individual")
 values_disp_used <- values_disp
-flags_disp_used <- c("individual", "groups_1", "groups_2", "uniform_1", "uniform_2")[4:5] #  |> rev() |> first()
+flags_disp_used <- c("individual", "groups_1", "groups_2", "uniform_1", "uniform_2")[5] #  |> rev() |> first()
 models_used <- c("one_piece", "two_piece", "asymptotic")[2] #c("one_piece", "two_piece") #, "two_piece")
 shape_y0_prior <- "flat" # flat or normal
 
@@ -523,7 +523,7 @@ for(model in models_used) {
                                    mutate(
                                      data,
                                      tmp_group =
-                                       if_else(male %in% male_high, 2, 1))
+                                       as.factor(if_else(male %in% male_high, 2, 1)))
                                  },
                                  "individual" = {
                                    mutate(data, tmp_group = 1) #tmp_group = male)
@@ -545,7 +545,7 @@ for(model in models_used) {
                   string_formula <- switch(flag,
                                            uniform_1 = paste0(flag_prefix, " ~ 0 + Intercept"),
                                            ## Doesn't work: paste0(flag_prefix, " ~ 0 + ", flag_str),
-                                           uniform_2 = paste0(flag_prefix, " ~ 0 + Intercept + ", flag_str),
+                                           uniform_2 = paste0(flag_prefix, " ~ 0 + ", flag_str),
                                            ## `0 + Intercept` avoids prior being defined on centered data
                                            ## The following formulation is incorrect and
                                            ## assumes that x0 is centered around 0
