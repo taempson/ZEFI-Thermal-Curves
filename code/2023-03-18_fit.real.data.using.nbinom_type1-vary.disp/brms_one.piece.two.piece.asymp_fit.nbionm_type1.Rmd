@@ -330,32 +330,49 @@ Note
 - Code starting wth `results=...` added to allow use of `\clearpage`
   For more details, see: [https://stackoverflow.com/a/48069427/5322644].
 
-```{r, message = TRUE, results='asis', eval=(opts_knit$get('rmarkdown.pandoc.to') == 'latex'), echo = FALSE} 
+```{r, message = TRUE} 
 
-## Run Settings
-run_fits <- TRUE
-#run_fits <- FALSE
-save_fits <- FALSE
-#save_fits <- TRUE 
-run_fits_force <- TRUE # force refitting of model; used with run_fits = TRUE
-force_load <- FALSE  # reload fit_tbl even if it already exits; used with run_fits = FALSE
-verbose <- TRUE
-
-## Fit Settings
-render_plots <- TRUE ## Build or use previously generated plots in tbl
-render_plots_force <- TRUE ## Force regeneration of plots if they already exist
-render_hex <- TRUE
-render_hist <- TRUE
-render_pairs <- FALSE
-off_diag_fun = "hex"
-
+##, results='asis', eval=(knitr::opts_knit$get('rmarkdown.pandoc.to') == 'latex'), echo = TRUE} 
 
 if(interactive()) {
-  display_plots <- FALSE ## Display plots to local device?
-  save_plots_file <- TRUE  ## Save plots to file?
+    ## Run Settings
+    run_fits <- TRUE
+    ## run_fits <- FALSE
+    save_fits <- FALSE
+    ## save_fits <- TRUE 
+    run_fits_force <- TRUE # force refitting of model; used with run_fits = TRUE
+    load_fits <- FALSE  # reload fit_tbl even if it already exits; used with run_fits = FALSE
+    verbose <- TRUE
+
+    ## Fit Settings
+    render_plots <- TRUE ## Build or use previously generated plots in tbl
+    render_plots_force <- TRUE ## Force regeneration of plots if they already exist
+    render_hex <- TRUE
+    render_hist <- TRUE
+    render_pairs <- FALSE
+    off_diag_fun = "hex"
+    display_plots <- FALSE ## Display plots to local device?
+    save_plots_file <- TRUE  ## Save plots to file?
 } else {
-  display_plots <- TRUE
-  save_plots_file <- FALSE 
+
+    ## Non-interactive (Knitr) settings 
+
+    run_fits <- FALSE
+    save_fits <- FALSE
+    ## save_fits <- TRUE 
+    run_fits_force <- FALSE # force refitting of model; used with run_fits = TRUE
+    load_fits <- TRUE  # load fit_tbl below?
+    verbose <- TRUE
+
+    ## Fit Settings
+    render_plots <- TRUE ## Build or use previously generated plots in tbl
+    render_plots_force <- TRUE ## Force regeneration of plots if they already exist
+    render_hex <- TRUE
+    render_hist <- TRUE
+    render_pairs <- FALSE
+    off_diag_fun <- "hex"    
+    display_plots <- TRUE
+    save_plots_file <- FALSE    
 }
 
 
@@ -370,7 +387,8 @@ if(run_fits_force) {
   ## over ride latest file below
   #infile <- "fit_tbl_adapt-delta-0.90.Rda"
   infile_tbl <- file.path(output_dir, "tibbles", infile)
-  if(force_load) {
+  
+  if(load_fits) {
     print(paste0("Loading `infile_tbl` = ", infile_tbl))
     load(infile_tbl)
   }
@@ -381,9 +399,8 @@ if(run_fits_force) {
 if(save_fits) {
   cur_time <- gsub(" ", "_", Sys.time()) %>% gsub(":", ".", .)
   outfile_tbl <- file.path(output_dir, "tibbles", paste0("fit_tbl_", cur_time, ".Rda"))
-  
 } else {
-  outfile_tbl <- NULL
+  outfile_tbl <- NA ## NULL causes an error when trying to print
 }
 
 print_pairs_plot <- FALSE  # Could base on model used, gets large when lots of individual or groups
@@ -398,7 +415,7 @@ n_chains_top <- 4  # how many to keep for model analysis
 flags_x0_used <- c("individual", "groups_1", "uniform_1") # %>% rev()#
 flags_y0_used <- c("individual")
 values_disp_used <- values_disp
-flags_disp_used <- c("individual", "groups_1", "groups_2", "uniform_1", "uniform_2")[5] #  |> rev() |> first()
+flags_disp_used <- c("individual", "groups_1", "groups_2", "uniform_1", "uniform_2")[4:5] #  |> rev() |> first()
 models_used <- c("one_piece", "two_piece", "asymptotic")[2] #c("one_piece", "two_piece") #, "two_piece")
 shape_y0_prior <- "flat" # flat or normal
 
