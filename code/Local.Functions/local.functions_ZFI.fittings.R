@@ -113,7 +113,7 @@ plot_pred <- function(data_pred, male_vec, desc, data_obs = NULL) {
     filter(male %in% male_vec)
   plot_tmp <- ggplot(data = data_pred_tmp, aes(x = x, y = .prediction)) + #, color = male)) +
     ## Combine Scatter Plots and Model vs Data Plots
-    stat_lineribbon(aes(y = .epred), .width = c(.95, .8, .5, 0.25), color = "#08519C") +
+    stat_lineribbon(aes(y = .prediction), .width = c(.95, .8, .5, 0.25), color = "#08519C") +
     scale_fill_brewer(palette = "Greys", direction =  -1)
 
   #scale_color_manual(values = colors_male) +
