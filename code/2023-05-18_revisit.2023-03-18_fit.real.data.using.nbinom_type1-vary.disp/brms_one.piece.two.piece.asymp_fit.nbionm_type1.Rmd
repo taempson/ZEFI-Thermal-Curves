@@ -292,7 +292,7 @@ values_disp <- switch(1,
                       list(0.1, "flat"), #, 0.1, 1) # doesn't work yet
                       c("flat"))
 
-flags_disp <- c("uniform_1", "uniform_2", "groups_1", "individual")
+flags_disp <- c("uniform_1", "uniform_2", "groups_1", "groups_2", "individual")
 
 
 ## whether to filter males with large disp values estimated using one piece model
@@ -302,7 +302,6 @@ N <- length(data)
 
 ## define full table a priori
 fit_tbl_crossed <- crossing(
-  model = models,
   #sampling_dist = sampling_dists,
   x0_flag = flags_x0,
   y0_flag = flags_y0,
@@ -316,7 +315,10 @@ fit_tbl_crossed <- crossing(
   plots = list(list()),
   llik = list(NA),
   r_eff = list(NA),
-  loo = list(NA)
+  loo = list(NA),
+  desc = NA,
+  model = models,
+
 )
 
 
@@ -349,7 +351,8 @@ if(interactive()) {
     ## run_fits <- FALSE
     save_fits <- FALSE
     save_fits <- TRUE 
-    run_fits_force <- TRUE # force refitting of model; used with run_fits = TRUE
+    run_fits_force <- TRUE #
+    #run_fits_force <- TRUE # force refitting of model; used with run_fits = TRUE
     load_fits <- FALSE  # reload fit_tbl even if it already exits; used with run_fits = FALSE
     verbose <- TRUE
 
@@ -383,6 +386,14 @@ if(interactive()) {
     save_plots_file <- TRUE
 }
 
+## Get all fits similar to the best one
+## DOESN"T WORK CONSISTENTLY
+## There's an issue with the local.functions code
+## not working with both stanfit and brmsfit objects
+## It's very confusing
+make_stan_best <- TRUE
+## Get X top fits, independent of if they are consistent with the 'best'
+make_stan_top <- TRUE
 
 ## Print settings
 print_get_prior <- TRUE ## Print generic priors, prior to fit.
@@ -424,7 +435,7 @@ n_chains_top <- 4  # how many to keep for model analysis
 flags_x0_used <- c("individual", "groups_1", "uniform_1") # %>% rev()#
 flags_y0_used <- c("individual")
 values_disp_used <- values_disp
-flags_disp_used <- c("individual", "groups_1", "groups_2", "uniform_1", "uniform_2")[4:5] #  |> rev() |> first()
+flags_disp_used <- c("individual", "groups_1", "groups_2", "uniform_1", "uniform_2") #  |> rev() |> first()
 models_used <- c("one_piece", "two_piece", "asymptotic")[2] #c("one_piece", "two_piece") #, "two_piece")
 shape_y0_prior <- "flat" # flat or normal
 
@@ -448,7 +459,7 @@ for(model in models_used) {
            stan_func <- stan_two_piece_func
            warmup <- 30000 # floor(3/4 * iter)
            iter <- warmup + 10000
-           adapt_delta <- 0.9 ## increasing from 0.9 to 0.99 didn't help eliminate divergence
+           adapt_delta <- 0.85 ## increasing from 0.9 to 0.99 didn't help eliminate divergence
            thin <- 5
          },
          one_piece = {
@@ -533,10 +544,11 @@ for(model in models_used) {
                 
                 for(flag_prefix in c("x0", "y0", "disp")) {
 
-                  group_txt <- paste0(flag_prefix, "_group")
+                    
+                  category_txt <- paste0(flag_prefix, "_category")
                   flag_txt <- paste0(flag_prefix, "_flag")
                   flag <- eval(parse(text = flag_txt))
-
+                    
                   ## Map from flags to more general categories below: "single", "double"...
                   switch_male <- which_switch_male(flag)
 
@@ -556,17 +568,11 @@ for(model in models_used) {
                                  },
                                  NA
                                  ) %>%
-                    rename(!!group_txt := tmp_group)
-
-                
-                  ## Define model formulas                 
-                  flag_txt <- paste0(flag_prefix, "_flag")
-                  flag <- eval(parse(text = flag_txt))
-
+                    rename(!!category_txt := tmp_group)
 
                   print(paste0(flag_prefix, ": ", flag))
                   
-                  flag_str <- paste0(flag_prefix, "_group")
+                  flag_str <- paste0(flag_prefix, "_category")
                   
                   string_formula <- switch(flag,
                                            uniform_1 = paste0(flag_prefix, " ~ 0 + Intercept"),
@@ -576,11 +582,16 @@ for(model in models_used) {
                                            ## The following formulation is incorrect and
                                            ## assumes that x0 is centered around 0
                                            ## groups_1 = formula(x0 ~ 0 + (1|male)),
-                                           groups_1 = paste0(flag_prefix, " ~ 0 + Intercept + (1|male)"),
+                                           ## According to the brms documentation, nonlinear models
+                                           ## are always uncentered, thus previously we used
+                                           ##   groups_1 = paste0(flag_prefix, " ~ 0 + Intercept + (1|male)"),
+                                           ## but we now use
+                                           groups_1 = paste0(flag_prefix, " ~ (1 + 1|male)"),
                                              ##paste0(flag_prefix, " ~ 0 + ", flag_str, " + (", flag_str, "|male)"),
 
                                            
-                                           groups_2 = paste0(flag_prefix, " ~ 0 + Intercept + (1|male) + ", flag_str),
+                                           ## groups_2 = paste0(flag_prefix, " ~ 0 + Intercept + (1|male) + ", flag_str),
+                                           groups_2 = paste0(flag_prefix, " ~ ", flag_str, " + (1|male)"),
                                            ##paste0(flag_prefix, " ~ 0 + (", flag_str, "|male)"),
                                              
                                            individual = paste0(flag_prefix, " ~ 0 + male"), ## Do not use 1 + male!
@@ -621,7 +632,7 @@ for(model in models_used) {
                 stanvar_prior <- stanvar(disp_value, name = "disp_value")
                 
                 prior_string <- if(disp_value == "flat") {
-                  "uniform(0, 20)"
+                  "uniform(0, 500)"
                 } else {
                   # encode non-flat prior here, which force recompling when disp_value changes
                   #paste0("exponential(", disp_value, ")")
@@ -636,7 +647,7 @@ for(model in models_used) {
                                       uniform_2 = NULL, ## This is probably broken
                                       groups_1 = set_prior(prior_string,
                                                            class = "b", dpar = "disp", lb = 0, ub = 20) +
-                                        set_prior("uniform(0.1, 5)", class = "sd", dpar = "disp", lb = 0.4, ub = 5),
+                                        set_prior("uniform(0.1, 20)", class = "sd", dpar = "disp", lb = 0.4, ub = 5),
                                       groups_2a = NULL,
                                       groups_2b = NULL,
                                       individual = set_prior(prior_string,
@@ -757,12 +768,6 @@ for(model in models_used) {
               print(stats_fit %>% arrange(desc(mean)))
               fit_tbl[[curr_row, "stats_fit"]][[1]] <- stats_fit
 
-              ## Get all fits similar to the best one
-              ## DOESN"T WORK CONSISTENTLY
-              ## There's an issue with the local.functions code
-              ## not working with both stanfit and brmsfit objects
-              ## It's very confusing
-              make_stan_best <- TRUE
               
               if(make_stan_best) {
                 fit_stan_best <- keep_chains_top(fit_stan, n_chains_max = n_chains_top, verbose = TRUE, best_only = TRUE)
@@ -774,9 +779,6 @@ for(model in models_used) {
                 fit_tbl[[curr_row, "fit_best"]][[1]] <- fit_best
               }
 
-              ## DOESN"T WORK CONSISTENTLY
-              ## There's an issue with the local.functions code
-              make_stan_top <- TRUE
               if(make_stan_top) {
                 ## Get the top fits
                 fit_stan_top <- keep_chains_top(fit_stan, n_chains_max = n_chains_top, verbose = FALSE, best_only = FALSE)
