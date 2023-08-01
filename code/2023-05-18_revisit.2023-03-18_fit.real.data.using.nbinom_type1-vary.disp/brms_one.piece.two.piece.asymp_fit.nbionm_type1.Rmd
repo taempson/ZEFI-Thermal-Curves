@@ -83,6 +83,11 @@ I expect this can be done by imposing a better prior on `x0|male`.
   - removed the 'missing term' from the llikelihood function given that it seems unnecessary and prevented test regression for `custom_family/nbinom_typ1` from working properly
  
 
+- Add 
+  - disp: group_1; 
+  - disp: uniform_1, group_1; x0 individual; 
+  - disp: uniform_1, group_1; x0 group_2; 
+
 ## Insights
 
 - When the `disp` (dispersal or `theta`) gets unrealistically large, we get the emergence of a bimodal distribution at both ends of `x0` values.  
