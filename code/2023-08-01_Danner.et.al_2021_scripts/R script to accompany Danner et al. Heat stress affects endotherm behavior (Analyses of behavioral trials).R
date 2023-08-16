@@ -27,14 +27,18 @@ library(lme4)
 library(dplyr)
 library("r2glmm")
 
+input.dir = file.path("Input", "Performance") ## added by mikeg
+
 drop.levels <- function (dat) {
   if (is.factor(dat)) dat <- dat[, drop = TRUE] else dat[] <-
       lapply(dat, function(x) x[, drop = TRUE]);
   return(dat) ;}; #define the function to drop removed levels (i.e. individuals of unknown sex)
 
 mods<-list()
+basename <- "color_association_thermal_trials.csv"
+input.file <- file.path(input.dir, basename) ## added by mikeg
 color_trials <- 
-  read.csv("color_association_thermal_trials.csv", 
+  read.csv(input.file, 
            header=TRUE) %>% 
   mutate(Date=as.Date(Date, format = "%m/%d/%y", origin = "1899-12-30")) %>%
   mutate(fExam.temp = factor(Exam.temp))
@@ -82,8 +86,10 @@ color_trials <-
   mutate(fExam.temp = factor(Exam.temp)) # drop removed levels
 
 # Foraging efficiency data 
+basename <- "color_association_foraging_efficiency.csv"
+input.file <- file.path(input.dir, basename) ## added by mikeg
 forage <- 
-  read.csv("color_association_foraging_efficiency.csv", 
+  read.csv(input.file,
            header=TRUE)  %>%
   mutate(birddate=paste(Bird, Date, sep=""),
          fTemp.set=factor(Temp.set))
@@ -165,8 +171,10 @@ print(with(mods$seed_lme4,anova(const,temp)))
  
 
 # 1. Number of trials
+basename <- "detour_reaching_thermal_trials.csv"
+input.file <- file.path(input.dir, basename) ## added by mikeg
 detour <- 
-  read.csv("detour_reaching_thermal_trials.csv", 
+  read.csv(input.file,
            header=TRUE) %>% 
   mutate(Date=as.Date(Date, format = "%m/%d/%y", origin = "1899-12-30"),
          Trial.temp=c(Ambient=22, High=44)[as.character(Trial.type)])
