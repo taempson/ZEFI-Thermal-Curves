@@ -1,0 +1,49 @@
+---
+title: "Gilchrist-ZEFI Song Analysis"
+author: "Tara Empson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+setwd("/Users/taraempson/Documents/GitHub/ZEFI-Thermal-Curves/data/song/collated/")
+round2<- read.csv("HSPi-Round-2-Heat-Trials.csv")
+ID<- round2$male
+motif <- round2$motif_count
+ttemp <- round2$temp_target
+```
+
+**Linear**
+
+```{r}
+linear <- lm(motif_count ~ temp_mean, data = round2)
+summary(linear)
+
+ggplot(round2, aes(x=temp_mean, y=motif_count))+
+    geom_point()+
+    geom_smooth(method = "lm", formula = y ~ x, color="red")
+```
+
+**Quadratic**
+
+```{r}
+quad <- lm(round2$motif_count~round2$temp_mean+I(round2$temp_mean^2))
+summary(quad)
+
+ggplot(round2, aes(x=temp_mean, y=motif_count))+
+    geom_point()+
+    geom_smooth(method = "lm", formula = y ~ x + I(x^2), color="red")
+```
+
+**Linear and Quadratic**
+
+```{r}
+#linquad <- lm(round2$motif_count~round2$temp_mean+(round2$temp_mean)^2)
+#summary(linquad)
+
+ggplot(round2, aes(x=temp_mean, y=motif_count))+
+    geom_point()+
+    geom_smooth(method = "lm", formula = y ~ x)+
+    geom_smooth(method = "lm", formula = y ~ x + I(x^2), color="red")
+```
