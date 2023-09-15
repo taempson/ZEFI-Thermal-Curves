@@ -339,7 +339,7 @@ if(interactive()) {
     run_fits <- TRUE
     ## run_fits <- FALSE
     save_fits <- FALSE
-    ## save_fits <- TRUE 
+    save_fits <- TRUE 
     run_fits_force <- TRUE # force refitting of model; used with run_fits = TRUE
     load_fits <- FALSE  # reload fit_tbl even if it already exits; used with run_fits = FALSE
     verbose <- TRUE
@@ -369,10 +369,10 @@ if(interactive()) {
     render_plots_force <- TRUE ## Force regeneration of plots if they already exist
     render_hex <- TRUE
     render_hist <- TRUE
-    render_pairs <- FALSE
-    off_diag_fun <- "hex"    
+    render_pairs <- TRUE
+    off_diag_fun <- "hex"
     display_plots <- TRUE
-    save_plots_file <- FALSE    
+    save_plots_file <- TRUE
 }
 
 
@@ -391,6 +391,7 @@ if(run_fits_force) {
   if(load_fits) {
     print(paste0("Loading `infile_tbl` = ", infile_tbl))
     load(infile_tbl)
+    #fit_tbl[["plots"]] <- list()
   }
   
 }
@@ -912,11 +913,11 @@ for(model in models_used) {
             }
             
             # remove old scatter plots
-            plots_row[["plot_scatter"]] <- NULL
+            # plots_row[["plot_scatter"]] <- NULL
             if(render_hex) {
               plot_name <- "plot_hex"
               plot_curr <- plots_row[[plot_name]]            
-              if( (is.null(plot_curr) | render_plots_force | TRUE) & render_plots) { ## Generate and append plot
+              if( (is.null(plot_curr) | render_plots_force) & render_plots) { ## Generate and append plot
                 print("Plotting Hex")
                 scatter_list <- list()
 
@@ -949,8 +950,9 @@ for(model in models_used) {
                     fit_stan_rename,
                     ## Can only use two variables
                     pars = c(first(vars_male), last(vars_male)),
-                    ) + labs(x = "x0", y = ylab, title = male)
-
+                    ) +
+                      ##labs(x = "x0", y = ylab, title = male)
+                      labs(title = male)
                   ## Add histograms to plot axes/margin
                   ## ggMarginal doesn't work natively with mcmc_hex, so we need to make the
                   ## points transparent and then add a hex layer
@@ -1059,6 +1061,7 @@ for(model in models_used) {
               ## update plots_row
               fit_tbl[[ curr_row, "plots"]][[1]] <- plots_row
             }
+              
              #graphics.off()
             # browser()
             curr_row <- curr_row + 1

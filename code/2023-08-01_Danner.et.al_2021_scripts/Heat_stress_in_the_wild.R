@@ -21,13 +21,15 @@ library("rgdal")
 library("raster")
 
 #Download temperature data from the following website and save in a folder on your computer: http://www.bom.gov.au/jsp/awap/temp/archive.jsp?colour=colour&map=maxave&year=2017&month=1&day=31&period=daily&area=nat
-
-setwd("~/ZB summer temps 201819")
+## mikeg: It's not clear wahta data should be downloaded. The link above is to data for 1 day ouside the the period listed in the paper.
+##   My current guess is that one needs to download 3 months of data, one day at a time. WTH?
+## Comment out and update fls definition
+##setwd("~/ZB summer temps 201819")
 getwd()
 
 #create list of data files
 fls <- NULL
-fls <- list.files() # you can add a pattern if you only want files of a certain type
+fls <- list.files(path ="./Input/Temperature", full.names = TRUE) # you can add a pattern if you only want files of a certain type
 
 #create a stack of data files
 dst <- NULL
