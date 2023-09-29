@@ -1,0 +1,69 @@
+---
+title: "Gilchrist- Standard Deviation of Temperature Loggers"
+author: "Tara Empson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+Trying to get standard deviation from the temp logger files. Can't figure out how to write a function to do it. 
+```{r eval=FALSE, include=FALSE}
+library(tidyverse)
+setwd("../../data/raw/chamber-temp-and-humidity/")
+getwd()
+files <- list.files(".", pattern="*.txt")
+# lapply(files, function(f) {
+#     read.table(file=f, fill=TRUE, header = FALSE, sep = ",", dec=".", skip = 1)
+#     })
+
+
+getTemp<-function(x, files){
+    cdtemp<-read.table(file=x, fill=TRUE, header = FALSE, sep = ",", dec=".", skip = 1)
+    df<-data.frame(matrix(ncol=7,nrow=0)) #
+    for(line in cdtemp){
+        new_line<-strsplit(line, split=',') # Split the lines based on where a comma is found. This creates a vector of vectors (Matrix, if you will), which can be looped through for the comma-separated-lines
+        #print(new_line)
+        for (v in new_line){
+            temp_vector <- c()
+            for(item in strsplit(v, split=" ")){
+                print(item)
+                append(temp_vector, item)
+            }
+            df<-rbind(df, temp_vector)
+        }
+    }
+    column_names<- c("HSPi",	"Time",	"Celsius",	"High Alarm",	"Humidity",	"Dew Point",	"Serial Number")
+    colnames(df)<-column_names
+}
+
+Temp<-lapply(files,getTemp)
+
+setwd("~/")
+write.csv(Temp,"Test")
+hi<- read.csv("Test.csv")
+```
+
+Going to do this the super inefficient way.
+```{r}
+library(tidyverse)
+setwd("../../data/raw/chamber-temp-and-humidity/")
+getwd()
+files <- list.files(".", pattern="*.txt")
+lapply(files, function(f) {
+    df = read_delim(f,",") #"HSPi_2_02_03_22.txt"
+    df= read.table(file=f, fill=TRUE, header = FALSE, sep = ",", dec=".", skip = 1)
+    data_frame(df, (f), row.names=FALSE)
+})
+Feb032022<- read.table(file="HSPi_2_02_03_22.txt", fill=TRUE, header = FALSE, sep = ",", dec=".", skip = 1)
+column_names<- c("HSPi",	"Time",	"Celsius",	"High Alarm",	"Humidity",	"Dew Point",	"Serial Number")
+colnames(df)<-column_names
+```
+
+
+```{r}
+setwd("../../collated/")
+round2<- read.csv("HSPi-Round-2-Heat-Trials.csv")
+quad <- round2 %>% 
+    lm(sd~temp_mean+I(temp_mean^2))
+summary(quad)
+```
+
