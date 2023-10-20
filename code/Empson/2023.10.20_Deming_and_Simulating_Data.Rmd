@@ -30,8 +30,8 @@ library(patchwork)
 ```{r}
 setwd("../../data/collated/")
 set.seed(1)
-raw.data <- read.csv("HSPi-Repeatability-Song-Count.csv")
-raw.data <- raw.data %>% 
+og.raw.data <- read.csv("HSPi-Repeatability-Song-Count.csv")
+raw.data <- og.raw.data %>% 
     filter(male!="T230")
 raw.data$day<- c(1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3)
 #adding in day order
@@ -52,8 +52,18 @@ simplified_real <- raw.data %>%
     mutate(real_sd=sd(motif_count)) %>% 
      mutate(real_mean=mean(motif_count)) %>% 
     mutate(real_var=var(motif_count)) %>% 
-    select(-chamber, -date, -motif_count, -counter, -temp_target, -temp_mean, -temp_median, -humidity_mean, -day,)
+    select(-chamber, -date, -motif_count, -counter, -temp_target, -temp_mean, -temp_median, -humidity_mean, -day)
 simply_real <- unique(simplified_real)
+```
+
+```{r}
+real <- og.raw.data %>% 
+    group_by(male) %>% 
+    mutate(real_sd=sd(motif_count)) %>% 
+     mutate(real_mean=mean(motif_count)) %>% 
+    mutate(real_var=var(motif_count)) %>% 
+    select(-chamber, -date, -motif_count, -counter, -temp_target, -temp_mean, -temp_median, -humidity_mean)
+real <- unique(real)
 ```
 
 ### Bootstrap 
@@ -314,3 +324,8 @@ big.combination%>%
     xlim(0,NA)+
     theme_classic()
 ```
+
+```{r}
+
+```
+
