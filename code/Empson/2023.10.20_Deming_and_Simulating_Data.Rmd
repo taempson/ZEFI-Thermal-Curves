@@ -16,7 +16,6 @@ Kayci Messerly, a previous post-bac, preformed multiple tests of trying to see h
 # Libraries
 
 ```{r message=FALSE}
-setwd("/Users/taraempson/Documents/GitHub/ZEFI-Thermal-Curves/code/Empson")
 library(tidyverse)
 library(janitor)
 library(deming)
@@ -28,16 +27,27 @@ library(patchwork)
 ## Load Data & Define Parameter
 - Not loading in T230 because he did not sing at all during this round and Deming/Simulating didn't like 0s. 
 ```{r}
-setwd("../../data/collated/")
+repo.dir <- system("git rev-parse --show-toplevel", intern = TRUE)
+setwd(file.path(repo.dir, "/code/Empson"))
+
+data.dir <- file.path("..", "..", "data", "collated")
 set.seed(1)
-og.raw.data <- read.csv("HSPi-Repeatability-Song-Count.csv")
+og.raw.data <- read.csv(file.path(data.dir, "HSPi-Repeatability-Song-Count.csv"))
 raw.data <- og.raw.data %>% 
-    filter(male!="T230")
-raw.data$day<- c(1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3,1,2,3)
-#adding in day order
+    filter(male!="T230") %>%
+    group_by(male) %>%
+    mutate(test_order = rank(date)) %>%
+    ungroup()
+
+
 unique.male <- unique(raw.data$male)
-n <- 3
-sample = 1000
+n.males <- length(unique.male)
+n <- 3 ## trials per male
+sample = 1000 # bootstrap samples
+raw.data$day<- rep(1:n, n.males)
+#adding in day order
+
+
 col.name = "motif_count"
 my_means <- vector(mode="double", length = sample)
 my_vars <- my_means
@@ -47,23 +57,25 @@ simulated <- vector()
 
 
 ```{r}
+
+select.out <- c("chamber",
+                "date",
+                "motif_count",
+                "counter",
+                "temp_target",
+                "temp_mean",
+                "temp_median",
+                "humidity_mean",
+                "test_order")
+
 simplified_real <- raw.data %>% 
     group_by(male) %>% 
     mutate(real_sd=sd(motif_count)) %>% 
      mutate(real_mean=mean(motif_count)) %>% 
     mutate(real_var=var(motif_count)) %>% 
-    select(-chamber, -date, -motif_count, -counter, -temp_target, -temp_mean, -temp_median, -humidity_mean, -day)
-simply_real <- unique(simplified_real)
-```
+    select(!all_of(select.out))
 
-```{r}
-real <- og.raw.data %>% 
-    group_by(male) %>% 
-    mutate(real_sd=sd(motif_count)) %>% 
-     mutate(real_mean=mean(motif_count)) %>% 
-    mutate(real_var=var(motif_count)) %>% 
-    select(-chamber, -date, -motif_count, -counter, -temp_target, -temp_mean, -temp_median, -humidity_mean)
-real <- unique(real)
+simply_real <- unique(simplified_real)
 ```
 
 ### Bootstrap 
