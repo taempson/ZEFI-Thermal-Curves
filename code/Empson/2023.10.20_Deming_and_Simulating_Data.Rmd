@@ -69,6 +69,7 @@ observed.graph<-filtered.data %>%
   labs(x="Mean", y="Var", title="Observed Data")+
   annotate("text", label=str_wrap("T231 had 2 trials under 40 motifs, but the other trial was 262 motifs", width = 40), x=170, y=18500)
 observed.graph
+observed.graph+scale_y_log10()+labs(caption="*Log*")
 
 filtered.data %>% 
   filter(male=="T231") %>% 
@@ -76,6 +77,18 @@ filtered.data %>%
   geom_point(color="black")+
   theme_minimal()+
   labs( x="Test Order", y="Number of Motifs", title="Does order explain the variation in the number of songs for T231? Nope.")
+
+
+More.filtered.graph <- filtered.data %>% 
+  filter(male!="T231", male!="T229") %>%
+  ggplot(aes(x=observed_mean, y=observed_var))+
+  geom_point(color="black")+
+  theme_minimal()+
+  xlim(0, NA)+
+  ylim(0, NA)+
+  labs(x="Mean", y="Var", title="Filtered out Extremes")
+More.filtered.graph+scale_y_log10()+labs(caption="*Log*")
+  
 ```
 
 ### Bootstrap Function
@@ -99,15 +112,15 @@ return(boot_set)
 - I think this is where the issue is.
 - real mean is similar to bootstrapped but variance is VERY different.
 ```{r}
-set.seed(1)
+set.seed(3)
 checking.real.T229 <- filtered.data %>% 
   filter(male=="T229")
 mean(checking.real.T229$motif_count) #191.3333
 var(checking.real.T229$motif_count) #13602.33
 
 testing.bootstrap.T229<- boot_male(one_male="T229", data.from=filtered.data,boot_set=out)
-mean(testing.bootstrap.T229$a_mean) #187.731
-mean(testing.bootstrap.T229$b_var) #7378.622
+mean(testing.bootstrap.T229$a_mean) #190.7173
+mean(testing.bootstrap.T229$b_var) #7266.377
 
 
 
@@ -117,14 +130,14 @@ mean(checking.real.T236$motif_count) #201
 var(checking.real.T236$motif_count)  #775
 
 testing.bootstrap.T236<- boot_male(one_male="T236", data.from=filtered.data,boot_set=out)
-mean(testing.bootstrap.T236$a_mean) #201.2933
-mean(testing.bootstrap.T236$b_var) #6892.865
+mean(testing.bootstrap.T236$a_mean) #200.67
+mean(testing.bootstrap.T236$b_var) #6828.178
 ```
 
 # Running Bootstrap Function
     - Not sure why the function isn't running.
 ```{r}
-simply_boot <- boot_male(one_male=unique.male, data.from=filtered.data, boot_set=out)
+simply_boot <- bind_rows(lapply(unique.male,boot_male, filtered.data, out))
 simply_boot <- simply_boot %>% 
   group_by(male) %>%
   summarise(sd_boot_mean=sd(a_mean),
@@ -132,6 +145,18 @@ simply_boot <- simply_boot %>%
   mean_boot_mean=mean(a_mean),
   mean_boot_var=mean(b_var))
 ```
+
+# Bootgraph
+filtered.data %>% 
+  ggplot(aes(x=observed_mean, y=observed_var))+
+  geom_point(color="black")+
+  theme_minimal()+
+  xlim(0, NA)+
+  ylim(0, NA)+
+  labs(x="Mean", y="Var", title="Observed Data")+
+  annotate("text", label=str_wrap("T231 had 2 trials under 40 motifs, but the other trial was 262 motifs", width = 40), x=170, y=18500)
+observed.graph
+observed.graph+scale_y_log10()+labs(caption="*Log*")
 
 ### Which is the best fit model
 ```{r}
