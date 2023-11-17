@@ -1,0 +1,129 @@
+---
+title: "Extract Trial Temp"
+author: "Tara Empson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+library(janitor)
+library(tidyverse)
+
+getwd()
+wd <- "../../data/raw/Spring2023_MDSHrna_MaleDirectedSonginHeatforRNAseq_Round4/MDSHrna_Temp_Logger_Round4_Spring2023/"
+
+misc.info <- read.csv("~/Desktop/MDSHrna_male_summary2023.11.14.csv") %>% 
+    clean_names()
+
+time.for.temp<- misc.info %>% 
+    select(1:6) %>% 
+    separate(date_euth, into = c("Month", "Day", "Year"), sep = "/") %>% 
+    mutate(Month= sprintf("%02d", as.numeric(Month)),
+        Day= sprintf("%02d", as.numeric(Day)),
+        Year= str_c("20",Year)) %>% 
+    mutate(euth_date=str_c(Month, "/", Day, "/", Year),
+           final_real_trial_time_chamber_on=str_remove_all(final_real_trial_time_chamber_on," AM")) %>% 
+           separate(final_real_trial_time_chamber_on, into = c("Hour", "Min"), sep = ":") %>% 
+    mutate(Hour= sprintf("%02d",as.numeric(Hour)),
+           Min=sprintf("%02d", as.numeric(Min)),
+           final_real_trial_time_chamber_on=str_c(Hour,":",Min, ":00"),
+           final_real_trial_time_door_opened=str_c(final_real_trial_time_door_opened, ":00")) %>% 
+    select(-Hour, -Min, -Month, -Day, -Year)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+#extractTemp.01<- function(x, files.02){ 
+    setwd(wd)
+logger.file <- read.csv("MDSHrna_ch1_2_04_16_23.txt", header=FALSE, comment.char="#")
+logger.output <- logger.file %>% 
+    select(!c(V1,V4, V7)) %>% 
+    tail(nrow(logger.file)-1) %>%
+  separate(V2, into = c("Date", "Time"), sep = " ") %>% 
+    mutate(V3=as.double(V3),
+           V5=as.double(V5),
+           V6=as.double(V6))
+colnames(logger.output) <- c("Date", "Time","Celsius","PercentHumidity","DewPoint")
+
+file.name <- str_split_fixed("MDSHrna_ch1_2_04_16_23.txt","_", n=6) %>%
+    as.data.frame() %>% 
+    mutate(V6=str_remove_all(V6, ".txt")) %>% 
+    mutate("Chamber"=str_remove_all(V2, "ch"),
+           Date=str_c(V4, "/", V5, "/20", V6),
+           Chamber=as.integer(Chamber)) %>%
+    rename("Logger"="V3") %>% 
+    select(-V1, -V2, -V4, -V5, -V6)
+
+find_date <- file.name %>% pull(Date)
+find_chamber <- file.name %>% pull(Chamber)
+find_logger <- file.name %>% pull(Logger)
+
+matched<- time.for.temp %>% 
+    filter(euth_date==find_date&
+        final_real_chamber_numb==find_chamber&
+        final_real_trial_logger_id==find_logger) 
+
+turn_chamber_on_time <- matched %>% pull("final_real_trial_time_chamber_on")
+remove_bird_from_chamber_time <- matched %>% pull("final_real_trial_time_door_opened")
+
+bird.in.on.chamber<- logger.output %>% 
+    filter(Time>turn_chamber_on_time) &
+               Time<remove_bird_from_chamber_time)
+
+matched$mean_temp<- mean(bird.in.on.chamber$Celsius)
+matched$mean_humid<- mean(bird.in.on.chamber$PercentHumidity)
+#}
+
+
+# This will be annoying, but the files don't all follow the same naming convention. So I need to do this in pieces.
+files.01 <- list.files(".", pattern="MDSH_ch[1-6]") 
+files.02 <- list.files(".", pattern="MDSHrna_ch")
+files.03 <- list.files(".", pattern="MDSH_[1-6]+")
+files.04 <- list.files(".", pattern="MDSH_N")
+files.05 <- list.files(".", pattern="MDSH_ch_") 
+all.files <- list.files(".", "*.txt") 
+
+#check if I got all the files. this should equal the length of all.files
+length(files.01)+length(files.02)+length(files.03)+length(files.04)+length(files.05)
+length(all.files)
+
+ran.01<- lapply(files.02,extractTemp.01)
+setwd(wd)
+```
+
+
+```{r}
+
+```
+
+```{r}
+birds<- unique(time.for.temp$bird_id)
+getwd()
+chamber.list <- as.character(1:6)
+for(c in chamber.list ){
+    a.chamber<- time.for.temp %>% filter(final_real_chamber_numb==c)
+    chamber.birds <- unique(a.chamber$bird_id)
+    for(i in chamber.birds){
+        i.bird<- a.chamber %>% filter(bird_id==i) %>% separate(euth_date, into = c("Month", "Day", "Year"), sep = "/") %>% mutate(chamber.log.file=str_c("temp_log_",Year ,Month, Day, ".csv"))
+    }
+path<- paste("../../../../Chamber_internal_temp/ch",c, sep="")
+setwd(path)
+
+turn_chamber_on_time <- i.bird %>% pull("final_real_trial_time_chamber_on")
+remove_bird_from_chamber_time <- i.bird %>% pull("final_real_trial_time_door_opened")
+
+working<- read.csv(i.bird$chamber.log.file, header=FALSE) %>% 
+    separate(V1, into=c("Date","Time"), sep=" ") %>% 
+    filter(Time>turn_chamber_on_time &
+               Time<remove_bird_from_chamber_time)
+
+time.for.temp$mean_temp<- mean(working$V4)
+}
+
+```
+
+
+```{r}
+View(right_join(files,time.for.temp, by= join_by("Date"=="date_euth", "loggerID"=="final_real_trial_logger_id", "chamberID"=="final_real_chamber_numb")))
+```
+

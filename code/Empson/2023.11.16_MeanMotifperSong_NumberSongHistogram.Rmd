@@ -1,0 +1,133 @@
+---
+title: "Mean Motif per Song"
+author: "Tara Empson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(janitor)
+getwd()
+folder <- "../../data/raw/Spring2023_MDSHrna_MaleDirectedSonginHeatforRNAseq_Round4/MDSHrna_Scored_Behavior_Data_Round4_Spring2023/2023.11.03_MDSHrna_Songs_Scored_TNS/"
+dir(folder)
+```
+
+```{r}
+setwd(folder)
+counts<- read.csv("MDSHrna_Round4_motif_and_song_count.csv") %>% 
+    clean_names()
+motif.info<- read_excel("Completed Song Counting Sheet.xlsx") %>% 
+    clean_names() %>% 
+    tail(-3) %>% 
+    rename("motif_per_song"="number_of_motifs")
+```
+
+
+```{r}
+clean.data<- motif.info %>% 
+    mutate(male_masked = str_extract(name_of_new_file, "^[A-Z]+"),
+           song_index = str_extract(name_of_new_file, "[0-9]+$") |> as.integer()) %>% 
+    group_by(male_masked) %>% 
+    mutate(motif_per_song= as.integer(motif_per_song),
+           ave_motif_song=mean(motif_per_song),
+           var_motif_song=var(motif_per_song),
+           number_of_songs=n(), 
+           prox_total_motifs=sum(motif_per_song)) %>% 
+    relocate(male_masked, song_index) %>% 
+    ungroup()
+```
+
+
+```{r}
+setwd(folder)
+setwd("../")
+
+hidden_id <- read_excel("MDSH_Video and Song Hidden IDs.xlsx") %>% 
+    clean_names() %>% 
+    filter(what_happened=="Given to Tamara") %>% 
+    separate(original_file_name, into = c("male", "trial", "date.concat.made"), sep = "_") %>% 
+    select(bird_id, trial, new_file_name)
+treat <- read_csv("misc.data.w.temp.csv") %>% 
+    clean_names()
+```
+
+
+```{r}
+real_id<- right_join(clean.data, hidden_id, by=join_by("male_masked"=="new_file_name"))
+song.data<- right_join(real_id, treat, by="bird_id")
+
+adding.song.var<- song.data %>% 
+    filter(song_index==number_of_songs) %>% 
+    group_by(bird_id) %>% 
+    mutate(var_song_num=var(song_index)) %>% 
+    select(bird_id, var_song_num)
+
+full.song.data <- right_join(song.data,adding.song.var, by="bird_id") %>% 
+    relocate(bird_id, treatment, trial, number_of_songs, song_index, motif_per_song, ave_motif_song, var_motif_song, var_song_num)
+```
+
+Histogram from Each day
+-Visual day was 24 hours before the Real trial, the chamber was not on, so it was at room temperature for both treatments.
+```{r}
+full.song.data %>% 
+    ggplot(aes(x=number_of_songs,fill=trial))+
+    geom_histogram(bins = 20, alpha=.5)+
+    theme_light()+
+    labs(title="Songs")
+
+full.song.data %>% 
+    ggplot(aes(x=number_of_songs,fill=trial))+
+    geom_histogram(bins = 20, alpha=.5)+
+    facet_wrap(~fct_rev(trial))+
+    theme_light()+
+    labs(title="Songs")
+```
+
+Variance
+```{r}
+full.song.data %>% 
+    ggplot(aes(x=var_motif_song))+
+    geom_histogram(bins = 20)+
+    theme_light()+
+    labs(title="Songs")
+full.song.data %>% 
+    ggplot(aes(x=var_song_num))+
+    geom_histogram(bins = 20)+
+    theme_light()+
+    labs(title="Motifs")
+```
+
+Scatterplot
+```{r}
+full.song.data %>% 
+    ggplot(aes(x=number_of_songs, y=var_motif_song, shape=trial))+
+    geom_point()
+
+full.song.data %>% 
+    ggplot(aes(x=number_of_songs, y=var_song_num, shape=trial))+
+    geom_point()
+
+```
+
+
+```{r}
+full.song.data %>% 
+    ggplot(aes(x=number_of_songs))+
+    geom_histogram(bins = 20, alpha=.5)+
+    facet_wrap(~treatment)+
+    theme_light()+
+    labs(title="Songs")
+```
+
+Scatterplot
+```{r}
+full.song.data %>% 
+    ggplot(aes(x=number_of_songs, y=prox_total_motifs, color=dad, shape=dad))+
+    geom_point()
+full.song.data %>% 
+    ggplot(aes(x=number_of_songs, y=prox_total_motifs, color=mom, shape=mom))+
+    geom_point()
+```
+
