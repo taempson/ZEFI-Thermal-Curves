@@ -114,7 +114,7 @@ full.song.data %>%
 
 ```{r}
 full.song.data %>% 
-    ggplot(aes(x=number_of_songs))+
+    ggplot(aes(x=number_of_songs, fill=trial))+
     geom_histogram(bins = 20, alpha=.5)+
     facet_wrap(~treatment)+
     theme_light()+
