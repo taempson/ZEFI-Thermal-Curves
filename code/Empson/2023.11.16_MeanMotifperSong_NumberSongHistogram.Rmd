@@ -55,24 +55,32 @@ treat <- read_csv("misc.data.w.temp.csv") %>%
 
 
 ```{r}
-real_id<- right_join(clean.data, hidden_id, by=join_by("male_masked"=="new_file_name"))
+real_id<- right_join(hidden_id, clean.data, by=join_by("new_file_name"=="male_masked"))
 song.data<- right_join(real_id, treat, by="bird_id")
 
-adding.song.var<- song.data %>% 
+add.zeros<- song.data
+add.zeros$song_index[is.na(add.zeros$song_index)] <- 0
+
+adding.song.var<- add.zeros %>% 
     filter(song_index==number_of_songs) %>% 
     group_by(bird_id) %>% 
     mutate(var_song_num=var(song_index)) %>% 
     select(bird_id, var_song_num)
 
-full.song.data <- right_join(song.data,adding.song.var, by="bird_id") %>% 
-    relocate(bird_id, treatment, trial, number_of_songs, song_index, motif_per_song, ave_motif_song, var_motif_song, var_song_num)
+full.song.data <- full_join(song.data,adding.song.var, by="bird_id") %>% 
+    relocate(bird_id, treatment, trial, number_of_songs, song_index, motif_per_song, ave_motif_song, var_motif_song, var_song_num) %>%
+    ungroup()
+
+trial.summary <- full.song.data %>%
+    group_by(bird_id, trial) %>% 
+    unique()
 ```
 
 Histogram from Each day
 -Visual day was 24 hours before the Real trial, the chamber was not on, so it was at room temperature for both treatments.
 ```{r}
-full.song.data %>% 
-    ggplot(aes(x=number_of_songs,fill=trial))+
+%>% 
+    ggplot(aes(x=song_count,fill=trial))+
     geom_histogram(bins = 20, alpha=.5)+
     theme_light()+
     labs(title="Songs")
