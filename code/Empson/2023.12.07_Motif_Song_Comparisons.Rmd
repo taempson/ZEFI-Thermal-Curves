@@ -222,8 +222,7 @@ full.song.summary.data %>%
 
 ```
 
-Scatterplot
-
+Scatterplotl.
 ```{r}
 full.song.summary.data %>% 
     ggplot(aes(x=total_number_of_songs, y=mean_temp))+
@@ -235,3 +234,12 @@ full.song.summary.data %>%
     geom_point()+
     geom_smooth(method = "lm")
 ```
+
+
+```{r}
+pivoted %>%
+    ggplot(aes(y=var_motif_in_song_Visual,x=ave_motif_in_song_Visual))+
+    geom_point()+
+    geom_smooth(formula = y~0+x, method="lm", color="red", se=FALSE)
+```
+

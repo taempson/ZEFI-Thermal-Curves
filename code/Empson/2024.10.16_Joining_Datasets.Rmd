@@ -1,0 +1,121 @@
+---
+title: "Joining Datasets"
+author: "Tara Empson"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+# Read Me
+
+-   Kayci Messerly, a previous post-bac, preformed multiple tests of trying to see how male zebra finch song varies in heat. She counted the number of female directed motifs the males sang in 30min. Being an animal behavior study there is a lot of variation and a very limited sample size. Additionally, researchers usually look at song level, not motif level. 
+-   Tamara Smith, an undergrad, scored all recordings by counting the number of songs and motifs within each song. 
+-   This script is combining their datasheets to one useable dataset.
+
+Load in libraries
+```{r setup}
+knitr::opts_chunk$set(include = FALSE)
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(lubridate)
+```
+
+Import datasets
+```{r Import datasets}
+getwd()
+setwd("../../data/song/collated/")
+
+Tamara.counts<- read_xlsx("All_Directed_Song_Counts.xlsx") %>% 
+    clean_names() %>% 
+    mutate(`date`=as.Date(`date`, format = "%Y-%m-%d"))
+
+round1 <- read.csv("HSPi-Round-1-Heat-Trials.csv") %>% 
+    select(male, chamber, date, motif_count, temp_target, temp_mean, temp_median, humdity_mean) %>%
+    rename("humidity_mean"="humdity_mean") %>%
+    mutate(`date`=as.Date(`date`, format = "%m/%d/%y"))
+
+round2 <- read.csv("HSPi-Round-2-Heat-Trials.csv") %>% 
+    select(male, chamber, date, motif_count, temp_target, temp_mean, temp_median, humidity_mean)%>%
+    mutate(`date`=as.Date(`date`, format = "%m/%d/%y"))
+
+round3 <- read_xlsx("HSPi-Repeatability-Song-Count.xlsx") %>% 
+    select(-counter) %>% 
+    mutate(`date`=as.Date(`date`, format = "%Y-%m-%d"),
+           temp_mean=as.double(`temp_mean`),                                                                     temp_median=as.double(`temp_median`),
+           humidity_mean=as.double(`humidity_mean`))
+
+bird.details <- read.csv("HSPi-Round-2-Heat-Trials.csv") %>% 
+    select(male, mass, bill_length, bill_depth, bill_width, date_morph_data_collected) %>%
+    filter(date_morph_data_collected!="") %>% 
+    mutate(`date_morph_data_collected`=as.Date(`date_morph_data_collected`, format = "%m/%d/%y"))
+```
+
+Adding a denotation of which round of data collection each dataset is.
+```{r}
+round1$round <- 1
+round2$round <- 2
+round3$round <- 3
+```
+
+```{r}
+all.rounds<- bind_rows(round1, round2, round3)
+```
+
+
+Clean up Tamara's dataset
+```{r}
+song.counts<- Tamara.counts %>% 
+    separate(male, into = c("male", "type", "null"), sep = "_") %>% 
+    mutate(type= case_when(number_of_motifs==0 ~ "none",
+                           is.na(type) ~ "song",
+                           TRUE ~ type)) %>%
+    mutate(timestamp_start = str_remove_all(timestamp_start, "h|m|s"),
+    timestamp_end = str_remove_all(timestamp_end, "h|m|s")) %>% 
+    separate(timestamp_start, into = c("start_hour", "start_min", "start_sec"), sep = " ") %>% 
+    mutate(start_sec= case_when(is.na(start_sec)~ start_min,
+                                !is.na(start_sec)~start_sec),
+           start_min= case_when(start_min==start_sec~ start_hour,
+                                start_min!=start_sec~start_min),
+           start_hour= case_when(start_hour==start_min~ "0",
+                                start_hour!=start_min~start_hour)) %>% 
+    separate(timestamp_end, into = c("end_hour", "end_min", "end_sec"), sep = " ") %>% 
+    mutate(end_sec= case_when(is.na(end_sec)~ end_min,
+                                !is.na(end_sec)~end_sec),
+           end_min= case_when(end_min==end_sec~ end_hour,
+                                end_min!=end_sec~end_min),
+           end_hour= case_when(end_hour==end_min~ "0",
+                                end_hour!=end_min~end_hour)) %>%
+    mutate(start_hour= as.double(start_hour)*60*60,
+           end_hour= as.double(end_hour)*60*60,
+           start_min= as.double(start_min)*60,
+           end_min= as.double(end_min)*60,
+           start_sec= as.double(start_sec),
+           end_sec= as.double(end_sec),
+           start.time=start_hour+start_min+start_sec,
+           end.time=end_hour+end_min+end_sec,
+           song.duration.sec=end.time-start.time) %>% 
+    mutate(flags= case_when(start.time>end.time ~ "error",
+                            song.duration.sec> 10~ "oddly long")) %>% 
+    filter(type=="song") %>% 
+        filter(is.na(flags))
+count_summaries<- song.counts %>% 
+    select(male, date, number_of_motifs, song.duration.sec) %>% 
+    group_by(male, date) %>% 
+    summarise(total_songs = n(),
+              average_motif = mean(number_of_motifs),
+              average_duration =mean(song.duration.sec),
+              average_song_rate = n()/average_duration,
+              average_motif_rate = average_motif/average_duration)
+```
+
+```{r}
+data.summary<- right_join(count_summaries, all.rounds, by = join_by(male, date)) %>% 
+    relocate(male, date, temp_target, round, total_songs, motif_count) %>% ungroup()
+
+```
+
+```{r}
+anti_join(count_summaries, all.rounds, by = join_by(male, date))
+anti_join(all.rounds, count_summaries, by = join_by(male, date))
+```
+

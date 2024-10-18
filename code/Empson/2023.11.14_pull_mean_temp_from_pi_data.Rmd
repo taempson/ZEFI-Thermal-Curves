@@ -5,14 +5,16 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
-#
+# Load file with miscalaneous information about each bird. 
+I think I made this sheet by copy and pasting things from the Mastersheet.
 ```{r}
-misc.info <- read.csv("MDSHrna_male_summary2023.11.14.csv") %>% 
+misc.info <- read.csv("~/Desktop/MDSHrna_male_summary2023.11.14.csv") %>% 
     clean_names()
 ```
 
-# Try to extract from data loggers but the file names don't match notes
-```{r eval=FALSE, include=FALSE}
+# Tried to extract from data loggers
+- The file names don't match notes, so it didn't work. 
+```{r}
 time.for.temp<- misc.info %>% 
     select(1:6) %>% 
     separate(date_euth, into = c("Month", "Day", "Year"), sep = "/") %>% 
@@ -29,13 +31,9 @@ time.for.temp<- misc.info %>%
     select(-Hour, -Min, -Month, -Day, -Year)
 ```
 
-
-```{r}
-birds<- unique(time.for.temp$bird_id)
-```
-
 # Function to get average temp from chamber logger.
-- Con of this is that it is only from while the camera was recording.
+- Since extracting from the insertable temp loggers doesn't seem to work for now, I'm going to instead extract the temp from the camera's built in temperature recording.
+- Con: This method is only from while the camera was recording. So its not consistent if the camera was turned on too early or late. 
 ```{r}
 gettemp<- function(i, birds){
     a.bird<- time.for.temp %>%
@@ -63,6 +61,7 @@ gettemp<- function(i, birds){
 
 # Run function
 ```{r}
+birds<- unique(time.for.temp$bird_id)
 fin<- bind_rows(lapply(birds,gettemp))
 ```
 
@@ -76,7 +75,6 @@ done<- right_join(fin, misc.info, by=join_by(bird_id))
 
 
 ```{r}
-
-#write_csv(done, "misc.data.w.temp.csv")
+#write_csv(done, paste("misc.data.w.temp_", Sys.Date(), ".csv"))
 ```
 
