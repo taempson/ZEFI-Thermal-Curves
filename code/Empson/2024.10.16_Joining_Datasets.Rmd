@@ -25,9 +25,23 @@ Import datasets
 getwd()
 setwd("../../data/song/collated/")
 
-Tamara.counts<- read_xlsx("All_Directed_Song_Counts.xlsx") %>% 
+Tamara.rough.counts<- read_xlsx("All_Directed_Song_Counts.xlsx") %>% 
     clean_names() %>% 
-    mutate(`date`=as.Date(`date`, format = "%Y-%m-%d"))
+    mutate(`date`=as.Date(`date`, format = "%Y-%m-%d"))%>% 
+    mutate(male=case_when(male=="T321"~"T231", #cleaning error/typos found after checking with raw datasheets
+                          male!="T321"~male),
+           `date`= case_when(`date` == "2022-04-16"~`date`-1,
+                           T~`date`),
+           `date` = case_when(`date` == "2022-06-24" & male=="T244" ~ `date`+1,
+        TRUE ~ `date`),
+        `date` = case_when(`date` == "2022-02-13" & male=="T230" ~ `date`+10,
+        TRUE ~ `date`))
+
+Tamara.rough.durations<- 
+Tamara.counts<- Tamara.rough.counts %>% left_join(Tamara.rough.durations, by="clipped_file_name")
+
+
+---
 
 round1 <- read.csv("HSPi-Round-1-Heat-Trials.csv") %>% 
     select(male, chamber, date, motif_count, temp_target, temp_mean, temp_median, humdity_mean) %>%
@@ -60,7 +74,6 @@ round3$round <- 3
 ```{r}
 all.rounds<- bind_rows(round1, round2, round3)
 ```
-
 
 Clean up Tamara's dataset
 ```{r}
@@ -96,12 +109,11 @@ song.counts<- Tamara.counts %>%
            song.duration.sec=end.time-start.time) %>% 
     mutate(flags= case_when(start.time>end.time ~ "error",
                             song.duration.sec> 10~ "oddly long")) %>% 
-    filter(type=="song") %>% 
-        filter(is.na(flags))
+    filter(type=="song"|type=="none")
+
 count_summaries<- song.counts %>% 
-    select(male, date, number_of_motifs, song.duration.sec) %>% 
     group_by(male, date) %>% 
-    summarise(total_songs = n(),
+    summarise(total_songs = sum(type == "song"),
               average_motif = mean(number_of_motifs),
               average_duration =mean(song.duration.sec),
               average_song_rate = n()/average_duration,
@@ -111,11 +123,10 @@ count_summaries<- song.counts %>%
 ```{r}
 data.summary<- right_join(count_summaries, all.rounds, by = join_by(male, date)) %>% 
     relocate(male, date, temp_target, round, total_songs, motif_count) %>% ungroup()
-
 ```
 
 ```{r}
-anti_join(count_summaries, all.rounds, by = join_by(male, date))
-anti_join(all.rounds, count_summaries, by = join_by(male, date))
+anti_join(count_summaries, all.rounds, by = join_by(male, date)) %>% arrange(date)
+anti_join(all.rounds, count_summaries, by = join_by(male, date)) %>% arrange(date)
 ```
 
