@@ -1,0 +1,150 @@
+---
+title: "Extracting temperature data"
+author: "Tara Empson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(readr)
+library(data.table)
+library(janitor)
+library(beepr)
+```
+
+Chamber Temp Readings
+```{r eval=FALSE}
+setwd("~/GitHub/ZEFI-Thermal-Curves/data/song/raw/chamber-temp-and-humidity/pi Temp Logs")
+
+Chamber.readings.setup<- data.frame()
+
+for(i in 1:length(list.dirs(recursive = F))){
+pick.a.folder <- list.dirs(recursive = F)[i]
+for (j in 1:length(list.files(pick.a.folder, pattern = ".csv"))) {
+pick.a.file <- list.files(pick.a.folder, pattern = ".csv")[j]
+a.file<- data.table::fread(paste(pick.a.folder,pick.a.file,sep="/"), header = F)
+
+a.file$File_Name <- pick.a.file
+
+Chamber.readings.setup<- bind_rows(Chamber.readings.setup,a.file) 
+}
+}
+
+colnames(Chamber.readings.setup) <- c("xDateTime", "Chamber", "idk", "Temp", "Bird_ID", "Temp_Target", "Status", "File_Name")
+beepr::beep(5); View(Chamber.readings.setup)
+
+#write_csv(Chamber.readings.setup,"HSPi_ChamberTemp_Max Temps Concat.csv")
+```
+
+Easy Logger Readings
+```{r message=FALSE}
+setwd("~/GitHub/ZEFI-Thermal-Curves/data/raw/chamber-temp-and-humidity/EasyLogger Temp Logs")
+
+Easy.Loggers.output.setup <- data.frame()
+
+for(k in 1:length(list.files(pattern=".txt"))){
+pick.a.file <- list.files(pattern=".txt")[k]
+a.file<- data.table::fread(pick.a.file, skip = 1, sep= ",", header=F)
+ifelse(ncol(a.file)==8,
+       new.file <- a.file %>% select(2,3,6,7),
+       new.file<- a.file %>% select(2,3,5,6))
+colnames(new.file) <- c("XDateTime", "Temp", "Humidity","DewPoint")
+new.file$File_Name <- pick.a.file
+
+Easy.Loggers.output.setup<- bind_rows(Easy.Loggers.output.setup,new.file) 
+}
+```
+
+```{r}
+Chamber.readings <- Chamber.readings.setup %>% 
+  dplyr::select(-idk, -Status) %>% 
+    mutate(xDateTime = as.POSIXct(xDateTime, format = "%m/%d/%Y %H:%M:%OS"),
+           Chamber = str_remove_all(Chamber, "Chamber "),
+           xTime=as.ITime(xDateTime, format = "%m/%d/%Y %H:%M:%S"),
+           xDate = as.Date(xDateTime, format = "%m/%d/%Y %H:%M:%S"),
+           logger_type= "camera") %>% 
+    dplyr::select(-File_Name, -Bird_ID, -Temp_Target) %>% 
+    clean_names()
+
+Easy.Loggers.output <- Easy.Loggers.output.setup %>%
+    separate_wider_delim(File_Name,
+             names = c("prefix", "Chamber", "mm", "dd", "yy"),
+             delim = "_") %>%
+    mutate(Chamber = str_remove_all(Chamber, "ch"),
+           yy = str_remove_all(yy, ".txt"),
+           xDate = as.Date(paste(mm, dd, yy, sep = "-"), format = "%m-%d-%y"),
+           xTime=as.ITime(XDateTime),
+           logger_type= "EasyLog") %>% 
+    dplyr::select(-prefix, -mm, -dd, -yy) %>% 
+  clean_names()
+  
+all.logs <- Easy.Loggers.output %>%
+  full_join(Chamber.readings, by = join_by(x_date_time, temp, chamber, x_date, x_time, logger_type)) %>%
+  relocate(x_date_time, x_date, x_time, chamber, logger_type, temp, humidity, dew_point)
+  
+#These trials were ran throughout January to July of 2022
+Trial.days <- all.logs %>% 
+  filter(x_date > as.Date("01-23-2022", format = "%m-%d-%Y")) %>%  #First Trial was Jan 24, 2022
+  filter(x_date < as.Date("07-23-2022", format = "%m-%d-%Y")) # Last Trial was July 22, 2022
+
+setwd("~/GitHub/ZEFI-Thermal-Curves/data/song/raw/chamber-temp-and-humidity")
+#write_csv(Trial.days,"HSPi_Trial Months_Temperature Logs.csv")
+```
+
+For Loop to narrow down each bird to during their trail times.
+```{r}
+narrowed.temperature.full.logs.setup <- data.frame()
+narrowed.temperature.30min.logs.setup <- data.frame()
+
+for(i in 1:nrow(narrowing.data)){
+  
+  a.bird <- narrowing.data$bird_id[i]
+  a.treatment <- narrowing.data$treatment[i]
+  a.date <- narrowing.data$x_date[i]
+  a.chamber <- narrowing.data$chamber[i]
+  a.start.time <- narrowing.data$end.time[i]
+  an.end.time <- narrowing.data$end.time[i]
+  
+  
+  full.logs <- all.logs %>% 
+    filter(chamber ==a.chamber) %>% 
+    filter(x_date == a.date) %>% 
+    filter(x_time < an.end.time) %>% 
+    filter(x_time > a.start.time) %>%
+    mutate(x_time = as.character(x_time),
+           bird_id = a.bird,
+           treatment = a.treatment)
+  
+  narrowed.temperature.full.logs.setup<- bind_rows(narrowed.temperature.full.logs.setup,full.logs) 
+  
+    less.logs <- all.logs %>%
+    filter(chamber ==a.chamber) %>% 
+    filter(x_date == a.date) %>% 
+    filter(x_time < an.end.time) %>% 
+    filter(x_time > (an.end.time-(.5*60))) %>% #final 30min
+    mutate(x_time = as.character(x_time),
+           bird_id = a.bird,
+           treatment = a.treatment)
+    
+  narrowed.temperature.30min.logs.setup<- bind_rows(narrowed.temperature.30min.logs.setup,less.logs) 
+}
+
+narrowed.temperature.logs.full<- narrowed.temperature.full.logs.setup %>% 
+  mutate(x_time= as.ITime(x_time),
+         x_datetime = as_datetime(paste(x_date, x_time))) %>% 
+  dplyr::select(-x_date_time)
+
+narrowed.temperature.logs.30<- narrowed.temperature.30min.logs.setup %>% 
+  mutate(x_time= as.ITime(x_time),
+         x_datetime = as_datetime(paste(x_date, x_time))) %>% 
+  dplyr::select(-x_date_time)
+```
+
+
+```{r}
+setwd("~/GitHub/Hot-Male-Song-RNAseq/Data")
+#write_csv(narrowed.temperature.logs.full,"four.hours.temperature.logs")
+#write_csv(narrowed.temperature.logs.30,"last.30min.temperature.logs.csv")
+```
+

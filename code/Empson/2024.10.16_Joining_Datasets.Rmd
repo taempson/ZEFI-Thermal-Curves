@@ -25,23 +25,9 @@ Import datasets
 getwd()
 setwd("../../data/song/collated/")
 
-Tamara.rough.counts<- read_xlsx("All_Directed_Song_Counts.xlsx") %>% 
+Tamara.rough.counts<- read.csv("~/GitHub/ZEFI-Thermal-Curves/code/Empson/9_25 updated male scoring(song.by.motif.csv", header=T) %>% 
     clean_names() %>% 
-    mutate(`date`=as.Date(`date`, format = "%Y-%m-%d"))%>% 
-    mutate(male=case_when(male=="T321"~"T231", #cleaning error/typos found after checking with raw datasheets
-                          male!="T321"~male),
-           `date`= case_when(`date` == "2022-04-16"~`date`-1,
-                           T~`date`),
-           `date` = case_when(`date` == "2022-06-24" & male=="T244" ~ `date`+1,
-        TRUE ~ `date`),
-        `date` = case_when(`date` == "2022-02-13" & male=="T230" ~ `date`+10,
-        TRUE ~ `date`))
-
-Tamara.rough.durations<- 
-Tamara.counts<- Tamara.rough.counts %>% left_join(Tamara.rough.durations, by="clipped_file_name")
-
-
----
+    mutate(`date`=as.Date(`date`, format = "%Y-%m-%d"))
 
 round1 <- read.csv("HSPi-Round-1-Heat-Trials.csv") %>% 
     select(male, chamber, date, motif_count, temp_target, temp_mean, temp_median, humdity_mean) %>%
@@ -77,45 +63,35 @@ all.rounds<- bind_rows(round1, round2, round3)
 
 Clean up Tamara's dataset
 ```{r}
-song.counts<- Tamara.counts %>% 
+Tamara.counts<- Tamara.rough.counts %>% 
     separate(male, into = c("male", "type", "null"), sep = "_") %>% 
     mutate(type= case_when(number_of_motifs==0 ~ "none",
                            is.na(type) ~ "song",
-                           TRUE ~ type)) %>%
-    mutate(timestamp_start = str_remove_all(timestamp_start, "h|m|s"),
-    timestamp_end = str_remove_all(timestamp_end, "h|m|s")) %>% 
-    separate(timestamp_start, into = c("start_hour", "start_min", "start_sec"), sep = " ") %>% 
-    mutate(start_sec= case_when(is.na(start_sec)~ start_min,
-                                !is.na(start_sec)~start_sec),
-           start_min= case_when(start_min==start_sec~ start_hour,
-                                start_min!=start_sec~start_min),
-           start_hour= case_when(start_hour==start_min~ "0",
-                                start_hour!=start_min~start_hour)) %>% 
-    separate(timestamp_end, into = c("end_hour", "end_min", "end_sec"), sep = " ") %>% 
-    mutate(end_sec= case_when(is.na(end_sec)~ end_min,
-                                !is.na(end_sec)~end_sec),
-           end_min= case_when(end_min==end_sec~ end_hour,
-                                end_min!=end_sec~end_min),
-           end_hour= case_when(end_hour==end_min~ "0",
-                                end_hour!=end_min~end_hour)) %>%
-    mutate(start_hour= as.double(start_hour)*60*60,
-           end_hour= as.double(end_hour)*60*60,
-           start_min= as.double(start_min)*60,
-           end_min= as.double(end_min)*60,
-           start_sec= as.double(start_sec),
-           end_sec= as.double(end_sec),
+                           .default = (type))) %>% 
+  separate_wider_delim(timestamp_start, names = c("start_hour", "start_min", "start_sec"), delim = " ", too_few = "align_end") %>% 
+  separate_wider_delim(timestamp_end, names = c("end_hour", "end_min", "end_sec"), delim = " ", too_few = "align_end") %>%
+    mutate(start_hour= as.double(str_remove(start_hour, "h"))*60*60,
+           end_hour= as.double(str_remove(end_hour, "h"))*60*60,
+           start_min= as.double(str_remove(start_min, "m"))*60,
+           end_min= as.double(str_remove(end_min, "m"))*60,
+           start_sec= as.double(str_remove(start_sec, "s")),
+           end_sec= as.double(str_remove(end_sec, "s")),
            start.time=start_hour+start_min+start_sec,
            end.time=end_hour+end_min+end_sec,
            song.duration.sec=end.time-start.time) %>% 
     mutate(flags= case_when(start.time>end.time ~ "error",
-                            song.duration.sec> 10~ "oddly long")) %>% 
+                            song.duration.sec> 15~ "oddly long")) %>% 
+    select(-null, -start_hour, -start_min, -start_sec, -end_hour, -end_min, -end_sec) %>% 
     filter(type=="song"|type=="none")
 
-count_summaries<- song.counts %>% 
+
+count_summaries<- Tamara.counts%>%
+    filter(is.na(flags))  %>% 
     group_by(male, date) %>% 
     summarise(total_songs = sum(type == "song"),
               average_motif = mean(number_of_motifs),
               average_duration =mean(song.duration.sec),
+              total_duration =sum(song.duration.sec),
               average_song_rate = n()/average_duration,
               average_motif_rate = average_motif/average_duration)
 ```
@@ -123,10 +99,62 @@ count_summaries<- song.counts %>%
 ```{r}
 data.summary<- right_join(count_summaries, all.rounds, by = join_by(male, date)) %>% 
     relocate(male, date, temp_target, round, total_songs, motif_count) %>% ungroup()
+
+write.csv(data.summary, paste(Sys.Date(), "_count_summaries.csv", sep=""))
+
+Tamara.data<- Tamara.counts %>% 
+    right_join(., all.rounds, by = join_by(male, date)) %>% 
+    relocate(male, date, temp_target, round) %>% ungroup()
+write.csv(Tamara.data, paste(Sys.Date(), "_All_count_data.csv", sep=""))
 ```
 
 ```{r}
 anti_join(count_summaries, all.rounds, by = join_by(male, date)) %>% arrange(date)
 anti_join(all.rounds, count_summaries, by = join_by(male, date)) %>% arrange(date)
+```
+
+```{r}
+n.3<- data.summary %>% 
+  filter(round!=3) 
+
+n.3 %>% 
+  ggplot(aes(x=total_duration, y=total_songs))+
+  geom_point()+
+  theme_light()
+
+n.3 %>% 
+  ggplot(aes(x=temp_mean, y=total_duration))+
+  geom_point()+
+  theme_light()+
+  geom_smooth(method="lm")
+
+n.3 %>% 
+  ggplot(aes(x=as.factor(temp_target), y=total_duration))+
+  geom_point()+
+  theme_light()
+
+library(lme4)
+mod_nb <- glm(total_songs ~ temp_mean, data = n.3)
+summary(segmented::segmented(mod_nb, seg.Z = ~temp_mean))
+
+n.3 %>% 
+  mutate(break.point= case_when(temp_mean<41.484 ~ "Below",
+                                .default = "Above")) %>% 
+  ggplot(aes(x=temp_mean, y=total_songs, col= break.point))+
+  geom_point()+
+  theme_light()+
+  geom_smooth(method="lm")
+
+mod_nb2 <- glm(total_songs ~ temp_target, data = n.3)
+summary(segmented::segmented(mod_nb2, seg.Z = ~temp_target))
+n.3 %>% 
+  mutate(break.point= case_when(temp_target<42 ~ "Below",
+                                .default = "Above")) %>% 
+  ggplot(aes(x=temp_target, y=total_songs, col= break.point))+
+  geom_point()+
+  theme_light()+
+  geom_smooth(method="lm")
+
+plot.segmented(mod_nb2, seg.Z = ~temp_target)
 ```
 

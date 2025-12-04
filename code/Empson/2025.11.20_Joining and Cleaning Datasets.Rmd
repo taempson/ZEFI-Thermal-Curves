@@ -1,0 +1,246 @@
+---
+title: "Joining Datasets"
+author: "Tara Empson"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+# Read Me
+
+-   Kayci Messerly, a previous post-bac, preformed multiple tests of trying to see how male zebra finch song varies in heat. She counted the number of female directed motifs the males sang in 30min. Being an animal behavior study there is a lot of variation and a very limited sample size. Additionally, researchers usually look at song level, not motif level. 
+-   Tamara Smith, an undergrad, scored all recordings by counting the number of songs and motifs within each song. 
+-   This script is combining their datasheets to one useable dataset.
+
+Load in libraries
+```{r setup}
+knitr::opts_chunk$set(include = FALSE)
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(lubridate)
+```
+
+Import datasets
+```{r Import datasets}
+getwd()
+setwd("../../data/song/collated/")
+
+Tamara.rough.counts<- read.csv("~/GitHub/ZEFI-Thermal-Curves/code/Empson/2025.11.21_updated male scoring song by motif.csv", header=T) %>% 
+    clean_names() %>% 
+    mutate(`date`=as.Date(`date`, format = "%m/%d/%y"))
+
+round1 <- read.csv("HSPi-Round-1-Heat-Trials.csv") %>% 
+    select(male, chamber, date, motif_count, temp_target, temp_mean, temp_median, humdity_mean) %>%
+    rename("humidity_mean"="humdity_mean") %>%
+    mutate(`date`=as.Date(`date`, format = "%m/%d/%y"))
+
+round2 <- read.csv("HSPi-Round-2-Heat-Trials.csv") %>% 
+    select(male, chamber, date, motif_count, temp_target, temp_mean, temp_median, humidity_mean)%>%
+    mutate(`date`=as.Date(`date`, format = "%m/%d/%y"))
+
+round3 <- read_xlsx("HSPi-Repeatability-Song-Count.xlsx") %>% 
+    select(-counter) %>% 
+    mutate(`date`=as.Date(`date`, format = "%Y-%m-%d"),
+           temp_mean=as.double(`temp_mean`),
+           temp_median=as.double(`temp_median`),
+           humidity_mean=as.double(`humidity_mean`))
+
+bird.details <- read.csv("HSPi-Round-2-Heat-Trials.csv") %>% 
+    select(male, mass, bill_length, bill_depth, bill_width, date_morph_data_collected) %>%
+    filter(date_morph_data_collected!="") %>% 
+    mutate(`date_morph_data_collected`=as.Date(`date_morph_data_collected`, format = "%m/%d/%y"))
+```
+
+Adding a denotation of which round of data collection each dataset is.
+```{r}
+round1$round <- 1
+round2$round <- 2
+round3$round <- 3
+```
+
+```{r}
+all.rounds<- bind_rows(round1, round2, round3) %>% 
+  mutate(motif_count = case_when(is.na(motif_count)~0,
+                              .default = motif_count)) 
+```
+
+Clean up Tamara's dataset
+```{r}
+Tamara.counts<- Tamara.rough.counts %>% 
+    separate(male, into = c("male", "type", "null"), sep = "_") %>% 
+    mutate(timestamp_start = str_trim(timestamp_start, side = "both"),
+           timestamp_end = str_trim(timestamp_end, side = "both"),
+      type= case_when(number_of_motifs==0 ~ "none",
+                           is.na(type) ~ "song",
+                           .default = (type))) %>% 
+  separate_wider_delim(timestamp_start, names = c("start_hour", "start_min", "start_sec"), delim = " ", too_few = "align_end") %>% 
+  separate_wider_delim(timestamp_end, names = c("end_hour", "end_min", "end_sec"), delim = " ", too_few = "align_end") %>%
+    mutate(start_hour= as.double(str_remove(start_hour, "h"))*60*60,
+           end_hour= as.double(str_remove(end_hour, "h"))*60*60,
+           start_min= as.double(str_remove(start_min, "m"))*60,
+           end_min= as.double(str_remove(end_min, "m"))*60,
+           start_sec= as.double(str_remove(start_sec, "s")),
+           end_sec= as.double(str_remove(end_sec, "s"))) %>% 
+  mutate(start_hour = case_when(is.na(start_hour)~0,
+                              .default = start_hour),
+       end_hour = case_when(is.na(end_hour)~0,
+                              .default = end_hour),
+       start_min = case_when(is.na(start_min)~0,
+                              .default = start_min),
+       end_min = case_when(is.na(end_min)~0,
+                              .default = end_min),
+       start_sec = case_when(is.na(start_sec)~0,
+                              .default = start_sec),
+       end_sec = case_when(is.na(end_sec)~0,
+                              .default = end_sec)) %>% 
+  mutate(start.time=start_hour+start_min+start_sec,
+         end.time=end_hour+end_min+end_sec,
+         song.duration.sec=end.time-start.time) %>%
+  mutate(flags= case_when(start.time>end.time ~ "error",
+                          song.duration.sec> 15~ "oddly long")) %>% 
+  select(-null, -start_hour, -start_min, -start_sec, -end_hour, -end_min, -end_sec)
+
+Tamara.counts %>% filter(!is.na(flags)) %>% View()
+```
+
+Creating a Summary Dataset
+```{r}
+count_summaries<- Tamara.counts %>%
+  filter(type=="song"|type=="none") %>%
+  group_by(male, date) %>%
+  summarise(total_songs = sum(type == "song"),
+            total_duration = sum(song.duration.sec),
+            total_motifs = sum(number_of_motifs),
+            average_motif = mean(number_of_motifs, na.rm = FALSE),
+            average_duration = mean(song.duration.sec))
+```
+
+
+Combining summary statistics with treatment information and exporting data.
+```{r}
+data.summary<- right_join(count_summaries, all.rounds, by = join_by(male, date)) %>% 
+    relocate(male, date, temp_target, round, total_songs, motif_count) %>% ungroup()
+
+write.csv(data.summary, paste(Sys.Date(), "_count_summaries.csv", sep=""))
+
+Tamara.data<- Tamara.counts %>% 
+    right_join(., all.rounds, by = join_by(male, date)) %>% 
+    relocate(male, date, temp_target, round) %>% ungroup()
+#write.csv(Tamara.data, paste(Sys.Date(), "_All_count_data.csv", sep=""))
+```
+
+```{r}
+ggplot(data.summary, aes(total_motifs, motif_count))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  labs(x="Tamara count", y="Kayci count")+
+  theme_light()+
+  xlim(0,450)+
+  ylim(0,450)
+
+cor.test(data.summary$motif_count, data.summary$total_motifs, paired =T)
+
+kayci.missed.scoring<- data.summary %>% 
+  filter(motif_count<10) %>% 
+  filter(total_motifs>50) %>% 
+  pull('date')
+
+fully.scored <- data.summary %>% 
+  filter(!date %in% kayci.missed.scoring) 
+
+fully.scored%>%
+  ggplot(aes(total_motifs, motif_count))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  labs(x="Tamara count", y="Kayci count")+
+  theme_light()+
+  xlim(0,450)+
+  ylim(0,450)
+
+cor.test(fully.scored$motif_count, fully.scored$total_motifs, paired =T)
+
+fully.scored%>%
+  ggplot(aes(total_songs, motif_count))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  theme_light()
+
+cor.test(fully.scored$motif_count, fully.scored$total_songs, paired =T)
+```
+
+```{r}
+narrowed.temperature.last30min.logs.setup <- data.frame()
+
+for(i in 1:nrow(narrowing.data)){
+  
+  a.bird <- narrowing.data$bird_id[i]
+  a.treatment <- narrowing.data$treatment[i]
+  a.date <- narrowing.data$x_date[i]
+  a.chamber <- narrowing.data$chamber[i]
+  an.end.time <- narrowing.data$end.time[i]
+  
+  full.logs <- all.logs %>% 
+    filter(x_date == a.date) %>% 
+    filter(chamber == a.chamber) %>% 
+    filter(x_time < an.end.time) %>% 
+    filter(x_time > (an.end.time-(5.5*60*60))) %>% #5.5 hours before dissection (when started temp)
+    mutate(x_time = as.character(x_time),
+           bird_id = a.bird,
+           treatment = a.treatment)
+  
+  narrowed.temperature.full.logs.setup<- bind_rows(narrowed.temperature.full.logs.setup,full.logs) 
+}
+```
+
+
+
+```{r}
+data.summary%>% 
+  ggplot(aes(x=temp_mean, y=total_songs))+
+  geom_point()+
+  theme_light()+
+  geom_smooth()
+
+mod <- glm(total_songs ~ temp_mean, data = data.summary)
+summary(segmented::segmented(mod, seg.Z = ~temp_mean))
+
+ds <- data.summary %>% 
+  mutate(break.point= case_when(temp_mean<41.484 ~ "Below",
+                                .default = "Above")) 
+ds %>% 
+  ggplot(aes(x=temp_mean, y=total_songs, col= break.point))+
+  geom_point()+
+  theme_light()+
+  geom_smooth(method="lm")
+
+```
+
+
+```{r}
+data.summary %>% 
+  ggplot(aes(x=temp_mean, y=total_motifs))+
+  geom_point()+
+  theme_light()+
+  geom_smooth()
+
+mod <- glm(total_motifs ~ temp_mean, data = data.summary)
+summary(segmented::segmented(mod, seg.Z = ~temp_mean))
+
+ds <- data.summary %>% 
+  mutate(break.point= case_when(temp_mean<38.704 ~ "Below",
+                                .default = "Above")) 
+
+ds %>% 
+  ggplot(aes(x=temp_mean, y=total_motifs, col= break.point))+
+  geom_point()+
+  theme_light()+
+  geom_smooth(method="lm")
+
+ds %>% filter(break.point=="Below") %>% 
+  glmer.nb(total_motifs~temp_mean+ (1|male), data=.)
+
+ds %>% filter(break.point=="Above") %>% 
+  glmer.nb(total_motifs~temp_mean+ (1|male), data=.)
+```
+
+
