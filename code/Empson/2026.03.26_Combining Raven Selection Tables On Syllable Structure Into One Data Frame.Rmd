@@ -1,0 +1,67 @@
+---
+title: "Raven Scoring"
+author: "Tara Empson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r}
+library(tidyverse)
+library(readxl)
+library(janitor)
+```
+
+```{r}
+raven.test <- read.delim("~/Library/CloudStorage/OneDrive-UniversityofTennessee/Male Thermal Curve/selection tables/T257_July_19_2022_36.Table.1.selections.txt") %>% 
+  clean_names() %>%
+  separate(begin_file, sep="_", into =c("bird_id", "month", "day", "year", "song_n"), remove= F) %>%
+  mutate(date = paste(month,day,year, sep="-"),
+         song_n = str_remove(song_n, pattern=".wav")) %>% 
+  relocate(bird_id,
+           date,
+           song_n,
+           selection,
+           syllable_type); raven.test
+```
+
+```{r}
+getwd()
+setwd("~/Library/CloudStorage/OneDrive-UniversityofTennessee/Male Thermal Curve/selection tables/")
+list.files(pattern = ".selections.txt")
+
+raven <- tibble()
+
+for (i in 1:length(list.files(pattern = ".selections.txt"))) {
+  a.file<- list.files(pattern = ".selections.txt")[i]
+  
+  
+  read.it<- read.delim(a.file) %>% 
+  clean_names() %>%
+  separate(begin_file, sep="_", into =c("bird_id", "month", "day", "year", "song_n"), remove= F) %>%
+  mutate(date = paste(month,day,year, sep="-"),
+         song_n = str_remove(song_n, pattern=".wav")) %>% 
+  relocate(bird_id,
+           date,
+           song_n,
+           selection)
+  
+  raven<- bind_rows(raven,read.it) 
+}
+raven
+
+```
+
+```{r}
+treatment.info <- read.csv("~/GitHub/ZEFI-Thermal-Curves/code/Empson/2025-11-25_count_summaries.csv") %>% 
+  select(male:round, chamber:humidity_mean) %>% 
+  separate(date, sep="-", into =c("year", "month", "day")) %>% 
+  mutate (bird_id = male,
+            date = paste(month,day,year, sep="-")) %>% 
+  select(-year, -month, -day)
+
+raven.data<- full_join(raven, treatment.info)
+```
+
+```{r}
+raven.data
+```
+
